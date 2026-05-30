@@ -35,3 +35,6 @@ coverage/
 
 # vercel
 .vercel
+
+# claude
+.claude
