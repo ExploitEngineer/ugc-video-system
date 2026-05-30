@@ -15,6 +15,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../../db/index.js";
 import type { ImageRef } from "../../providers/openai/index.js";
 import { createOpenAIProvider } from "../../providers/openai/index.js";
+import { createVideoProvider } from "../../providers/index.js";
 import type { SkillContext } from "../types.js";
 import { criticAgent } from "./index.js";
 import type { CriticVerdict } from "./types.js";
@@ -90,7 +91,12 @@ async function main() {
   }
 
   const adStyle = process.argv[3] ?? run.adStyle ?? "clean, neutral commercial";
-  const ctx: SkillContext = { runId, adStyle, openai: createOpenAIProvider() };
+  const ctx: SkillContext = {
+    runId,
+    adStyle,
+    openai: createOpenAIProvider(),
+    video: createVideoProvider(),
+  };
   const userPrompt = run.prompt;
 
   const assets = await db

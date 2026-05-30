@@ -15,7 +15,8 @@
     "db:studio": "drizzle-kit studio",
     "storage:setup": "tsx src/storage/setup.ts",
     "agents:verify": "tsx src/agents/image/verify.ts",
-    "critic:verify": "tsx src/agents/critic/verify.ts"
+    "critic:verify": "tsx src/agents/critic/verify.ts",
+    "video:verify": "tsx src/agents/video/verify.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

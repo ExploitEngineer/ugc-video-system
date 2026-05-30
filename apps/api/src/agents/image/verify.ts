@@ -12,6 +12,7 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "../../db/index.js";
 import { createOpenAIProvider } from "../../providers/openai/index.js";
+import { createVideoProvider } from "../../providers/index.js";
 import type { ImageRef } from "../../providers/openai/index.js";
 import type { SkillContext } from "../types.js";
 import { imageAgent } from "./index.js";
@@ -42,7 +43,12 @@ async function main() {
     process.exit(1);
   }
 
-  const ctx: SkillContext = { runId, adStyle, openai: createOpenAIProvider() };
+  const ctx: SkillContext = {
+    runId,
+    adStyle,
+    openai: createOpenAIProvider(),
+    video: createVideoProvider(),
+  };
   const userPrompt = run.prompt;
 
   console.log(`\n▶ Product Sheet Builder (style: "${adStyle}")`);
