@@ -33,6 +33,14 @@ const serverEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   DATABASE_URL: z.string().url(),
 
+  // F7 background worker — in-process loop that drives runs through the
+  // pipeline. Disable (e.g. in tests) to keep the HTTP server passive.
+  WORKER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1500),
+
   // Runtime
   NODE_ENV: z
     .enum(["development", "production", "test"])
