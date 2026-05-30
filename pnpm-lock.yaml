@@ -227,6 +227,9 @@ importers:
       hono:
         specifier: ^4.12.23
         version: 4.12.23
+      openai:
+        specifier: ^6.39.1
+        version: 6.39.1(zod@4.4.3)
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
@@ -1951,6 +1954,18 @@ packages:
       sass:
         optional: true
 
+  openai@6.39.1:
+    resolution: {integrity: sha512-z3dO9fEWOXBzlXynVb/xZ/tujzUjFWQWn3C0n0mw6Vo0zJTbEkaN4b2cLWjhJ6haJQx8LlREoafHRl+Gu/Hl+A==}
+    hasBin: true
+    peerDependencies:
+      ws: ^8.18.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      ws:
+        optional: true
+      zod:
+        optional: true
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -3276,6 +3291,10 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  openai@6.39.1(zod@4.4.3):
+    optionalDependencies:
+      zod: 4.4.3
 
   picocolors@1.1.1: {}
 
