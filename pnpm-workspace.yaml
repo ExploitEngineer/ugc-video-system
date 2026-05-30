@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Build scripts must be explicitly approved before they run (pnpm >= 10)
+onlyBuiltDependencies:
+  - "@biomejs/biome"
+  - esbuild
+  - sharp
+
+ignoredBuiltDependencies:
+  - unrs-resolver

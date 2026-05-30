@@ -1,0 +1,25 @@
+{
+  "name": "ugc-video-system",
+  "version": "1.0.0",
+  "description": "UGC video system monorepo (web + api + shared)",
+  "private": true,
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=11"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build": "pnpm -r build",
+    "start": "pnpm -r --parallel start",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist .next .turbo node_modules/.cache"
+  }
+}

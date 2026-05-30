@@ -1,0 +1,37 @@
+# deps
+node_modules/
+.pnp
+.pnp.*
+
+# build output
+dist/
+build/
+out/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / os
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.pem
+
+# coverage
+coverage/
+
+# vercel
+.vercel
