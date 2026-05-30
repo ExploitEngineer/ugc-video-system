@@ -59,18 +59,37 @@ function getClient(): OpenAI {
   return client;
 }
 
+/**
+ * Resolve an `ImageRef` to a base64 data URI. We fetch the bytes ourselves and
+ * inline them rather than handing OpenAI a URL to download — OpenAI's server
+ * times out fetching large images from Supabase Storage ("400 Timeout while
+ * downloading …"). Already-inline data URIs pass through untouched.
+ */
+async function imageRefToDataUri(ref: ImageRef): Promise<string> {
+  if (ref.source.startsWith("data:")) return ref.source;
+  const res = await fetch(ref.source);
+  if (!res.ok) {
+    throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  const mime = ref.mime ?? res.headers.get("content-type") ?? "image/png";
+  return `data:${mime};base64,${buf.toString("base64")}`;
+}
+
 /** Map our `ChatMessage` (+ optional images) to the SDK's message shape. */
-function toChatMessage(m: ChatMessage): ChatCompletionMessageParam {
+async function toChatMessage(m: ChatMessage): Promise<ChatCompletionMessageParam> {
   if (!m.images?.length) {
     return { role: m.role, content: m.content };
   }
-  // Vision parts ride on a user turn (system/assistant stay text-only).
+  // Vision parts ride on a user turn (system/assistant stay text-only). Inline
+  // each image as a data URI so OpenAI never reaches back to Supabase.
+  const dataUris = await Promise.all(m.images.map(imageRefToDataUri));
   const parts: ChatCompletionContentPart[] = [
     { type: "text", text: m.content },
-    ...m.images.map(
-      (img): ChatCompletionContentPart => ({
+    ...dataUris.map(
+      (url): ChatCompletionContentPart => ({
         type: "image_url",
-        image_url: { url: img.source },
+        image_url: { url },
       }),
     ),
   ];
@@ -92,9 +111,10 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
 export function createOpenAIProvider(): OpenAIProvider {
   return {
     async chat(messages) {
+      const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const completion = await getClient().chat.completions.create({
         model: OPENAI_CHAT_MODEL,
-        messages: messages.map(toChatMessage),
+        messages: sdkMessages,
       });
       return completion.choices[0]?.message?.content ?? "";
     },

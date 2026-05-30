@@ -3,6 +3,7 @@
 // so non-critic code (video, F7 orchestrator) doesn't import from the critic.
 
 export {
+  countRegenEvents,
   writeStepEvent,
   type StepEventStatus,
   type WriteStepEventInput,

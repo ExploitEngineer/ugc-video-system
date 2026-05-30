@@ -13,7 +13,7 @@ export interface SkillContext {
   /** Opaque in F4 (caller supplies it); F7's Creative Direction Agent sets it. */
   adStyle: string;
   openai: OpenAIProvider;
-  /** Video provider (Seedance via Ark/RunComfy). Used by the Video Builder. */
+  /** Video provider (Seedance via BytePlus). Used by the Video Builder. */
   video: VideoProvider;
 }
 

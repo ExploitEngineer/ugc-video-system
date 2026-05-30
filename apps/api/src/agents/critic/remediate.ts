@@ -1,9 +1,11 @@
 // The inspect → (regen on issue) → re-inspect engine, generic over the regen
 // strategy so both inspections reuse it.
 //
-// Retry cap = 1 (CRITIC_RETRY_CAP): a passing first inspection regenerates
-// nothing; a failing one regenerates exactly once, then re-inspects; if it
-// still fails, the run is signalled as failed (NO second regen).
+// Regen budget is run-level (MAX_REGEN_PER_RUN), shared across inspection
+// steps: a passing inspection regenerates nothing; a failing one regenerates
+// only while the run still has budget left (counting regens already spent on
+// earlier steps), then re-inspects; once the run budget is exhausted a further
+// failure signals the run as failed (NO more regens).
 //
 // This engine NEVER mutates `runs.status` — that is F7's job. It writes
 // `step_events`, flips artifact status (draft → approved | rejected), and
@@ -11,8 +13,8 @@
 
 import type { Step } from "@ugc/shared";
 import type { SkillContext, SkillResult } from "../types.js";
-import { CRITIC_RETRY_CAP } from "./constants.js";
-import { writeStepEvent } from "./events.js";
+import { MAX_REGEN_PER_RUN } from "./constants.js";
+import { countRegenEvents, writeStepEvent } from "./events.js";
 import {
   approveArtifact,
   type InspectableSheetTable,
@@ -81,6 +83,8 @@ export async function inspectAndRemediate(
 ): Promise<CriticVerdict> {
   let current = cfg.initial;
   let attempts = 0;
+  // Regens already spent on earlier inspection steps of this run.
+  const priorRegens = await countRegenEvents(ctx.runId);
 
   await writeStepEvent({
     runId: ctx.runId,
@@ -114,7 +118,7 @@ export async function inspectAndRemediate(
     // Failed. The current (rejected) sheet is replaced or the run fails.
     await rejectArtifact(cfg.table, current.artifactId);
 
-    if (regensUsed >= CRITIC_RETRY_CAP) {
+    if (priorRegens + regensUsed >= MAX_REGEN_PER_RUN) {
       await writeStepEvent({
         runId: ctx.runId,
         step: cfg.step,

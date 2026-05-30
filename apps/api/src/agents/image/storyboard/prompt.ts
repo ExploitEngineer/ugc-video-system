@@ -7,6 +7,7 @@
 // downstream video prompting.
 
 import type { ChatMessage } from "../../../providers/openai/index.js";
+import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
 
 export interface StoryboardPromptInput {
   adStyle: string;
@@ -51,11 +52,13 @@ export function buildStoryboardPrompt({
     "THE SHEET (describe all of this inside `imagePrompt`):",
     "- ONE single image, exactly FOUR equal-size panels in reading order —",
     "  a clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
-    "  with thin plain borders between panels.",
+    "  with thin, uniform plain separator borders between panels.",
+    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full 4K detail.`,
     "- Each panel is the keyframe illustration for that scene.",
-    "- Keep the product (and the person, if present) consistent with the",
-    "  attached reference sheets in EVERY panel — same product, same person,",
-    "  same colors and proportions.",
+    "- Keep the product (and the person, if present) faithfully consistent with",
+    "  the attached reference sheets in EVERY panel — the SAME product with all",
+    "  its real markings, text and logos intact, the same person, same colors,",
+    "  materials and proportions. Do not restyle, garble, or invent product text.",
     "",
     "PANEL ANNOTATIONS — keep it MINIMAL, like a clean classic storyboard. Each",
     "panel shows ONLY:",
@@ -74,8 +77,10 @@ export function buildStoryboardPrompt({
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "adStyle": string } ] }',
     "`imagePrompt` is the full, self-contained prompt for the image model and",
-    "MUST itself state the four-panel layout and the minimal-annotation rule",
-    "(number + arrows + one tiny caption per panel). `scenes` MUST have exactly",
+    "MUST itself state the four-panel 2×2 layout with thin separator borders, the",
+    `${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution, the product/person fidelity rule,`,
+    "and the minimal-annotation rule (number + arrows + one tiny caption per",
+    "panel). `scenes` MUST have exactly",
     "4 entries, in order; the `sceneDescription` is richer metadata for the",
     "video step (NOT all drawn on the panel). Set every scene's `adStyle` to",
     `"${style}".`,

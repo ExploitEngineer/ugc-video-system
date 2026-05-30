@@ -26,6 +26,7 @@ import {
 import { createVideoProvider } from "../../providers/index.js";
 import type { VideoProvider } from "../../providers/video.js";
 import { writeStepEvent } from "../events.js";
+import { logRun, logRunError } from "../../lib/log.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
@@ -208,9 +209,11 @@ export async function driveRun(runId: string): Promise<void> {
   // Phase 0 — interpret the ad style once, when leaving `queued`.
   if (run.status === "queued") {
     const ctx = buildCtx(run);
+    logRun(runId, "▶ interpreting ad style …");
     try {
       const { adStyle } = await interpretAdStyle(ctx, { userPrompt: run.prompt });
       await setRun(runId, { adStyle, status: "running", currentStep: null });
+      logRun(runId, `ad style: "${adStyle}"`);
     } catch (err) {
       await failRun(runId, null, err);
       return;
@@ -243,12 +246,15 @@ export async function driveRun(runId: string): Promise<void> {
         return;
       }
       const genStep = genStepForGate(gate);
+      const t0 = Date.now();
+      logRun(runId, `▶ ${genStep} (regenerate) …`);
       try {
         await executeStep(ctx, genStep);
       } catch (err) {
         await failRun(runId, genStep, err);
         return;
       }
+      logRun(runId, `✓ ${genStep} regenerated (${Date.now() - t0}ms)`);
       if (await isTerminated(runId)) return; // cancelled mid-step
       await setRun(runId, { status: "running", currentStep: genStep });
       continue;
@@ -256,7 +262,7 @@ export async function driveRun(runId: string): Promise<void> {
 
     // ── running: execute the next step ──
     const step = run.currentStep
-      ? nextStep(run.currentStep, personUploaded)
+      ? nextStep(run.currentStep, personUploaded, run.criticEnabled)
       : firstStep();
     if (!step) {
       await setRun(runId, { status: "completed" });
@@ -264,15 +270,22 @@ export async function driveRun(runId: string): Promise<void> {
     }
 
     let outcome: CriticOutcome | undefined;
+    const t0 = Date.now();
+    logRun(runId, `▶ ${step} …`);
     try {
       ({ outcome } = await executeStep(ctx, step));
     } catch (err) {
       await failRun(runId, step, err);
       return;
     }
+    logRun(
+      runId,
+      `✓ ${step} (${Date.now() - t0}ms)${outcome ? ` — critic: ${outcome}` : ""}`,
+    );
     if (await isTerminated(runId)) return; // cancelled mid-step
 
     if (outcome === "failed_retry_cap") {
+      logRunError(runId, `${step} rejected by critic after the retry cap`);
       await setRun(runId, {
         status: "failed",
         currentStep: step,
@@ -283,6 +296,7 @@ export async function driveRun(runId: string): Promise<void> {
 
     // Success — advance the checkpoint, then decide the next state.
     if (step === "video") {
+      logRun(runId, "✓ run completed — final video ready");
       await setRun(runId, { status: "completed", currentStep: step });
       return;
     }
@@ -301,6 +315,7 @@ async function failRun(
   err: unknown,
 ): Promise<void> {
   const message = err instanceof Error ? err.message : String(err);
+  logRunError(runId, `${step ?? "run"} failed: ${message}`);
   if (step) {
     await writeStepEvent({
       runId,

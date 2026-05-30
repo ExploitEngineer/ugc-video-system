@@ -7,6 +7,7 @@
 // Append-only audit row: a single insert, no transaction. `status` is
 // constrained to the four values the DB CHECK allows.
 
+import { and, eq, sql } from "drizzle-orm";
 import type { Step } from "@ugc/shared";
 import { db, schema } from "../db/index.js";
 
@@ -33,4 +34,24 @@ export async function writeStepEvent({
     status,
     payload: payload ?? null,
   });
+}
+
+/**
+ * Count Critic-driven regenerations already spent on a run — the run-level
+ * regen budget. Only counts `regenerated` events written by the remediate
+ * engine (which always tags its payload with `strategy`), so confirm-mode
+ * manual rejects don't eat the auto budget.
+ */
+export async function countRegenEvents(runId: string): Promise<number> {
+  const rows = await db
+    .select({ value: sql<number>`count(*)::int` })
+    .from(schema.stepEvents)
+    .where(
+      and(
+        eq(schema.stepEvents.runId, runId),
+        eq(schema.stepEvents.status, "regenerated"),
+        sql`${schema.stepEvents.payload} ? 'strategy'`,
+      ),
+    );
+  return rows[0]?.value ?? 0;
 }
