@@ -1,18 +1,15 @@
-import { serve } from '@hono/node-server'
-import { APP_NAME } from '@ugc/shared'
-import { Hono } from 'hono'
+import { serve } from "@hono/node-server";
+import { createApp } from "./app.js";
+import { env } from "./config/index.js";
 
-const app = new Hono()
+const app = createApp();
 
-app.get('/', (c) => {
-  return c.text(`Hello from ${APP_NAME}!`)
-})
-
-const port = Number(process.env.PORT) || 3001
-
-serve({
-  fetch: app.fetch,
-  port
-}, (info) => {
-  console.log(`Server is running on http://localhost:${info.port}`)
-})
+serve(
+  {
+    fetch: app.fetch,
+    port: env.PORT,
+  },
+  (info) => {
+    console.log(`Server is running on http://localhost:${info.port}`);
+  },
+);
