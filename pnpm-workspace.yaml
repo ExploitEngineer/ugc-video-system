@@ -10,3 +10,6 @@ onlyBuiltDependencies:
 
 ignoredBuiltDependencies:
   - unrs-resolver
+
+allowBuilds:
+  esbuild: set this to true or false

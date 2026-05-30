@@ -11,11 +11,16 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
+    "@supabase/supabase-js": "^2.106.2",
     "@ugc/shared": "workspace:*",
-    "hono": "^4.12.23"
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.23",
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.17",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3"
   }

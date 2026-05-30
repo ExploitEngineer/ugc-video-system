@@ -164,55 +164,55 @@ flowchart TD
 
 4 product views in one composite sheet.
 
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| runId | uuid FK | |
-| assetId | uuid FK → assets (`product_sheet`) | |
-| views | jsonb | `{ front, threeQuarter, side, rear }` — each: crop/region descriptor + notes |
-| promptUsed | text | final GPT Image 2 prompt |
-| status | text | `draft` / `approved` / `rejected` |
+| Field      | Type                               | Notes                                                                        |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------- |
+| id         | uuid PK                            |                                                                              |
+| runId      | uuid FK                            |                                                                              |
+| assetId    | uuid FK → assets (`product_sheet`) |                                                                              |
+| views      | jsonb                              | `{ front, threeQuarter, side, rear }` — each: crop/region descriptor + notes |
+| promptUsed | text                               | final GPT Image 2 prompt                                                     |
+| status     | text                               | `draft` / `approved` / `rejected`                                            |
 
 #### Person Reference Sheet — `person_reference_sheets`
 
 Multiple views + person details, costume/style, color reference. Only created when no person uploaded.
 
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| runId | uuid FK | |
-| assetId | uuid FK → assets (`person_sheet`) | |
-| views | jsonb | multiple view descriptors |
-| personDetails | jsonb | `{ demographics, costumeStyle, colorReference }` |
-| promptUsed | text | |
-| status | text | `draft` / `approved` / `rejected` |
+| Field         | Type                              | Notes                                            |
+| ------------- | --------------------------------- | ------------------------------------------------ |
+| id            | uuid PK                           |                                                  |
+| runId         | uuid FK                           |                                                  |
+| assetId       | uuid FK → assets (`person_sheet`) |                                                  |
+| views         | jsonb                             | multiple view descriptors                        |
+| personDetails | jsonb                             | `{ demographics, costumeStyle, colorReference }` |
+| promptUsed    | text                              |                                                  |
+| status        | text                              | `draft` / `approved` / `rejected`                |
 
 #### Storyboard / Keyframe Sheet — `storyboard_sheets`
 
 Ordered scenes, each with camera/angle, action/movement, description, in the chosen ad style.
 
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| runId | uuid FK | |
-| assetId | uuid FK → assets (`storyboard_sheet`) | |
-| scenes | jsonb[] | each: `{ index, cameraAngle, actionMovement, sceneDescription, adStyle }` |
-| promptUsed | text | |
-| status | text | `draft` / `approved` / `rejected` |
+| Field      | Type                                  | Notes                                                                     |
+| ---------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| id         | uuid PK                               |                                                                           |
+| runId      | uuid FK                               |                                                                           |
+| assetId    | uuid FK → assets (`storyboard_sheet`) |                                                                           |
+| scenes     | jsonb[]                               | each: `{ index, cameraAngle, actionMovement, sceneDescription, adStyle }` |
+| promptUsed | text                                  |                                                                           |
+| status     | text                                  | `draft` / `approved` / `rejected`                                         |
 
 #### Final Video — `videos`
 
 Single ~15s clip with audio from Seedance 2.0. No merge.
 
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| runId | uuid FK | |
-| assetId | uuid FK → assets (`final_video`) | |
-| durationSec | numeric | ~15 |
-| hasAudio | boolean | true (native Seedance audio) |
-| providerMeta | jsonb | fal.ai job id, model slug, params |
-| status | text | `processing` / `completed` / `failed` |
+| Field        | Type                             | Notes                                 |
+| ------------ | -------------------------------- | ------------------------------------- |
+| id           | uuid PK                          |                                       |
+| runId        | uuid FK                          |                                       |
+| assetId      | uuid FK → assets (`final_video`) |                                       |
+| durationSec  | numeric                          | ~15                                   |
+| hasAudio     | boolean                          | true (native Seedance audio)          |
+| providerMeta | jsonb                            | fal.ai job id, model slug, params     |
+| status       | text                             | `processing` / `completed` / `failed` |
 
 ---
 
