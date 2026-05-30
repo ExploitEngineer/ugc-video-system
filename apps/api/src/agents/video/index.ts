@@ -6,6 +6,7 @@ import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
+import { logRun } from "../../lib/log.js";
 import { buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
@@ -63,15 +64,21 @@ export async function videoBuilder(
     });
 
     // 3. Poll until completed / failed / timeout.
-    const deadline = Date.now() + env.ARK_POLL_TIMEOUT_MS;
+    const startedAt = Date.now();
+    const deadline = startedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
+    logRun(ctx.runId, `video task ${task.taskId} submitted — polling BytePlus …`);
     let result = await ctx.video.pollVideo(task);
     while (result.state === "processing") {
       if (Date.now() > deadline) {
         throw new Error(
-          `video task ${task.taskId} timed out after ${env.ARK_POLL_TIMEOUT_MS}ms`,
+          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms`,
         );
       }
-      await sleep(env.ARK_POLL_INTERVAL_MS);
+      await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
+      logRun(
+        ctx.runId,
+        `video still processing … ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`,
+      );
       result = await ctx.video.pollVideo(task);
     }
     if (result.state === "failed" || !result.videoUrl) {
@@ -101,8 +108,8 @@ export async function videoBuilder(
             durationSec: String(durationSec),
             hasAudio,
             providerMeta: {
-              provider: env.VIDEO_PROVIDER,
-              model: env.ARK_VIDEO_MODEL,
+              provider: "byteplus",
+              model: env.BYTEPLUS_VIDEO_MODEL,
               taskId: task.taskId,
               videoPrompt,
             },

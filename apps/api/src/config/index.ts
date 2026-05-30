@@ -15,17 +15,15 @@ const serverEnvSchema = z.object({
   // OpenAI — GPT Image 2 + LLM reasoning/critique
   OPENAI_API_KEY: z.string().min(1),
 
-  // Volcengine / BytePlus Ark — Seedance 2.0 video (key starts `ark-`)
-  ARK_API_KEY: z.string().min(1),
-
-  // Video provider selection + tuning. Ark is the SPEC-canonical default;
-  // runcomfy is a documented fallback adapter (needs RUNCOMFY_TOKEN).
-  VIDEO_PROVIDER: z.enum(["ark", "runcomfy"]).default("ark"),
-  ARK_BASE_URL: z.string().url().default("https://ark.cn-beijing.volces.com"),
-  ARK_VIDEO_MODEL: z.string().default("doubao-seedance-2-0-260128"),
-  ARK_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
-  ARK_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
-  RUNCOMFY_TOKEN: z.string().optional(),
+  // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
+  BYTEPLUS_API_KEY: z.string().min(1),
+  BYTEPLUS_BASE_URL: z
+    .string()
+    .url()
+    .default("https://ark.ap-southeast.bytepluses.com"),
+  BYTEPLUS_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-260128"),
+  BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
 
   // Supabase — Postgres (Drizzle), Storage, Auth (F8)
   SUPABASE_URL: z.string().url(),

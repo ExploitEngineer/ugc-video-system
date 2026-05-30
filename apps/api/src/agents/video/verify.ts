@@ -63,7 +63,7 @@ async function main() {
     video: createVideoProvider(),
   };
 
-  console.log(`\n[1/1] Video Builder … (provider=${process.env.VIDEO_PROVIDER ?? "ark"})`);
+  console.log("\n[1/1] Video Builder … (provider=byteplus)");
   const video = await videoAgent.videoBuilder(ctx, {
     storyboardSheetRef: { source: asset.url },
     scenes: (storyboard.scenes ?? []) as StoryboardScene[],

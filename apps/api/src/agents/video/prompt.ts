@@ -25,6 +25,7 @@ export function buildVideoPrompt(input: {
     `Compose ONE Seedance 2.0 video prompt for a ~${durationSec}s ad in the "${adStyle}" style.`,
     "The storyboard sheet is supplied as an image reference and holds the visual identity (product, person, palette) — DO NOT re-describe their appearance.",
     "Describe the EVOLVING shot: camera movement/grammar, subject action across the scenes in order, pacing, lighting/mood, and AUDIO (spoken tone, ambience, music/SFX) for native synchronized audio.",
+    "Frame for 16:9 widescreen (horizontal), composing the action for a landscape frame.",
     "Keep it one flowing cinematic paragraph, filmable in the duration. Return STRICT JSON only.",
   ].join(" ");
 

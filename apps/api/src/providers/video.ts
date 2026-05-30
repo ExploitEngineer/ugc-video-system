@@ -1,7 +1,7 @@
-// Shared video-provider boundary — Seedance 2.0 (Ark) or RunComfy adapters.
+// Shared video-provider boundary — Seedance 2.0 via the BytePlus adapter.
 //
 // The Video Builder skill depends on this interface only, never on a concrete
-// SDK/REST/CLI, so the provider is swappable. Seedance runs async: submit a
+// SDK/REST, so the provider is swappable. Seedance runs async: submit a
 // task, then poll until the video is ready.
 
 export interface SubmitVideoInput {
