@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" role="img" aria-label="Mock final video poster">
+  <defs>
+    <linearGradient id="vbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1b4d"/>
+      <stop offset="0.5" stop-color="#3a1d52"/>
+      <stop offset="1" stop-color="#10243a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.45" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#vbg)"/>
+  <rect width="1280" height="720" fill="url(#glow)"/>
+  <circle cx="640" cy="330" r="78" fill="#ffffff" fill-opacity="0.92"/>
+  <polygon points="616,288 616,372 688,330" fill="#3a1d52"/>
+  <text x="640" y="470" fill="#ffffff" text-anchor="middle" font-family="system-ui, sans-serif" font-size="34" font-weight="700">Final Ad Video</text>
+  <text x="640" y="512" fill="#cdb9e8" text-anchor="middle" font-family="system-ui, sans-serif" font-size="22">~15s · native audio · 1280×720</text>
+</svg>

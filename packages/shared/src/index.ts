@@ -3,4 +3,7 @@
 export const APP_NAME = "ugc-video-system";
 
 // Run state-machine enums (Zod schemas + inferred types).
-export * from "./enums.js";
+export * from "./enums";
+
+// API DTO schemas (Run / Asset / StepEvent / RunDetail / CreateRunInput).
+export * from "./dto";
