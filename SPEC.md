@@ -1,6 +1,6 @@
 # AI Product Ad Video Generator — SPEC
 
-> Living architecture document **and** progress tracker. Update the `- [ ]` checklists and the **Progress Log** as we build. Tick items off as they land.
+> Living architecture document **and** progress tracker. The **Build Status** and **Progress Log** sections record what is built. Keep them current as work lands.
 
 ---
 
@@ -103,7 +103,7 @@ flowchart TD
 
 ### Agent/Skill code layout
 
-Agents are **code, not a framework**. Each **skill** = a prompt module (`prompt.ts`) + a function (`index.ts`) of shape `(ctx: SkillContext, input) => Promise<SkillResult<T>>`. Provider adapters (OpenAI/Ark) are **injected via `SkillContext`**, never imported inside a skill — keeping skills swappable and testable.
+Agents are **code, not a framework**. Each **skill** = a prompt module (`prompt.ts`) + a function (`index.ts`) of shape `(ctx: SkillContext, input) => Promise<SkillResult<T>>`. Provider adapters (OpenAI / video) are **injected via `SkillContext`**, never imported inside a skill — keeping skills swappable and testable.
 
 ```
 apps/api/src/agents/
@@ -233,7 +233,7 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | assetId      | uuid FK → assets (`final_video`) |                                       |
 | durationSec  | numeric                          | ~15                                   |
 | hasAudio     | boolean                          | true (native Seedance audio)          |
-| providerMeta | jsonb                            | Ark task id, model slug, params       |
+| providerMeta | jsonb                            | provider, model slug, task id, params |
 | status       | text                             | `processing` / `completed` / `failed` |
 
 ---
@@ -243,15 +243,15 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | Service                         | Used for                                                                               | Client                                       | Key (env)                                                                        |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
 | **OpenAI**                      | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **Ark** (Volcengine / BytePlus) | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | Ark REST (OpenAI-compatible client)          | `ARK_API_KEY`                                                                    |
+| **BytePlus / ModelArk**         | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | REST (`/api/v3/contents/generations/tasks`)  | `BYTEPLUS_API_KEY` (default), `MODELARK_API_KEY` (when `VIDEO_PROVIDER=modelark`) |
 | **Supabase**                    | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
-**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,ark}`) so the concrete model/provider is swappable without touching agent logic.
+**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus,modelark}`) so the concrete model/provider is swappable without touching agent logic. `VIDEO_PROVIDER` (default `byteplus`) selects the video adapter; both speak the same `/api/v3/contents/generations/tasks` REST shape.
 
 **Invocation shape:**
 
 - GPT Image 2 — Image Agent builds a prompt (via LLM skill) → image generation call → store composite sheet to Supabase Storage → row in `assets` + artifact table.
-- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as an Ark video task, polls Ark until complete, downloads the ~15s video to Supabase Storage.
+- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a video task to the selected provider (BytePlus / ModelArk), polls until complete, downloads the ~15s video to Supabase Storage.
 
 ---
 
@@ -273,7 +273,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Open questions**
 
 - Exact OpenAI model id/endpoint mapped to "GPT Image 2", and whether a reference "sheet" is **one composite image** (multiple views in a grid) vs several separate images. **Assumption:** one composite sheet image per artifact.
-- Exact Ark **Seedance 2.0 model slug/endpoint**, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
+- Exact **Seedance 2.0 model slug/endpoint** for the chosen provider (BytePlus / ModelArk), whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
 - Agent runtime: OpenAI Responses/Chat + tool-calling vs Assistants API; how "skills" map to code. **Assumption:** each skill = a prompt module + a function, orchestrated in code by the Creative Direction Agent.
 - Worker host: in-process loop vs separate queue process (pg-boss/BullMQ). **Assumption:** in-process loop in `apps/api` through F7.
 - Regeneration **retry caps / cost guards** — max auto-regens per step before failing the run.
@@ -283,116 +283,56 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Assumptions** (recorded above inline) — all marked **Assumption:** are working defaults, revisit as needed.
 
 ---
+# Build Status
 
-# Features (build order — progress tracker)
+> Per-feature status of the F0–F8 build order. "Done" = code complete and locally verified (typecheck/build/route smoke tests) unless noted. Live OpenAI/BytePlus end-to-end verification is still outstanding across the agent pipeline (F4–F7).
 
-> Tick `- [ ]` → `- [x]` as items complete. Keep this section authoritative.
+## F0 — Project scaffolding & config — **Done**
 
-## F0 — Project scaffolding & config
+Deps added (`zod`, `drizzle-orm`/`drizzle-kit`/`postgres`, `@supabase/supabase-js`, `dotenv` on api; `framer-motion` on web). Per-app env files (`apps/api/.env(.example)` server secrets, `apps/web/.env.local(.example)` `NEXT_PUBLIC_*` only); real files gitignored. `apps/api/src/config` Zod-validates server env (fail-fast); `apps/web` exposes only public vars. Shared Zod enums in `packages/shared`. Provider adapter stubs under `apps/api/src/providers/{openai, byteplus, modelark}`. `pnpm dev`/`typecheck`/`lint` green.
 
-**Goal:** add all missing deps and a validated config/secret layer on top of the existing monorepo.
+## F1 — Database schema design — **Done**
 
-- [x] Add deps: `zod` (shared + api), `drizzle-orm` + `drizzle-kit` + `postgres` (api), `@supabase/supabase-js` (api), `zustand` + `framer-motion` (web)
-- [x] Per-app env files: `apps/api/.env(.example)` holds server secrets (`OPENAI_API_KEY`, `ARK_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`); `apps/web/.env.local(.example)` holds public-only `NEXT_PUBLIC_*` (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Real files gitignored, `.example` pushed.
-- [x] `apps/api/src/config` — load + Zod-validate server env (fail fast on missing secrets)
-- [x] `apps/web` public env handling (only `NEXT_PUBLIC_*` exposed)
-- [x] Shared enums/types (run status, step, asset kind, mode, artifact status) in `packages/shared` as Zod schemas + inferred types
-- [x] Provider adapter stubs: `apps/api/src/providers/{openai,ark}` interfaces
-- [x] Confirm `pnpm dev`, `typecheck`, `lint` still green
+Drizzle schema for all 8 tables (`projects`, `runs`, `assets`, `step_events`, `product_reference_sheets`, `person_reference_sheets`, `storyboard_sheets`, `videos`) in `apps/api/src/db/schema.ts`; 5 native `pgEnum`s sourced from shared Zod enums; PKs `gen_random_uuid()`, FKs `ON DELETE cascade`, FK + `runs.status` indexes, CHECKs on `step_events.status`/`videos.status`/`videos.duration_sec`. `drizzle.config.ts` + db scripts; initial migration applied to live Supabase. DB client singleton in `apps/api/src/db`. Seed helper. RLS enabled on every table (locked down / service-role-only; owner policies deferred to F8). Docs in `apps/api/docs/`.
 
-## F1 — Database schema design
+## F2 — Frontend UI shell + TanStack Query — **Done**
 
-**Goal:** Drizzle schema over Supabase Postgres + migrations for all tables/artifacts.
+Marketing landing (`/`), studio create form (`/studio`), run progress view (`/studio/[runId]`). shadcn/ui (new-york), next-themes, lucide-react, oklch token theme with violet→fuchsia→cyan brand accent. Shared DTO schemas in `packages/shared`. Create = structured form (image dropzones + preview, segmented mode field, prompt textarea). Progress = vertical timeline/stepper with per-step status, artifact cards w/ zoom, confirm-bar gating in confirm mode, terminal video/error states; Framer Motion throughout w/ `prefers-reduced-motion`. **No global store** (zustand removed): form draft = local state; server state = TanStack Query polling `GET /runs/:id`, stopping at terminal status and pausing at `awaiting_confirmation`.
 
-- [x] Drizzle schema: `projects`, `runs`, `assets`, `step_events`
-- [x] Drizzle schema: `product_reference_sheets`, `person_reference_sheets`, `storyboard_sheets`, `videos`
-- [x] Enums: run status, step, asset kind, mode, artifact status
-- [x] `drizzle.config.ts` pointed at `DATABASE_URL`
-- [x] Generate + apply initial migration to Supabase
-- [x] DB client singleton in `apps/api/src/db`
-- [x] Seed/test helper for a sample run
-- [x] RLS enabled on all tables (locked down, service-role-only; owner-based policies deferred to F8)
-- [x] Schema + RLS docs in `apps/api/docs/`
+## F3 — Backend API (Hono) + Zod — **Done**
 
-## F2 — Frontend UI shell + TanStack Query
+Hono backend in `apps/api`: `app.ts` (CORS, `/health`, mounts `/runs`, error/notFound sinks). Routes in `src/routes/runs.ts`: `POST /runs` (multipart upload + validation + Storage upload + row inserts), `GET /runs/:id`, `GET /runs/:id/artifacts`, `POST /runs/:id/{confirm,reject,cancel}`. Zod validation on every route via shared schemas. Helpers: `lib/errors.ts` (single JSON error shape), `lib/storage.ts` (service-role Supabase client, public `ugc-assets` bucket), `lib/mappers.ts` (sole DB→DTO exit, never emits `storagePath`), `lib/runs.ts`. Public bucket for stable URLs (signed URLs deferred).
 
-**Goal:** input + progress UI; no real generation yet (mock the API).
+## F4 — Image Generation Agent + skills (GPT Image 2) — **Done (code; live verification pending)**
 
-- [x] Upload product image (required) + optional person image, with preview
-- [x] Prompt textarea (style hint allowed)
-- [x] Mode toggle: Automatic / Confirm-every-step
-- [x] Create button → calls create-run API (mocked via server action)
-- [x] Results/progress view: per-step status, artifact previews, confirm/reject buttons (confirm mode)
-- [x] State convention: **no global store** (zustand removed). Form draft = local `useState`/`useReducer`; server state (run status, artifacts) = **TanStack Query** via a `<Providers>` `QueryClientProvider` (`apps/web/src/app/providers.tsx`). Poll `GET /runs/:id` with `refetchInterval`, stopping at terminal status (`completed`/`failed`). React Context only if a real cross-cutting need appears (e.g. toasts).
-- [x] Framer Motion transitions between steps/states
-- [x] Apply `frontend-design`, `tailwindcss`, `framer-motion` skills for the UI
+Image Agent + 3 skills under `apps/api/src/agents/image/`. Convention: each skill = `prompt.ts` + `index.ts` `(ctx, input) => SkillResult<T>`, OpenAI adapter injected via `SkillContext`. OpenAI provider (`providers/openai/index.ts`): `chat()` (vision-ready) + `generateImage()` (`images.generate` vs `images.edit` for ref→sheet); model ids in `providers/openai/constants.ts`. Skills: **Product Sheet Builder**, **Generate Person Image** (only when no person uploaded), **StoryBoard Generator**. All sheets = single composite images. Shared `agents/persist.ts` (upload → `assets` row → artifact row in one tx) and `agents/json.ts`. Ad style threaded opaque via `ctx`. Invoked standalone via `agents/image/verify.ts`. **Not yet run against live OpenAI image API.**
 
-## F3 — Backend API (Hono) + Zod
+## F5 — Critic Agent + skills — **Done (code; live verification pending)**
 
-**Goal:** routes to create runs, poll status, fetch artifacts, and gate steps.
+Critic Agent under `apps/api/src/agents/critic/`. Two skills, each a single-pass inspection + inspect-and-remediate wrapper: **Product Sheet Inspection** and **StoryBoard Sheet Inspection**; inspections attach the sheet as a vision image and parse a strict `InspectionVerdict`. Critic does NOT own `run.status` (F7's job) — returns `CriticVerdict { outcome, attempts, finalArtifact, lastVerdict }`. Plumbing: verdict types, `CRITIC_RETRY_CAP = 1`, `events.ts` `writeStepEvent` (first writer of `step_events`), draft→approved/rejected status, generic remediate engine, localized product-view regen. Retry cap = 1; inspections cover product + storyboard only; localized partial regen = product sheet only (storyboard always full regen). Full regen re-invokes the F4 producer steered by an additive `critique?` field. Invoked standalone via `agents/critic/verify.ts`. **Not yet run against live OpenAI vision.**
 
-- [x] `POST /runs` — create run (multipart: images + prompt + mode), upload images to Supabase Storage, insert rows, enqueue
-- [x] `GET /runs/:id` — status + currentStep + step_events
-- [x] `GET /runs/:id/artifacts` — sheets + video URLs
-- [x] `POST /runs/:id/confirm` and `POST /runs/:id/reject` — confirm-mode gating (+ `POST /runs/:id/cancel`)
-- [x] Zod validation on every route (shared schemas)
-- [x] Supabase Storage upload helpers (public bucket `ugc-assets` → stable public URLs; signed URLs deferred — bucket is public for now)
-- [x] Error handling + consistent JSON error shape
+## F6 — Video Generation Agent + Video Builder (Seedance 2.0) — **Done (code; live verification pending)**
 
-## F4 — Image Generation Agent + skills (GPT Image 2)
+Video Agent under `apps/api/src/agents/video/`. Provider boundary generalized: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the default adapter** (`providers/byteplus/index.ts`); **ModelArk** (`providers/modelark/index.ts`) is the alternate — both speak the same `POST /api/v3/contents/generations/tasks` REST shape (Bearer key, body `{model, content:[text,image_url], duration, resolution:"720p", ratio:"16:9", generate_audio:true}`) and poll mapping `succeeded→completed`, `failed|cancelled|expired→failed`. `createVideoProvider()` factory in `providers/index.ts` switches on `VIDEO_PROVIDER` (default `byteplus`). **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet URL + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `VIDEO_PROVIDER`, `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`, optional `MODELARK_API_KEY`/`MODELARK_BASE_URL`, `ARK_POLL_INTERVAL_MS`/`ARK_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
 
-**Goal:** produce product sheet, optional person sheet, storyboard sheet.
+## F7 — Creative Direction Agent orchestration + modes — **Done (code; live end-to-end pending)**
 
-- [x] OpenAI provider adapter (LLM + GPT Image 2 image gen)
-- [x] Skill: **Product Sheet Builder** — style/hook reasoning → prompt → GPT Image 2 → Product Reference Sheet (4 views)
-- [x] Skill: **Generate Person Image** — only when no person uploaded → Person Reference Sheet (+ personDetails)
-- [x] Skill: **StoryBoard Generator** — product (+person) sheet → Storyboard Sheet (scenes)
-- [x] Persist artifacts to Storage + artifact tables + `assets`
-- [x] Each skill = prompt module + function; ad style threaded through
+CDA orchestrator + in-process background worker under `apps/api/src/agents/creative-direction/`. (1) **Style skill** `interpret-style` distils the raw prompt into a concise style-agnostic `adStyle` brief, run once on leaving `queued`, persisted to `runs.adStyle`, threaded into every downstream skill via `ctx.adStyle`. (2) **State machine** `orchestrator.ts` (`driveRun`) + **worker** `worker.ts` (`startWorker`). Fixed pipeline in `plan.ts`: `product_sheet → [person_sheet if no person] → product_inspection → [gate] → storyboard → storyboard_inspection → [gate] → video → completed`. Convention: `currentStep` = last completed step; `status` drives the worker (`queued`→interpret; `running`→`nextStep`; `regenerating`→re-run stage; `awaiting_confirmation`/`completed`/`failed` terminal). Existing confirm/reject/cancel routes work unchanged. Gating (confirm mode only) pauses after each validated stage; Critic auto-checks run in both modes. Resumable: each step persists state + reloads inputs from DB. Worker = recursive-`setTimeout` poll, single-flight per `runId`, gated by `WORKER_ENABLED`. **Outstanding: full live OpenAI + BytePlus end-to-end run in both modes (automatic + confirm) — not yet verified.**
 
-## F5 — Critic Agent + skills
+## F8 — Auth (Supabase) + hardening + cleanup — **Not started (deferred to last)**
 
-**Goal:** validate artifacts and regenerate (full or partial) on issues, in both modes.
-
-- [x] Skill: **Product Sheet Inspection** — vision validation; full regen
-- [x] Product Sheet Inspection — **localized partial regen** when the problem is local
-- [x] Skill: **StoryBoard Sheet Inspection** — validate scenes; regenerate on problems
-- [x] Write `step_events` diagnostics for each inspection
-- [x] Retry cap / cost guard before failing a run
-
-## F6 — Video Generation Agent + Video Builder (Seedance 2.0)
-
-**Goal:** storyboard sheet → single ~15s video with audio. No merge.
-
-- [x] Ark provider adapter (submit + poll Seedance 2.0)
-- [x] Skill: **Video Builder** — send full storyboard sheet → ~15s video w/ audio
-- [x] Download result to Supabase Storage; insert `videos` + `assets`
-- [x] Surface final video in results view
-
-## F7 — Creative Direction Agent orchestration + modes
-
-**Goal:** the orchestrator + background worker that runs the whole state machine for both modes.
-
-- [x] Creative Direction Agent: workflow logic, agent sequencing, ad-style interpretation + propagation
-- [x] Background worker loop polling `runs` and advancing steps
-- [x] Automatic mode: end-to-end, no gating
-- [x] Confirm mode: pause at `awaiting_confirmation`, resume on confirm/reject
-- [x] Full state-machine transitions incl. regeneration + failure
-- [ ] End-to-end run verified with both modes (live OpenAI/Ark) — code complete, live run pending
-
-## F8 — Auth (Supabase) + hardening + cleanup
-
-**Goal:** attach ownership, secure access, final polish. **Deferred to last.**
-
-- [ ] Supabase Auth (sign-in)
-- [ ] Set `projects.ownerId`; scope runs/artifacts to the user
-- [ ] Row-Level Security policies
-- [ ] Secret review + rate limiting + input hardening
-- [ ] Cleanup, error states, retention policy for assets
+Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-based RLS policies; secret review + rate limiting + input hardening; cleanup, error states, asset retention policy.
 
 ---
 
 ## Progress Log
+
+### 2026-05-31
+
+- **Video provider switch: Ark/RunComfy → BytePlus + ModelArk.** Removed the `providers/ark` and `providers/runcomfy` adapters; added `providers/byteplus` (default) and `providers/modelark` (alternate), both implementing the shared `VideoProvider` interface against the same `POST /api/v3/contents/generations/tasks` REST shape (Seedance 2.0, `generate_audio:true`). `createVideoProvider()` switches on `VIDEO_PROVIDER` (`byteplus` | `modelark`, default `byteplus`). Config env renamed `ARK_API_KEY` → `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL` (+ optional `MODELARK_API_KEY`/`MODELARK_BASE_URL`); poll knobs retained. Docs: `apps/api/docs/video-providers.md`.
+- **Agent prompt + UI refinements.** Iterated image/critic/video/CDA prompt modules and assorted web UI components (landing, studio create form, run views, shadcn primitives); studio form sub-components (`image-dropzone`, `mode-toggle-field`, `prompt-field`) folded back into `create-run-form`.
+- **SPEC cleanup.** Replaced the F0–F8 `- [ ]` checklists with a prose **Build Status** section; corrected provider naming throughout (Ark → BytePlus/ModelArk) in the architecture, integrations, and data-model sections. Live OpenAI/BytePlus end-to-end verification (F4–F7) still outstanding.
+
 
 ### 2026-05-30
 
