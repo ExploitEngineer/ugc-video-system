@@ -45,6 +45,7 @@ export function toRunDto(row: RunRow): Run {
     prompt: row.prompt,
     adStyle: row.adStyle ?? "",
     mode: row.mode,
+    criticEnabled: row.criticEnabled,
     status: row.status,
     currentStep: row.currentStep ?? "product_sheet",
     error: row.error ?? null,

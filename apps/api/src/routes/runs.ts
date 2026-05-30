@@ -8,11 +8,11 @@
 
 import type { AssetKind } from "@ugc/shared";
 import { createRunInputSchema } from "@ugc/shared";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
-import { toAssetDto } from "../lib/mappers.js";
+import { toAssetDto, toRunDto } from "../lib/mappers.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
 import { uploadAsset } from "../lib/storage.js";
 
@@ -53,6 +53,8 @@ runs.post("/", async (c) => {
   const parsed = createRunInputSchema.safeParse({
     prompt: body.prompt,
     mode: body.mode,
+    // FormData carries strings; default ON unless explicitly "false".
+    criticEnabled: body.criticEnabled !== "false",
     hasPersonImage: personImage !== null,
   });
   if (!parsed.success) {
@@ -61,7 +63,7 @@ runs.post("/", async (c) => {
       parsed.error.issues,
     );
   }
-  const { prompt, mode } = parsed.data;
+  const { prompt, mode, criticEnabled } = parsed.data;
 
   // `runs.projectId` is NOT NULL → auto-create a project to own this run.
   const [project] = await db
@@ -71,7 +73,7 @@ runs.post("/", async (c) => {
 
   const [run] = await db
     .insert(schema.runs)
-    .values({ projectId: project.id, prompt, mode, status: "queued" })
+    .values({ projectId: project.id, prompt, mode, criticEnabled, status: "queued" })
     .returning();
 
   // Upload images, then record them as `assets`. Uploads are external to
@@ -81,23 +83,41 @@ runs.post("/", async (c) => {
   ];
   if (personImage) uploads.push({ kind: "person_upload", file: personImage });
 
-  for (const { kind, file } of uploads) {
-    const { storagePath, url } = await uploadAsset({
-      runId: run.id,
-      kind,
-      bytes: await fileToBytes(file),
-      contentType: file.type,
-    });
-    await db.insert(schema.assets).values({
-      runId: run.id,
-      kind,
-      storagePath,
-      url,
-      mime: file.type,
-    });
+  try {
+    for (const { kind, file } of uploads) {
+      const { storagePath, url } = await uploadAsset({
+        runId: run.id,
+        kind,
+        bytes: await fileToBytes(file),
+        contentType: file.type,
+      });
+      await db.insert(schema.assets).values({
+        runId: run.id,
+        kind,
+        storagePath,
+        url,
+        mime: file.type,
+      });
+    }
+  } catch (err) {
+    // Don't leave a queued run with no product_upload for the worker to claim.
+    await db
+      .update(schema.runs)
+      .set({ status: "failed", error: "Image upload failed.", updatedAt: new Date() })
+      .where(eq(schema.runs.id, run.id));
+    throw err;
   }
 
   return c.json(await loadRunDetail(run.id), 201);
+});
+
+// ── GET /runs — list all runs, newest first (sidebar history) ─────────
+runs.get("/", async (c) => {
+  const rows = await db
+    .select()
+    .from(schema.runs)
+    .orderBy(desc(schema.runs.createdAt));
+  return c.json(rows.map(toRunDto));
 });
 
 // ── GET /runs/:id — poll status + artifacts + audit trail ─────────────

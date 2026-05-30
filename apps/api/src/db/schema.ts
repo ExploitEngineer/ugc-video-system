@@ -90,6 +90,7 @@ export const runs = pgTable(
     prompt: text("prompt").notNull(), // raw user prompt
     adStyle: text("ad_style"), // interpreted style propagated to agents
     mode: modeEnum("mode").notNull(),
+    criticEnabled: boolean("critic_enabled").notNull().default(true),
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
     error: text("error"),

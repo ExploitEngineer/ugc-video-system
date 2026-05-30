@@ -8,6 +8,13 @@
       "when": 1780139305401,
       "tag": "0000_silky_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780177336042,
+      "tag": "0001_nappy_riptide",
+      "breakpoints": true
     }
   ]
 }
