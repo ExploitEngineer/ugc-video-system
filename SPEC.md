@@ -292,7 +292,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 - [x] RLS enabled on all tables (locked down, service-role-only; owner-based policies deferred to F8)
 - [x] Schema + RLS docs in `apps/api/docs/`
 
-## F2 — Frontend UI shell + Zustand
+## F2 — Frontend UI shell + TanStack Query
 
 **Goal:** input + progress UI; no real generation yet (mock the API).
 
@@ -301,7 +301,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 - [ ] Mode toggle: Automatic / Confirm-every-step
 - [ ] Create button → calls create-run API
 - [ ] Results/progress view: per-step status, artifact previews, confirm/reject buttons (confirm mode)
-- [ ] Zustand stores: input draft + active run/polling state
+- [ ] State convention: **no global store** (zustand removed). Form draft = local `useState`/`useReducer`; server state (run status, artifacts) = **TanStack Query** via a `<Providers>` `QueryClientProvider` (`apps/web/src/app/providers.tsx`). Poll `GET /runs/:id` with `refetchInterval`, stopping at terminal status (`completed`/`failed`). React Context only if a real cross-cutting need appears (e.g. toasts).
 - [ ] Framer Motion transitions between steps/states
 - [ ] Apply `frontend-design`, `tailwindcss`, `framer-motion` skills for the UI
 
@@ -377,3 +377,4 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 - SPEC.md created — architecture, data model, integrations (OpenAI + Ark/Seedance + Supabase), mode behavior, and feature checklists F0–F8 captured. No application code yet.
 - **F0 complete.** Deps added (`zod`, `drizzle-orm`/`drizzle-kit`/`postgres`, `@supabase/supabase-js`, `dotenv` on api; `zustand`/`framer-motion` on web). Per-app env files (`apps/api/.env(.example)` server secrets, `apps/web/.env.local(.example)` `NEXT_PUBLIC_*` only); real files gitignored. Video provider switched **fal.ai → Volcengine/BytePlus Ark** (`ARK_API_KEY`) across SPEC + CLAUDE.md. Built: `apps/api/src/config` (Zod env, fail-fast), `apps/web/src/lib/env.ts` (public-only), shared Zod enums (`packages/shared/src/enums.ts`), provider stubs `apps/api/src/providers/{openai,ark}`. typecheck + lint + api boot all green.
 - **F1 complete.** Drizzle schema for all 8 tables in `apps/api/src/db/schema.ts` (5 native `pgEnum`s sourced from the shared Zod enums; PKs `gen_random_uuid()`, FKs `ON DELETE cascade`, indexes on every FK + `runs.status`, CHECKs on `step_events.status`, `videos.status`, `videos.duration_sec > 0`). `drizzle.config.ts` + `db:generate/migrate/push/seed/studio` scripts. Initial migration `0000_silky_the_watchers.sql` generated and **applied to live Supabase** (verified: 8 tables, `relrowsecurity=true` on all, 5 enums, 3 checks present). DB client singleton `apps/api/src/db/index.ts` (first consumer of `src/config`). Seed helper inserts + reads back a sample run. **RLS** enabled on every table with **no policies** — locked-down/service-role-only until Auth (F8). Docs: `apps/api/docs/{database-schema,rls-policies}.md`.
+- **State/deps decision.** Removed `zustand` from `apps/web` — the app is server-state-heavy (the `runs` row is authoritative; `runId` is a route param), so there's no genuine cross-tree client state to justify a global store. Adopted **TanStack Query** (`@tanstack/react-query`) for all server state + polling; wired a client `<Providers>` (`apps/web/src/app/providers.tsx`) into the root layout. Form draft stays in local component state; React Context reserved for future cross-cutting concerns only. **Zod kept as-is** — enums are single-sourced in `packages/shared` (`z.enum`) and Drizzle `pgEnum`s derive values via `.options` (zero duplication); Zod earns its runtime keep at API-route + config validation, which Drizzle enums can't do. Dependency direction (`api` → `shared`, never reverse) means enums/DTOs must live in `shared`, so drizzle-as-source / `drizzle-zod` were rejected.
