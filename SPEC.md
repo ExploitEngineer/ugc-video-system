@@ -58,7 +58,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 | **Creative Direction Agent** (orchestrator) | OpenAI (LLM)                                                        | Holds all guidelines + workflow logic. Decides agent order for both modes, interprets requested ad style, propagates it downstream, drives the run state machine, applies mode gating. |
 | **Image Generation Agent**                  | OpenAI — **GPT Image 2** for images, OpenAI LLM for prompt building | `Product Sheet Builder`, `Generate Person Image`, `StoryBoard Generator`                                                                                                               |
 | **Critic Agent** (QA/validation)            | OpenAI (LLM, vision)                                                | `Product Sheet Inspection` (full or localized partial regen), `StoryBoard Sheet Inspection`                                                                                            |
-| **Video Generation Agent**                  | **fal.ai — Seedance 2.0**                                           | `Video Builder`                                                                                                                                                                        |
+| **Video Generation Agent**                  | **Volcengine / BytePlus Ark — Seedance 2.0**                        | `Video Builder`                                                                                                                                                                        |
 
 #### Skill detail
 
@@ -86,7 +86,7 @@ flowchart TD
     F --> SBS[(Storyboard Sheet)]
     SBS --> G["Critic Agent · StoryBoard Sheet Inspection"]
     G -- issues --> F
-    G -- ok --> H["Video Agent · Video Builder<br/>→ fal.ai Seedance 2.0"]
+    G -- ok --> H["Video Agent · Video Builder<br/>→ Ark Seedance 2.0"]
     H --> VID[(Final ~15s video w/ audio)]
 
     CDA -. confirm-every-step gating .-> B
@@ -211,7 +211,7 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | assetId      | uuid FK → assets (`final_video`) |                                       |
 | durationSec  | numeric                          | ~15                                   |
 | hasAudio     | boolean                          | true (native Seedance audio)          |
-| providerMeta | jsonb                            | fal.ai job id, model slug, params     |
+| providerMeta | jsonb                            | Ark task id, model slug, params       |
 | status       | text                             | `processing` / `completed` / `failed` |
 
 ---
@@ -221,15 +221,15 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | Service      | Used for                                                                               | Client                                       | Key (env)                                                                        |
 | ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
 | **OpenAI**   | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **fal.ai**   | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | `@fal-ai/client`                             | `FAL_KEY`                                                                        |
+| **Ark** (Volcengine / BytePlus) | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)         | Ark REST (OpenAI-compatible client)          | `ARK_API_KEY`                                                                    |
 | **Supabase** | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
-**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,fal}`) so the concrete model/provider is swappable without touching agent logic.
+**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,ark}`) so the concrete model/provider is swappable without touching agent logic.
 
 **Invocation shape:**
 
 - GPT Image 2 — Image Agent builds a prompt (via LLM skill) → image generation call → store composite sheet to Supabase Storage → row in `assets` + artifact table.
-- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a fal.ai job, polls fal until complete, downloads the ~15s video to Supabase Storage.
+- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as an Ark video task, polls Ark until complete, downloads the ~15s video to Supabase Storage.
 
 ---
 
@@ -251,7 +251,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Open questions**
 
 - Exact OpenAI model id/endpoint mapped to "GPT Image 2", and whether a reference "sheet" is **one composite image** (multiple views in a grid) vs several separate images. **Assumption:** one composite sheet image per artifact.
-- Exact fal.ai **Seedance 2.0 model slug**, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
+- Exact Ark **Seedance 2.0 model slug/endpoint**, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
 - Agent runtime: OpenAI Responses/Chat + tool-calling vs Assistants API; how "skills" map to code. **Assumption:** each skill = a prompt module + a function, orchestrated in code by the Creative Direction Agent.
 - Worker host: in-process loop vs separate queue process (pg-boss/BullMQ). **Assumption:** in-process loop in `apps/api` through F7.
 - Regeneration **retry caps / cost guards** — max auto-regens per step before failing the run.
@@ -271,11 +271,11 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Goal:** add all missing deps and a validated config/secret layer on top of the existing monorepo.
 
 - [x] Add deps: `zod` (shared + api), `drizzle-orm` + `drizzle-kit` + `postgres` (api), `@supabase/supabase-js` (api), `zustand` + `framer-motion` (web)
-- [x] Per-app env files: `apps/api/.env(.example)` holds server secrets (`OPENAI_API_KEY`, `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`); `apps/web/.env.local(.example)` holds public-only `NEXT_PUBLIC_*` (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Real files gitignored, `.example` pushed.
+- [x] Per-app env files: `apps/api/.env(.example)` holds server secrets (`OPENAI_API_KEY`, `ARK_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`); `apps/web/.env.local(.example)` holds public-only `NEXT_PUBLIC_*` (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Real files gitignored, `.example` pushed.
 - [ ] `apps/api/src/config` — load + Zod-validate server env (fail fast on missing secrets)
 - [ ] `apps/web` public env handling (only `NEXT_PUBLIC_*` exposed)
 - [ ] Shared enums/types (run status, step, asset kind, mode) in `packages/shared` as Zod schemas + inferred types
-- [ ] Provider adapter stubs: `apps/api/src/providers/{openai,fal}` interfaces
+- [ ] Provider adapter stubs: `apps/api/src/providers/{openai,ark}` interfaces
 - [ ] Confirm `pnpm dev`, `typecheck`, `lint` still green
 
 ## F1 — Database schema design
@@ -340,7 +340,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 
 **Goal:** storyboard sheet → single ~15s video with audio. No merge.
 
-- [ ] fal.ai provider adapter (submit + poll Seedance 2.0)
+- [ ] Ark provider adapter (submit + poll Seedance 2.0)
 - [ ] Skill: **Video Builder** — send full storyboard sheet → ~15s video w/ audio
 - [ ] Download result to Supabase Storage; insert `videos` + `assets`
 - [ ] Surface final video in results view
@@ -372,4 +372,4 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 
 ### 2026-05-30
 
-- SPEC.md created — architecture, data model, integrations (OpenAI + fal.ai + Supabase), mode behavior, and feature checklists F0–F8 captured. No application code yet.
+- SPEC.md created — architecture, data model, integrations (OpenAI + Ark/Seedance + Supabase), mode behavior, and feature checklists F0–F8 captured. No application code yet.

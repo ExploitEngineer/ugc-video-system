@@ -46,14 +46,14 @@ packages/shared   @ugc/shared — types/schemas shared by web + api
 
 Once built, the system is:
 
-- **Agents as code, not a framework.** A Creative Direction Agent (orchestrator) interprets the requested ad style, propagates it downstream, and drives a run state machine. Image Agent (OpenAI GPT Image 2) produces reference/storyboard sheets; Critic Agent (OpenAI vision) validates and triggers regeneration; Video Agent (fal.ai Seedance 2.0) turns the full storyboard sheet into the final video. Each "skill" = a prompt module + a function.
-- **Provider adapter boundary:** all OpenAI/fal calls live behind `apps/api/src/providers/{openai,fal}` so models are swappable without touching agent logic.
+- **Agents as code, not a framework.** A Creative Direction Agent (orchestrator) interprets the requested ad style, propagates it downstream, and drives a run state machine. Image Agent (OpenAI GPT Image 2) produces reference/storyboard sheets; Critic Agent (OpenAI vision) validates and triggers regeneration; Video Agent (Volcengine/BytePlus Ark Seedance 2.0) turns the full storyboard sheet into the final video. Each "skill" = a prompt module + a function.
+- **Provider adapter boundary:** all OpenAI/Ark calls live behind `apps/api/src/providers/{openai,ark}` so models are swappable without touching agent logic.
 - **Execution = background worker + polling.** A Hono route enqueues a `run`; an in-process worker loop in `apps/api` advances it step-by-step. The `runs` DB row is the authoritative state machine, so a refresh never loses progress. Frontend polls a status endpoint.
 - **Two run modes:** `automatic` (no gating) and `confirm` (pauses at `awaiting_confirmation` after each step). Critic auto-checks run in **both** modes.
 - **Persistence:** Drizzle over Supabase Postgres; files in Supabase Storage (DB rows hold path + URL); Zod validates every API route using the shared schemas.
 - **Hard non-goals:** no per-scene video generation, no separate audio step, no merge step, one output video per run. Seedance produces the single final video with native audio.
 
-Config/secrets are Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`.
+Config/secrets are Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `ARK_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`.
 
 ## Relevant skills
 
