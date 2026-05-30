@@ -218,11 +218,11 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 
 ## 6. External Integrations
 
-| Service      | Used for                                                                               | Client                                       | Key (env)                                                                        |
-| ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
-| **OpenAI**   | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **Ark** (Volcengine / BytePlus) | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)         | Ark REST (OpenAI-compatible client)          | `ARK_API_KEY`                                                                    |
-| **Supabase** | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
+| Service                         | Used for                                                                               | Client                                       | Key (env)                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| **OpenAI**                      | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
+| **Ark** (Volcengine / BytePlus) | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | Ark REST (OpenAI-compatible client)          | `ARK_API_KEY`                                                                    |
+| **Supabase**                    | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
 **Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,ark}`) so the concrete model/provider is swappable without touching agent logic.
 
@@ -272,11 +272,11 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 
 - [x] Add deps: `zod` (shared + api), `drizzle-orm` + `drizzle-kit` + `postgres` (api), `@supabase/supabase-js` (api), `zustand` + `framer-motion` (web)
 - [x] Per-app env files: `apps/api/.env(.example)` holds server secrets (`OPENAI_API_KEY`, `ARK_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`); `apps/web/.env.local(.example)` holds public-only `NEXT_PUBLIC_*` (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Real files gitignored, `.example` pushed.
-- [ ] `apps/api/src/config` — load + Zod-validate server env (fail fast on missing secrets)
-- [ ] `apps/web` public env handling (only `NEXT_PUBLIC_*` exposed)
-- [ ] Shared enums/types (run status, step, asset kind, mode) in `packages/shared` as Zod schemas + inferred types
-- [ ] Provider adapter stubs: `apps/api/src/providers/{openai,ark}` interfaces
-- [ ] Confirm `pnpm dev`, `typecheck`, `lint` still green
+- [x] `apps/api/src/config` — load + Zod-validate server env (fail fast on missing secrets)
+- [x] `apps/web` public env handling (only `NEXT_PUBLIC_*` exposed)
+- [x] Shared enums/types (run status, step, asset kind, mode, artifact status) in `packages/shared` as Zod schemas + inferred types
+- [x] Provider adapter stubs: `apps/api/src/providers/{openai,ark}` interfaces
+- [x] Confirm `pnpm dev`, `typecheck`, `lint` still green
 
 ## F1 — Database schema design
 
@@ -373,3 +373,4 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 ### 2026-05-30
 
 - SPEC.md created — architecture, data model, integrations (OpenAI + Ark/Seedance + Supabase), mode behavior, and feature checklists F0–F8 captured. No application code yet.
+- **F0 complete.** Deps added (`zod`, `drizzle-orm`/`drizzle-kit`/`postgres`, `@supabase/supabase-js`, `dotenv` on api; `zustand`/`framer-motion` on web). Per-app env files (`apps/api/.env(.example)` server secrets, `apps/web/.env.local(.example)` `NEXT_PUBLIC_*` only); real files gitignored. Video provider switched **fal.ai → Volcengine/BytePlus Ark** (`ARK_API_KEY`) across SPEC + CLAUDE.md. Built: `apps/api/src/config` (Zod env, fail-fast), `apps/web/src/lib/env.ts` (public-only), shared Zod enums (`packages/shared/src/enums.ts`), provider stubs `apps/api/src/providers/{openai,ark}`. typecheck + lint + api boot all green.

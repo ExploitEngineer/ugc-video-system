@@ -2,10 +2,5 @@
 
 export const APP_NAME = "ugc-video-system";
 
-export interface Video {
-  id: string;
-  title: string;
-  url: string;
-  status: "pending" | "processing" | "ready" | "failed";
-  createdAt: string;
-}
+// Run state-machine enums (Zod schemas + inferred types).
+export * from "./enums.js";
