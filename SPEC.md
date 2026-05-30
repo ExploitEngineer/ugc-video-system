@@ -243,15 +243,15 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | Service                         | Used for                                                                               | Client                                       | Key (env)                                                                        |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
 | **OpenAI**                      | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **BytePlus / ModelArk**         | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | REST (`/api/v3/contents/generations/tasks`)  | `BYTEPLUS_API_KEY` (default), `MODELARK_API_KEY` (when `VIDEO_PROVIDER=modelark`) |
+| **BytePlus**                    | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | REST (`/api/v3/contents/generations/tasks`)  | `BYTEPLUS_API_KEY`                                                                |
 | **Supabase**                    | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
-**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus,modelark}`) so the concrete model/provider is swappable without touching agent logic. `VIDEO_PROVIDER` (default `byteplus`) selects the video adapter; both speak the same `/api/v3/contents/generations/tasks` REST shape.
+**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus}`) so the concrete model/provider is swappable without touching agent logic. BytePlus is the sole video provider; it speaks the `/api/v3/contents/generations/tasks` REST shape.
 
 **Invocation shape:**
 
 - GPT Image 2 — Image Agent builds a prompt (via LLM skill) → image generation call → store composite sheet to Supabase Storage → row in `assets` + artifact table.
-- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a video task to the selected provider (BytePlus / ModelArk), polls until complete, downloads the ~15s video to Supabase Storage.
+- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a video task to BytePlus, polls until complete, downloads the ~15s video to Supabase Storage.
 
 ---
 
@@ -273,7 +273,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Open questions**
 
 - Exact OpenAI model id/endpoint mapped to "GPT Image 2", and whether a reference "sheet" is **one composite image** (multiple views in a grid) vs several separate images. **Assumption:** one composite sheet image per artifact.
-- Exact **Seedance 2.0 model slug/endpoint** for the chosen provider (BytePlus / ModelArk), whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
+- Exact **Seedance 2.0 model slug/endpoint** on BytePlus, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
 - Agent runtime: OpenAI Responses/Chat + tool-calling vs Assistants API; how "skills" map to code. **Assumption:** each skill = a prompt module + a function, orchestrated in code by the Creative Direction Agent.
 - Worker host: in-process loop vs separate queue process (pg-boss/BullMQ). **Assumption:** in-process loop in `apps/api` through F7.
 - Regeneration **retry caps / cost guards** — max auto-regens per step before failing the run.
@@ -289,7 +289,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 
 ## F0 — Project scaffolding & config — **Done**
 
-Deps added (`zod`, `drizzle-orm`/`drizzle-kit`/`postgres`, `@supabase/supabase-js`, `dotenv` on api; `framer-motion` on web). Per-app env files (`apps/api/.env(.example)` server secrets, `apps/web/.env.local(.example)` `NEXT_PUBLIC_*` only); real files gitignored. `apps/api/src/config` Zod-validates server env (fail-fast); `apps/web` exposes only public vars. Shared Zod enums in `packages/shared`. Provider adapter stubs under `apps/api/src/providers/{openai, byteplus, modelark}`. `pnpm dev`/`typecheck`/`lint` green.
+Deps added (`zod`, `drizzle-orm`/`drizzle-kit`/`postgres`, `@supabase/supabase-js`, `dotenv` on api; `framer-motion` on web). Per-app env files (`apps/api/.env(.example)` server secrets, `apps/web/.env.local(.example)` `NEXT_PUBLIC_*` only); real files gitignored. `apps/api/src/config` Zod-validates server env (fail-fast); `apps/web` exposes only public vars. Shared Zod enums in `packages/shared`. Provider adapter stubs under `apps/api/src/providers/{openai, byteplus}`. `pnpm dev`/`typecheck`/`lint` green.
 
 ## F1 — Database schema design — **Done**
 
@@ -313,7 +313,7 @@ Critic Agent under `apps/api/src/agents/critic/`. Two skills, each a single-pass
 
 ## F6 — Video Generation Agent + Video Builder (Seedance 2.0) — **Done (code; live verification pending)**
 
-Video Agent under `apps/api/src/agents/video/`. Provider boundary generalized: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the default adapter** (`providers/byteplus/index.ts`); **ModelArk** (`providers/modelark/index.ts`) is the alternate — both speak the same `POST /api/v3/contents/generations/tasks` REST shape (Bearer key, body `{model, content:[text,image_url], duration, resolution:"720p", ratio:"16:9", generate_audio:true}`) and poll mapping `succeeded→completed`, `failed|cancelled|expired→failed`. `createVideoProvider()` factory in `providers/index.ts` switches on `VIDEO_PROVIDER` (default `byteplus`). **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet URL + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `VIDEO_PROVIDER`, `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`, optional `MODELARK_API_KEY`/`MODELARK_BASE_URL`, `ARK_POLL_INTERVAL_MS`/`ARK_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
+Video Agent under `apps/api/src/agents/video/`. Provider boundary: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the sole adapter** (`providers/byteplus/index.ts`) — `POST /api/v3/contents/generations/tasks` (Bearer key, body `{model, content:[text,image_url], duration, resolution:"720p", aspect_ratio:"16:9", generate_audio:true}`), polling maps `succeeded→completed`, `failed|cancelled|expired→failed`. `createVideoProvider()` in `providers/index.ts` returns the BytePlus provider. **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet URL + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`/`BYTEPLUS_POLL_INTERVAL_MS`/`BYTEPLUS_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
 
 ## F7 — Creative Direction Agent orchestration + modes — **Done (code; live end-to-end pending)**
 
@@ -329,9 +329,9 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 
 ### 2026-05-31
 
-- **Video provider switch: Ark/RunComfy → BytePlus + ModelArk.** Removed the `providers/ark` and `providers/runcomfy` adapters; added `providers/byteplus` (default) and `providers/modelark` (alternate), both implementing the shared `VideoProvider` interface against the same `POST /api/v3/contents/generations/tasks` REST shape (Seedance 2.0, `generate_audio:true`). `createVideoProvider()` switches on `VIDEO_PROVIDER` (`byteplus` | `modelark`, default `byteplus`). Config env renamed `ARK_API_KEY` → `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL` (+ optional `MODELARK_API_KEY`/`MODELARK_BASE_URL`); poll knobs retained. Docs: `apps/api/docs/video-providers.md`.
+- **Video provider switch: Ark/RunComfy → BytePlus (sole provider).** Removed the `providers/ark` and `providers/runcomfy` adapters; added `providers/byteplus` implementing the shared `VideoProvider` interface against the `POST /api/v3/contents/generations/tasks` REST shape (Seedance 2.0, `generate_audio:true`). `createVideoProvider()` returns the BytePlus provider — no fallbacks/alternates. Config env renamed `ARK_API_KEY` → `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`/`BYTEPLUS_POLL_INTERVAL_MS`/`BYTEPLUS_POLL_TIMEOUT_MS`. Docs: `apps/api/docs/video-providers.md`.
 - **Agent prompt + UI refinements.** Iterated image/critic/video/CDA prompt modules and assorted web UI components (landing, studio create form, run views, shadcn primitives); studio form sub-components (`image-dropzone`, `mode-toggle-field`, `prompt-field`) folded back into `create-run-form`.
-- **SPEC cleanup.** Replaced the F0–F8 `- [ ]` checklists with a prose **Build Status** section; corrected provider naming throughout (Ark → BytePlus/ModelArk) in the architecture, integrations, and data-model sections. Live OpenAI/BytePlus end-to-end verification (F4–F7) still outstanding.
+- **SPEC cleanup.** Replaced the F0–F8 `- [ ]` checklists with a prose **Build Status** section; corrected provider naming throughout (Ark → BytePlus) in the architecture, integrations, and data-model sections. Live OpenAI/BytePlus end-to-end verification (F4–F7) still outstanding.
 
 
 ### 2026-05-30
