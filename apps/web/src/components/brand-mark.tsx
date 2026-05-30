@@ -25,7 +25,9 @@ export function BrandMark({
         </svg>
       </span>
       {withWordmark && (
-        <span className="text-lg font-semibold tracking-tight">Adverra</span>
+        <span className="text-display text-lg leading-none font-bold tracking-tight">
+          Adverra
+        </span>
       )}
     </span>
   );

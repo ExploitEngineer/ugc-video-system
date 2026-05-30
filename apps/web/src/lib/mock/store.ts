@@ -77,15 +77,13 @@ function interpretAdStyle(prompt: string): string {
   return "cinematic";
 }
 
-function buildPlan(hasPersonImage: boolean): Step[] {
+function buildPlan(hasPersonImage: boolean, criticEnabled: boolean): Step[] {
   const plan: Step[] = ["product_sheet"];
   if (hasPersonImage) plan.push("person_sheet");
-  plan.push(
-    "product_inspection",
-    "storyboard",
-    "storyboard_inspection",
-    "video",
-  );
+  if (criticEnabled) plan.push("product_inspection");
+  plan.push("storyboard");
+  if (criticEnabled) plan.push("storyboard_inspection");
+  plan.push("video");
   return plan;
 }
 
@@ -151,7 +149,7 @@ function goToNext(run: MockRun, ts: number) {
 /** Create a queued run; returns its id. */
 export function createRun(input: CreateRunInput): string {
   const id = randomUUID();
-  const plan = buildPlan(input.hasPersonImage);
+  const plan = buildPlan(input.hasPersonImage, input.criticEnabled);
   const ts = nowIso();
   const detail: RunDetail = {
     id,
@@ -159,6 +157,7 @@ export function createRun(input: CreateRunInput): string {
     prompt: input.prompt,
     adStyle: interpretAdStyle(input.prompt),
     mode: input.mode,
+    criticEnabled: input.criticEnabled,
     status: "queued",
     currentStep: plan[0],
     error: null,

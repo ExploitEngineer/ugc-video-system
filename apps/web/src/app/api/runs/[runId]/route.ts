@@ -1,8 +1,9 @@
 // Poll target for the run progress view. TanStack Query hits this on an
-// interval; each call advances the mock state machine one tick and returns
-// the current `RunDetail`. In F3 this handler proxies the Hono API instead.
+// interval; this handler proxies the Hono API's GET /runs/:id and forwards its
+// status (so a 404 still reaches the run view's not-found branch). The backend
+// worker advances run state — this is a read-only proxy.
 
-import { advanceRun } from "@/lib/mock/store";
+import { apiUrl } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,14 @@ export async function GET(
   { params }: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await params;
-  const detail = advanceRun(runId);
 
-  if (!detail) {
-    return Response.json({ error: "Run not found" }, { status: 404 });
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}`), { cache: "no-store" });
+    const body = await res
+      .json()
+      .catch(() => ({ error: "Bad response from API" }));
+    return Response.json(body, { status: res.status });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
   }
-  return Response.json(detail);
 }

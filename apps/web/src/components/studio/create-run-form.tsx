@@ -4,38 +4,50 @@ import type { Mode } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
+  ArrowUpIcon,
+  GaugeIcon,
   ImageIcon,
+  ListChecksIcon,
   Loader2Icon,
-  SparklesIcon,
+  ShieldCheckIcon,
+  ShieldOffIcon,
   UserIcon,
+  XIcon,
 } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { createRunAction } from "@/app/studio/actions";
-import { ImageDropzone } from "@/components/studio/image-dropzone";
-import { ModeToggleField } from "@/components/studio/mode-toggle-field";
-import { PromptField } from "@/components/studio/prompt-field";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { addRun } from "@/lib/run-history";
+import { cn } from "@/lib/utils";
+
+const MAX = 2000;
+const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
+const ACCEPT = ["image/png", "image/jpeg", "image/webp", "image/avif"];
 
 export function CreateRunForm() {
+  const router = useRouter();
   const [productFile, setProductFile] = useState<File | null>(null);
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<Mode>("automatic");
+  const [criticEnabled, setCriticEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
-  const canSubmit = Boolean(productFile) && prompt.trim().length > 0;
+  const canSubmit =
+    Boolean(productFile) && prompt.trim().length > 0 && !pending;
+
+  // Auto-grow the composer up to a cap, then scroll.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: prompt drives the resize; the ref isn't a dependency
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 260)}px`;
+  }, [prompt]);
 
   function submit() {
     setError(null);
@@ -53,103 +65,292 @@ export function CreateRunForm() {
     if (personFile) fd.set("personImage", personFile);
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
+    fd.set("criticEnabled", criticEnabled ? "true" : "false");
 
     startTransition(async () => {
       const result = await createRunAction(fd);
-      // On success the action redirects (throws), so we only get here on error.
-      if (result && !result.ok) setError(result.error);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      addRun({
+        id: result.runId,
+        prompt: prompt.trim(),
+        createdAt: new Date().toISOString(),
+      });
+      router.push(`/studio/${result.runId}`);
     });
   }
 
   return (
-    <Card className="ring-glow overflow-hidden">
-      <CardHeader>
-        <CardTitle className="text-xl">Create a run</CardTitle>
-        <CardDescription>
-          Upload a product image, describe the ad, and choose how the pipeline
-          runs.
-        </CardDescription>
-      </CardHeader>
+    <div className="flex flex-col gap-3">
+      <div className="ring-glow bg-card/80 focus-within:border-brand/50 relative flex flex-col gap-2 rounded-3xl border border-border/60 p-2.5 shadow-xl backdrop-blur transition-shadow">
+        <textarea
+          ref={taRef}
+          value={prompt}
+          maxLength={MAX}
+          rows={1}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter sends; Shift+Enter (or IME composition) inserts a newline.
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing
+            ) {
+              e.preventDefault();
+              if (canSubmit) submit();
+            }
+          }}
+          placeholder="Describe the ad you want to generate — hint a style if you like…"
+          className="placeholder:text-muted-foreground max-h-[260px] w-full resize-none bg-transparent px-3 pt-2.5 text-[15px] leading-relaxed outline-none"
+        />
 
-      <CardContent className="flex flex-col gap-7">
-        <div className="grid gap-5 sm:grid-cols-2">
-          <ImageDropzone
-            label="Product image"
-            file={productFile}
-            onFile={setProductFile}
-            required
-            hint="The hero of the ad"
-          />
-          <ImageDropzone
-            label="Person image"
-            file={personFile}
-            onFile={setPersonFile}
-            hint="Skip it — one will be generated"
-          />
-        </div>
+        <div className="flex items-end justify-between gap-2 px-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <AttachButton
+              label="Product"
+              icon={ImageIcon}
+              file={productFile}
+              onFile={setProductFile}
+              onError={setError}
+              required
+            />
+            <AttachButton
+              label="Person"
+              icon={UserIcon}
+              file={personFile}
+              onFile={setPersonFile}
+              onError={setError}
+            />
+            <ModeToggle value={mode} onChange={setMode} />
+            <CriticToggle value={criticEnabled} onChange={setCriticEnabled} />
+          </div>
 
-        <PromptField value={prompt} onChange={setPrompt} />
-
-        <ModeToggleField value={mode} onChange={setMode} />
-
-        <div className="flex flex-col gap-2">
-          <span className="text-muted-foreground text-xs font-medium">
-            Your selections
-          </span>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant={productFile ? "brand" : "outline"}>
-              <ImageIcon className="size-3" />
-              {productFile ? "Product added" : "No product"}
-            </Badge>
-            <Badge variant={personFile ? "secondary" : "outline"}>
-              <UserIcon className="size-3" />
-              {personFile ? "Person added" : "Person auto-generated"}
-            </Badge>
-            <Badge variant="secondary">
-              <SparklesIcon className="size-3" />
-              {mode === "automatic" ? "Automatic" : "Confirm every step"}
-            </Badge>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
+              {prompt.length}/{MAX}
+            </span>
+            <Button
+              type="button"
+              variant="brand"
+              size="icon"
+              className="size-9 rounded-full"
+              onClick={submit}
+              disabled={!canSubmit}
+              aria-label="Generate ad video"
+            >
+              {pending ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <ArrowUpIcon className="size-4" />
+              )}
+            </Button>
           </div>
         </div>
+      </div>
 
-        <AnimatePresence>
-          {error && (
-            <motion.div
+      <div className="flex min-h-5 items-center justify-between px-1">
+        <AnimatePresence mode="wait">
+          {error ? (
+            <motion.p
+              key="err"
               initial={{ opacity: 0, x: 0 }}
               animate={{ opacity: 1, x: [0, -6, 6, -4, 4, 0] }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4 }}
-              className="text-destructive flex items-center gap-2 text-sm"
+              className="text-destructive flex items-center gap-1.5 text-xs"
             >
-              <AlertCircleIcon className="size-4 shrink-0" />
+              <AlertCircleIcon className="size-3.5 shrink-0" />
               {error}
-            </motion.div>
+            </motion.p>
+          ) : (
+            <motion.p
+              key="hint"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="text-muted-foreground text-xs"
+            >
+              Press{" "}
+              <kbd className="bg-muted rounded px-1 py-0.5 font-mono text-[10px]">
+                Enter
+              </kbd>{" "}
+              to generate ·{" "}
+              <kbd className="bg-muted rounded px-1 py-0.5 font-mono text-[10px]">
+                Shift+Enter
+              </kbd>{" "}
+              for a new line
+            </motion.p>
           )}
         </AnimatePresence>
-      </CardContent>
+      </div>
+    </div>
+  );
+}
 
-      <Separator />
+/** Compact attach control — a chip that turns into a thumbnail once set. */
+function AttachButton({
+  label,
+  icon: Icon,
+  file,
+  onFile,
+  onError,
+  required = false,
+}: {
+  label: string;
+  icon: typeof ImageIcon;
+  file: File | null;
+  onFile: (f: File | null) => void;
+  onError: (msg: string | null) => void;
+  required?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
 
-      <CardFooter className="justify-end pt-0">
-        <Button
-          size="lg"
-          variant="brand"
-          onClick={submit}
-          disabled={!canSubmit || pending}
+  useEffect(() => {
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  function accept(next: File | null) {
+    onError(null);
+    if (!next) return onFile(null);
+    if (!ACCEPT.includes(next.type)) {
+      return onError("Use a PNG, JPEG, WebP, or AVIF image.");
+    }
+    if (next.size > MAX_BYTES) return onError("Image must be under 12 MB.");
+    onFile(next);
+  }
+
+  if (file && preview) {
+    return (
+      <span className="border-border/60 bg-background/60 group inline-flex items-center gap-1.5 rounded-full border py-0.5 pr-1 pl-1">
+        {/* biome-ignore lint/performance/noImgElement: object-URL preview, not a remote asset */}
+        <img
+          src={preview}
+          alt={`${label} preview`}
+          className="size-6 rounded-full object-cover"
+        />
+        <span className="text-xs font-medium">{label}</span>
+        <button
+          type="button"
+          onClick={() => {
+            accept(null);
+            if (inputRef.current) inputRef.current.value = "";
+          }}
+          aria-label={`Remove ${label} image`}
+          className="hover:bg-muted text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-full transition-colors"
         >
-          {pending ? (
-            <>
-              <Loader2Icon className="size-4 animate-spin" />
-              Starting run…
-            </>
-          ) : (
-            <>
-              <SparklesIcon className="size-4" />
-              Generate ad video
-            </>
-          )}
-        </Button>
-      </CardFooter>
-    </Card>
+          <XIcon className="size-3" />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT.join(",")}
+        className="sr-only"
+        onChange={(e) => accept(e.target.files?.[0] ?? null)}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-accent/40 inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium transition-colors"
+      >
+        <Icon className="size-3.5" />
+        {label}
+        {required && <span className="text-destructive">*</span>}
+      </button>
+    </>
+  );
+}
+
+/** Compact two-state run-mode segmented control. */
+function ModeToggle({
+  value,
+  onChange,
+}: {
+  value: Mode;
+  onChange: (m: Mode) => void;
+}) {
+  const opts: Array<{ value: Mode; label: string; icon: typeof GaugeIcon }> = [
+    { value: "automatic", label: "Auto", icon: GaugeIcon },
+    { value: "confirm", label: "Confirm", icon: ListChecksIcon },
+  ];
+  return (
+    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+      {opts.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={selected}
+            title={
+              opt.value === "automatic"
+                ? "Run end-to-end with no gating"
+                : "Pause after each step to confirm or regenerate"
+            }
+            className={cn(
+              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {selected && (
+              <motion.span
+                layoutId="mode-pill"
+                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              />
+            )}
+            <opt.icon className="size-3.5" />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Single-pill toggle for the Critic agent — on = QA + gating, off = faster. */
+function CriticToggle({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const Icon = value ? ShieldCheckIcon : ShieldOffIcon;
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      aria-pressed={value}
+      title={
+        value
+          ? "Critic agent on — inspects each artifact (slower, higher quality)"
+          : "Critic agent off — skips inspections (faster, no gating)"
+      }
+      className={cn(
+        "relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        value
+          ? "border-border/60 bg-accent text-foreground"
+          : "border-border/60 bg-background/40 text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon className="size-3.5" />
+      Critic
+    </button>
   );
 }

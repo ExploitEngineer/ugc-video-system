@@ -1,20 +1,17 @@
 "use server";
 
-// Run mutations as Next.js server actions. Create redirects into the run
-// view; confirm/reject/cancel mutate the mock store and return the fresh
-// detail so the client can prime its query cache. In F3 these call the Hono
-// API (POST /runs, /runs/:id/confirm, …) with the same external contract.
+// Run mutations as Next.js server actions. These run server-side (Node), so
+// they call the Hono API directly — no browser CORS. Create forwards the
+// multipart form to POST /runs and returns the new run id so the client can
+// record it in the sidebar history and navigate. Confirm/reject/cancel POST to
+// the gating routes and return the fresh RunDetail to prime the query cache.
 
 import { createRunInputSchema, type RunDetail } from "@ugc/shared";
-import { redirect } from "next/navigation";
-import {
-  cancelRun,
-  confirmStep,
-  createRun,
-  rejectStep,
-} from "@/lib/mock/store";
+import { apiUrl } from "@/lib/api";
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+export type ActionResult =
+  | { ok: true; runId: string }
+  | { ok: false; error: string };
 
 function hasFile(value: FormDataEntryValue | null): value is File {
   return value instanceof File && value.size > 0;
@@ -26,6 +23,7 @@ export async function createRunAction(
   const parsed = createRunInputSchema.safeParse({
     prompt: formData.get("prompt"),
     mode: formData.get("mode"),
+    criticEnabled: formData.get("criticEnabled") !== "false",
     hasPersonImage: hasFile(formData.get("personImage")),
   });
 
@@ -39,26 +37,58 @@ export async function createRunAction(
     return { ok: false, error: "A product image is required." };
   }
 
-  // Mock: we don't persist the uploaded bytes — only whether a person image
-  // was provided. F3 uploads both files to Supabase Storage here.
-  const id = createRun(parsed.data);
-  redirect(`/studio/${id}`);
+  try {
+    // Forward the FormData verbatim — fetch sets the multipart boundary, and
+    // the field names already match the api (productImage/personImage/…).
+    const res = await fetch(apiUrl("/runs"), {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      return { ok: false, error: body?.error ?? "Failed to start run." };
+    }
+    const detail = (await res.json()) as RunDetail;
+    return { ok: true, runId: detail.id };
+  } catch {
+    return {
+      ok: false,
+      error: "Could not reach the server. Is the API running?",
+    };
+  }
+}
+
+async function mutateRun(
+  runId: string,
+  action: "confirm" | "reject" | "cancel",
+): Promise<RunDetail | null> {
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}/${action}`), {
+      method: "POST",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as RunDetail;
+  } catch {
+    return null;
+  }
 }
 
 export async function confirmStepAction(
   runId: string,
 ): Promise<RunDetail | null> {
-  return confirmStep(runId);
+  return mutateRun(runId, "confirm");
 }
 
 export async function rejectStepAction(
   runId: string,
 ): Promise<RunDetail | null> {
-  return rejectStep(runId);
+  return mutateRun(runId, "reject");
 }
 
 export async function cancelRunAction(
   runId: string,
 ): Promise<RunDetail | null> {
-  return cancelRun(runId);
+  return mutateRun(runId, "cancel");
 }

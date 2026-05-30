@@ -1,18 +1,9 @@
 import type { RunDetail } from "@ugc/shared";
 import { ClapperboardIcon, GaugeIcon, ListChecksIcon } from "lucide-react";
 
-import { STATUS_LABEL } from "@/components/studio/run/run-meta";
+import { STATUS_DOT, STATUS_LABEL } from "@/components/studio/run/run-meta";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-const STATUS_DOT: Record<RunDetail["status"], string> = {
-  queued: "bg-muted-foreground",
-  running: "bg-brand animate-pulse",
-  awaiting_confirmation: "bg-amber-500",
-  regenerating: "bg-amber-500 animate-pulse",
-  completed: "bg-emerald-500",
-  failed: "bg-destructive",
-};
 
 export function RunHeader({ run }: { run: RunDetail }) {
   return (
@@ -37,9 +28,7 @@ export function RunHeader({ run }: { run: RunDetail }) {
       </div>
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Your ad run
-        </h1>
+        <h1 className="text-display text-2xl sm:text-3xl">Your ad run</h1>
         <p className="text-muted-foreground mt-1.5 max-w-2xl text-pretty">
           “{run.prompt}”
         </p>

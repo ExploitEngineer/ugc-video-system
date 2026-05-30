@@ -1,42 +1,50 @@
 "use client";
 
-import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
-export function ThemeToggle() {
-  const { setTheme } = useTheme();
+/** One-tap light↔dark switch with a morphing sun/moon. */
+export function ThemeToggle({ className }: { className?: string }) {
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // next-themes only knows the real theme client-side; avoid a hydration flash.
+  useEffect(() => setMounted(true), []);
+
+  const isDark = resolvedTheme === "dark";
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Toggle theme">
-          <SunIcon className="size-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
-          <MoonIcon className="absolute size-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
-          <span className="sr-only">Toggle theme</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
-          <SunIcon className="size-4" />
-          Light
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
-          <MoonIcon className="size-4" />
-          Dark
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
-          <MonitorIcon className="size-4" />
-          System
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      className={cn("relative overflow-hidden", className)}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {mounted && (
+          <motion.span
+            key={isDark ? "moon" : "sun"}
+            initial={{ opacity: 0, rotate: -90, scale: 0.4, y: 4 }}
+            animate={{ opacity: 1, rotate: 0, scale: 1, y: 0 }}
+            exit={{ opacity: 0, rotate: 90, scale: 0.4, y: -4 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="flex"
+          >
+            {isDark ? (
+              <MoonIcon className="size-4" />
+            ) : (
+              <SunIcon className="size-4" />
+            )}
+          </motion.span>
+        )}
+      </AnimatePresence>
+      <span className="sr-only">Toggle theme</span>
+    </Button>
   );
 }

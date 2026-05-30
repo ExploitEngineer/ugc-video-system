@@ -44,23 +44,25 @@ const FEATURES = [
 
 export function Features() {
   return (
-    <section id="features" className="scroll-mt-24 border-t">
+    <section id="features" className="scroll-mt-24 border-t border-border/60">
       <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6 lg:py-32">
         <Reveal className="max-w-2xl">
-          <p className="text-brand text-sm font-semibold">Features</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl lg:text-5xl">
+          <p className="text-brand text-sm font-semibold tracking-wide uppercase">
+            Features
+          </p>
+          <h2 className="text-display mt-3 text-3xl sm:text-4xl lg:text-5xl">
             Built around how the pipeline actually works
           </h2>
         </Reveal>
 
-        <RevealGroup className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <RevealItem key={f.title}>
-              <div className="bg-card hover:border-brand/40 group h-full rounded-2xl border p-6 transition-[transform,border-color,box-shadow] hover:-translate-y-0.5 hover:shadow-lg">
-                <div className="bg-accent text-accent-foreground group-hover:bg-brand-gradient group-hover:text-brand-foreground flex size-11 items-center justify-center rounded-xl transition-colors">
+              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.696_0.17_162/0.35)]">
+                <div className="bg-accent text-accent-foreground group-hover:bg-brand-gradient group-hover:text-brand-foreground flex size-12 items-center justify-center rounded-2xl transition-colors duration-300 group-hover:scale-105">
                   <f.icon className="size-5" />
                 </div>
-                <h3 className="mt-5 text-base font-semibold">{f.title}</h3>
+                <h3 className="text-display mt-5 text-lg">{f.title}</h3>
                 <p className="text-muted-foreground mt-2 text-sm text-pretty">
                   {f.body}
                 </p>

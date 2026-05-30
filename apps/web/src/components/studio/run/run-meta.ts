@@ -55,6 +55,14 @@ export function stepState(run: RunDetail, step: Step): StepState {
     return "skipped";
   }
 
+  // Critic inspections are dropped entirely when the critic is disabled.
+  if (
+    run.criticEnabled === false &&
+    (step === "product_inspection" || step === "storyboard_inspection")
+  ) {
+    return "skipped";
+  }
+
   if (idx === currentIdx) {
     if (run.status === "completed") return "done";
     if (run.status === "failed") return "failed";
@@ -76,6 +84,16 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
   regenerating: "Regenerating",
   completed: "Completed",
   failed: "Failed",
+};
+
+/** Tailwind classes for the colored status dot, shared by header + sidebar. */
+export const STATUS_DOT: Record<RunStatus, string> = {
+  queued: "bg-muted-foreground",
+  running: "bg-brand animate-pulse",
+  awaiting_confirmation: "bg-amber-500",
+  regenerating: "bg-amber-500 animate-pulse",
+  completed: "bg-emerald-500",
+  failed: "bg-destructive",
 };
 
 export function isTerminal(status: RunStatus) {

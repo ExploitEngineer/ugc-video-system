@@ -25,24 +25,33 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="bg-muted/30 scroll-mt-24 border-t">
-      <div className="mx-auto w-full max-w-6xl px-4 py-24 sm:px-6 lg:py-32">
+    <section
+      id="how-it-works"
+      className="bg-muted/30 relative scroll-mt-24 border-t border-border/60"
+    >
+      <div
+        aria-hidden
+        className="bg-grid pointer-events-none absolute inset-0"
+      />
+      <div className="relative mx-auto w-full max-w-6xl px-4 py-24 sm:px-6 lg:py-32">
         <Reveal className="max-w-2xl">
-          <p className="text-brand text-sm font-semibold">How it works</p>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl lg:text-5xl">
+          <p className="text-brand text-sm font-semibold tracking-wide uppercase">
+            How it works
+          </p>
+          <h2 className="text-display mt-3 text-3xl sm:text-4xl lg:text-5xl">
             From a single image to a finished ad in four moves
           </h2>
         </Reveal>
 
-        <RevealGroup className="mt-12 grid gap-5 sm:grid-cols-2">
+        <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2">
           {STEPS.map((step) => (
             <RevealItem key={step.n}>
-              <div className="bg-card flex h-full gap-5 rounded-2xl border p-6 transition-[transform,border-color,box-shadow] hover:-translate-y-0.5 hover:shadow-lg">
-                <span className="text-brand-gradient text-3xl font-bold tabular-nums">
+              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.696_0.17_162/0.35)]">
+                <span className="text-brand-gradient text-display text-5xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
                   {step.n}
                 </span>
                 <div>
-                  <h3 className="text-lg font-semibold">{step.title}</h3>
+                  <h3 className="text-display text-xl">{step.title}</h3>
                   <p className="text-muted-foreground mt-2 text-sm text-pretty">
                     {step.body}
                   </p>

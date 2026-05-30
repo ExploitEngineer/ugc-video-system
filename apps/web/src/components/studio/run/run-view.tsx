@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunDetail } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   ArrowRightIcon,
@@ -9,6 +8,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect } from "react";
 import { toast } from "sonner";
 
 import {
@@ -24,15 +24,10 @@ import { StepTimeline } from "@/components/studio/run/step-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fetchRun } from "@/lib/api";
+import { addRun } from "@/lib/run-history";
 
 const POLL_MS = 1500;
-
-async function fetchRun(runId: string): Promise<RunDetail> {
-  const res = await fetch(`/api/runs/${runId}`, { cache: "no-store" });
-  if (res.status === 404) throw new Error("not-found");
-  if (!res.ok) throw new Error("Failed to load run");
-  return res.json();
-}
 
 export function RunView({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
@@ -73,6 +68,14 @@ export function RunView({ runId }: { runId: string }) {
     onError: () => toast.error("Action failed — try again"),
   });
 
+  // Record this run in the sidebar history — covers both freshly-created runs
+  // and ones opened directly by URL. addRun is idempotent per id.
+  useEffect(() => {
+    if (run) {
+      addRun({ id: run.id, prompt: run.prompt, createdAt: run.createdAt });
+    }
+  }, [run]);
+
   if (isError && (error as Error).message === "not-found") {
     return (
       <Card>
@@ -81,8 +84,7 @@ export function RunView({ runId }: { runId: string }) {
           <div>
             <h2 className="font-semibold">Run not found</h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              This run doesn’t exist. Mock runs reset when the dev server
-              restarts.
+              This run doesn’t exist or has been removed.
             </p>
           </div>
           <Button asChild variant="brand">

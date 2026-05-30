@@ -4,8 +4,8 @@ import { BrandMark } from "@/components/brand-mark";
 
 export function SiteFooter() {
   return (
-    <footer className="border-t">
-      <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row sm:px-6">
+    <footer className="border-t border-border/60">
+      <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 py-10 sm:flex-row sm:px-6">
         <div className="flex flex-col items-center gap-2 sm:items-start">
           <BrandMark />
           <p className="text-muted-foreground text-sm">
