@@ -271,7 +271,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Goal:** add all missing deps and a validated config/secret layer on top of the existing monorepo.
 
 - [x] Add deps: `zod` (shared + api), `drizzle-orm` + `drizzle-kit` + `postgres` (api), `@supabase/supabase-js` (api), `zustand` + `framer-motion` (web)
-- [ ] `.env.example` at root with `OPENAI_API_KEY`, `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`
+- [x] Per-app env files: `apps/api/.env(.example)` holds server secrets (`OPENAI_API_KEY`, `FAL_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`); `apps/web/.env.local(.example)` holds public-only `NEXT_PUBLIC_*` (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`). Real files gitignored, `.example` pushed.
 - [ ] `apps/api/src/config` — load + Zod-validate server env (fail fast on missing secrets)
 - [ ] `apps/web` public env handling (only `NEXT_PUBLIC_*` exposed)
 - [ ] Shared enums/types (run status, step, asset kind, mode) in `packages/shared` as Zod schemas + inferred types
