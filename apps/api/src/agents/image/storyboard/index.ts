@@ -19,6 +19,8 @@ export interface StoryboardInput {
   /** Present whether the person was uploaded or generated. */
   personSheetRef?: ImageRef;
   userPrompt: string;
+  /** Critic feedback from a rejected prior attempt — steers a full regen (F5). */
+  critique?: string;
 }
 
 export async function storyboardGenerator(
@@ -30,6 +32,7 @@ export async function storyboardGenerator(
       adStyle: ctx.adStyle,
       userPrompt: input.userPrompt,
       hasPerson: Boolean(input.personSheetRef),
+      critique: input.critique,
     }),
   );
   const plan = parseJsonObject<StoryboardPlan>(reply);

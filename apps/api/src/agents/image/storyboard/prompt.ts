@@ -12,6 +12,8 @@ export interface StoryboardPromptInput {
   adStyle: string;
   userPrompt: string;
   hasPerson: boolean;
+  /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
+  critique?: string;
 }
 
 export interface StoryboardScene {
@@ -32,6 +34,7 @@ export function buildStoryboardPrompt({
   adStyle,
   userPrompt,
   hasPerson,
+  critique,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
 
@@ -84,6 +87,14 @@ export function buildStoryboardPrompt({
     "The reference sheets are attached in the image-generation step.",
     "Produce the composite storyboard sheet plan — exactly 4 panels, each with",
     "only a scene number, motion arrows, and one tiny caption.",
+    ...(critique?.trim()
+      ? [
+          "",
+          "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
+          "`imagePrompt` that fixes these issues while keeping everything else:",
+          critique.trim(),
+        ]
+      : []),
   ].join("\n");
 
   return [

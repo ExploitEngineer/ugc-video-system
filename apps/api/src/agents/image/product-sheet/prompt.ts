@@ -10,6 +10,8 @@ import type { ChatMessage } from "../../../providers/openai/index.js";
 export interface ProductSheetPromptInput {
   adStyle: string;
   userPrompt: string;
+  /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
+  critique?: string;
 }
 
 /** Shape the LLM must return as strict JSON. */
@@ -27,6 +29,7 @@ export interface ProductSheetPlan {
 export function buildProductSheetPrompt({
   adStyle,
   userPrompt,
+  critique,
 }: ProductSheetPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
 
@@ -78,6 +81,14 @@ export function buildProductSheetPrompt({
     "A product reference image is attached in the image-generation step.",
     "Produce the composite four-view product reference sheet plan — clean 2×2",
     "grid, images only, absolutely no text or labels baked into the image.",
+    ...(critique?.trim()
+      ? [
+          "",
+          "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
+          "`imagePrompt` that fixes these issues while keeping everything else:",
+          critique.trim(),
+        ]
+      : []),
   ].join("\n");
 
   return [

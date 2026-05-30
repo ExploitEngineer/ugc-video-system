@@ -17,6 +17,8 @@ export interface ProductSheetInput {
   /** The uploaded product image (public URL or data URI). */
   productUpload: ImageRef;
   userPrompt: string;
+  /** Critic feedback from a rejected prior attempt — steers a full regen (F5). */
+  critique?: string;
 }
 
 export async function productSheetBuilder(
@@ -24,7 +26,11 @@ export async function productSheetBuilder(
   input: ProductSheetInput,
 ): Promise<SkillResult<ProductReferenceSheet>> {
   const reply = await ctx.openai.chat(
-    buildProductSheetPrompt({ adStyle: ctx.adStyle, userPrompt: input.userPrompt }),
+    buildProductSheetPrompt({
+      adStyle: ctx.adStyle,
+      userPrompt: input.userPrompt,
+      critique: input.critique,
+    }),
   );
   const plan = parseJsonObject<ProductSheetPlan>(reply);
 
