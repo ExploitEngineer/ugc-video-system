@@ -50,6 +50,7 @@ export const runSchema = z.object({
   prompt: z.string(),
   adStyle: z.string(),
   mode: modeSchema,
+  criticEnabled: z.boolean(),
   status: runStatusSchema,
   currentStep: stepSchema,
   error: z.string().nullable(),
@@ -73,6 +74,7 @@ export type RunDetail = z.infer<typeof runDetailSchema>;
 export const createRunInputSchema = z.object({
   prompt: z.string().trim().min(1, "Prompt is required").max(2000),
   mode: modeSchema,
+  criticEnabled: z.boolean(),
   hasPersonImage: z.boolean(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
