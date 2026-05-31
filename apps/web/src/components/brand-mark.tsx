@@ -2,33 +2,28 @@ import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 
-/** Adverra logo: a play-triangle inside a rounded gradient aperture. */
+/**
+ * Adverra logo — pure typographic wordmark in the grotesk display face.
+ * Distinctive detail: a tight-tracked lockup whose trailing "a" carries the
+ * indigo → fuchsia brand gradient, plus an accented terminal dot. No icon box.
+ */
 export function BrandMark({
   className,
-  withWordmark = true,
   href = "/",
 }: {
   className?: string;
-  withWordmark?: boolean;
   href?: string | null;
 }) {
   const mark = (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <span className="bg-brand-gradient relative flex size-8 items-center justify-center rounded-[0.6rem] shadow-sm">
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          className="size-4 text-white"
-          fill="currentColor"
-        >
-          <path d="M9 7.5v9a1 1 0 0 0 1.52.86l7.2-4.5a1 1 0 0 0 0-1.72l-7.2-4.5A1 1 0 0 0 9 7.5Z" />
-        </svg>
-      </span>
-      {withWordmark && (
-        <span className="text-display text-lg leading-none font-bold tracking-tight">
-          Adverra
-        </span>
+    <span
+      className={cn(
+        "text-display inline-flex items-baseline text-lg leading-none font-bold tracking-tight select-none",
+        className,
       )}
+    >
+      <span className="text-foreground">Adverr</span>
+      <span className="text-brand-gradient">a</span>
+      <span className="bg-brand-gradient ml-0.5 size-1.5 self-end rounded-full" />
     </span>
   );
 

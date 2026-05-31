@@ -58,7 +58,7 @@ export function Features() {
         <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <RevealItem key={f.title}>
-              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.696_0.17_162/0.35)]">
+              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.58_0.22_277/0.35)]">
                 <div className="bg-accent text-accent-foreground group-hover:bg-brand-gradient group-hover:text-brand-foreground flex size-12 items-center justify-center rounded-2xl transition-colors duration-300 group-hover:scale-105">
                   <f.icon className="size-5" />
                 </div>

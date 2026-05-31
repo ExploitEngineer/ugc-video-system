@@ -78,7 +78,7 @@ export function SiteHeader() {
         className={cn(
           "mx-auto flex items-center justify-between gap-4 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
           scrolled
-            ? "h-14 max-w-3xl rounded-full border border-border/60 px-3 pr-2.5 shadow-[0_10px_40px_-12px_oklch(0.18_0.02_165/0.28)] backdrop-blur-xl backdrop-saturate-150 ring-glow [background:color-mix(in_oklch,var(--card)_72%,transparent)]"
+            ? "h-14 max-w-3xl rounded-full border border-border/60 px-3 pr-2.5 shadow-[0_10px_40px_-12px_oklch(0.06_0.02_285/0.5)] backdrop-blur-xl backdrop-saturate-150 ring-glow [background:color-mix(in_oklch,var(--card)_72%,transparent)]"
             : "h-16 max-w-6xl rounded-none border-b border-transparent px-4 sm:px-6",
         )}
       >

@@ -41,7 +41,7 @@ export function PipelineSection() {
         <RevealGroup className="mt-14 grid gap-5 md:grid-cols-3">
           {STAGES.map((stage, i) => (
             <RevealItem key={stage.title}>
-              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.696_0.17_162/0.4)]">
+              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.58_0.22_277/0.4)]">
                 <div
                   aria-hidden
                   className="bg-brand/10 pointer-events-none absolute -top-16 -right-16 size-40 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100"

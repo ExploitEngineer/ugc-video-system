@@ -46,7 +46,7 @@ export function HowItWorks() {
         <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2">
           {STEPS.map((step) => (
             <RevealItem key={step.n}>
-              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.696_0.17_162/0.35)]">
+              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.58_0.22_277/0.35)]">
                 <span className="text-brand-gradient text-display text-5xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
                   {step.n}
                 </span>

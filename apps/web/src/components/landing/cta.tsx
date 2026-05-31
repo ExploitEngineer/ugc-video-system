@@ -18,6 +18,7 @@ export function CtaBand() {
               aria-hidden
               className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-white/20 blur-3xl"
             />
+            <div aria-hidden className="noise-overlay absolute inset-0" />
             <h2 className="text-display text-brand-foreground relative text-4xl sm:text-5xl">
               Make your first ad video
             </h2>

@@ -32,6 +32,8 @@ export function Hero() {
         aria-hidden
         className="bg-brand-3/20 pointer-events-none absolute -top-10 right-0 size-[24rem] rounded-full blur-3xl"
       />
+      {/* Film grain for cinematic depth. */}
+      <div aria-hidden className="noise-overlay absolute inset-0" />
 
       <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-4 py-24 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:py-32">
         <div>
