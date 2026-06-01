@@ -16,8 +16,10 @@ export interface VideoBuilderInput {
    * into the clip); the plan reaches the model via `scenes` text instead.
    */
   storyboardSheetRef: ImageRef;
-  /** Optional person/product reference sheets sent as Seedance image references. */
+  /** Optional non-face reference sheets (e.g. product) sent as plain image references. */
   referenceImages?: ImageRef[];
+  /** Optional person/face reference sheets — registered as BytePlus face assets. */
+  personReferences?: ImageRef[];
   /** Scene metadata from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   userPrompt: string;
@@ -71,6 +73,8 @@ export async function videoBuilder(
     const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
     const task = await ctx.video.submitVideo({
       referenceImages: input.referenceImages?.map((r) => r.source),
+      personReferences: input.personReferences?.map((r) => r.source),
+      referenceTag: ctx.runId,
       prompt,
       durationSec,
     });

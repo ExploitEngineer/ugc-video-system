@@ -16,6 +16,7 @@ const serverEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1),
 
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
+  // The `ark-` key authenticates VIDEO GENERATION (inference) only.
   BYTEPLUS_API_KEY: z.string().min(1),
   BYTEPLUS_BASE_URL: z
     .string()
@@ -24,6 +25,22 @@ const serverEnvSchema = z.object({
   BYTEPLUS_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-260128"),
   BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
+
+  // BytePlus asset management (real-human/face assets) — OpenAPI, AK/SK-signed.
+  // SEPARATE from the `ark-` key above. Required ONLY to register faces so
+  // Seedance's face filter accepts them (see docs/byteplus-face-assets.md);
+  // when absent the video flow falls back to raw image_url URLs. Optional so
+  // the server still boots before the user adds these.
+  BYTEPLUS_ACCESS_KEY: z.string().optional(),
+  BYTEPLUS_SECRET_KEY: z.string().optional(),
+  BYTEPLUS_REGION: z.string().default("ap-southeast-1"),
+  // Reuse ONE asset group across runs; auto-created + logged once if unset.
+  BYTEPLUS_ASSET_GROUP_ID: z.string().optional(),
+  // BytePlus asset-management OpenAPI (verified live: open.byteplusapi.com,
+  // service "ark", version "2024-01-01"; region from BYTEPLUS_REGION).
+  BYTEPLUS_OPENAPI_HOST: z.string().default("open.byteplusapi.com"),
+  BYTEPLUS_ASSET_SERVICE: z.string().default("ark"),
+  BYTEPLUS_ASSET_API_VERSION: z.string().default("2024-01-01"),
 
   // Supabase — Postgres (Drizzle), Storage, Auth (F8)
   SUPABASE_URL: z.string().url(),

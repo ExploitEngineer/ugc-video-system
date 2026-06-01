@@ -16,8 +16,17 @@ export interface SubmitVideoInput {
    * arrows and captions would otherwise be animated into the final clip.
    */
   firstFrame?: string;
-  /** Person/product reference sheet URLs sent as identity/style guidance. */
+  /** Non-face reference sheet URLs (e.g. product) sent as plain image guidance. */
   referenceImages?: string[];
+  /**
+   * Face/person reference URLs. These trip Seedance's real-human face filter
+   * when sent raw, so the BytePlus adapter registers them as assets first and
+   * references them as `asset://<id>` with role "reference_image". Falls back
+   * to a raw image_url when asset-management creds are absent.
+   */
+  personReferences?: string[];
+  /** Stable name prefix for idempotent asset reuse across regen/resume (runId). */
+  referenceTag?: string;
 }
 
 export interface VideoTask {

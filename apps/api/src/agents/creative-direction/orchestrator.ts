@@ -187,17 +187,19 @@ async function executeStep(
     case "video": {
       const storyboard = await latestStoryboardSheet(runId);
       if (!storyboard) throw new Error("no storyboard sheet for video");
-      // Person/product reference sheets → Seedance image references (style guidance).
+      // Product sheet → plain image reference. Person/face sheet → registered
+      // as a BytePlus face asset (asset://) so Seedance's face filter accepts it.
       const product = await latestProductSheet(runId);
       const personSheetRef = await resolvePersonRef(runId, personUpload);
-      const referenceImages = [
-        product ? ({ source: product.assetUrl } as ImageRef) : null,
-        personSheetRef,
-      ].filter((r): r is ImageRef => r != null);
+      const referenceImages = product
+        ? [{ source: product.assetUrl } as ImageRef]
+        : [];
+      const personReferences = personSheetRef ? [personSheetRef] : [];
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
         referenceImages,
+        personReferences,
         scenes: (storyboard.scenes ?? []) as StoryboardScene[],
         userPrompt,
       });
