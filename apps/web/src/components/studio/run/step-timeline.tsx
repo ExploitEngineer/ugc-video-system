@@ -14,9 +14,9 @@ import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import {
   STEP_LABEL,
   STEP_ORDER,
-  STEP_SUBLABEL,
   type StepState,
   stepState,
+  stepSublabel,
 } from "@/components/studio/run/run-meta";
 import { cn } from "@/lib/utils";
 
@@ -213,7 +213,7 @@ export function StepTimeline({ run }: { run: RunDetail }) {
                 <StatusPill state={state} />
               </div>
               <p className="text-muted-foreground mt-1 text-xs">
-                {STEP_SUBLABEL[step]}
+                {stepSublabel(step)}
               </p>
 
               {showAsset && asset && (

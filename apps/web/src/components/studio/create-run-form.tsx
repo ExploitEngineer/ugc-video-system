@@ -347,18 +347,18 @@ function CriticToggle({
       aria-pressed={value}
       title={
         value
-          ? "Critic agent on — inspects each artifact (slower, higher quality)"
-          : "Critic agent off — skips inspections (faster, no gating)"
+          ? "Critic agent ON — inspects each artifact and can fail the run (slower, higher quality). Click to turn off."
+          : "Critic agent OFF — skips all inspections, never fails on quality (faster). Click to turn on."
       }
       className={cn(
         "relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
         value
-          ? "border-border/60 bg-accent text-foreground"
+          ? "border-brand/40 bg-brand/10 text-brand"
           : "border-border/60 bg-background/40 text-muted-foreground hover:text-foreground",
       )}
     >
       <Icon className="size-3.5" />
-      Critic
+      Critic {value ? "on" : "off"}
     </button>
   );
 }

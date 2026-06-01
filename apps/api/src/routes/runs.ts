@@ -14,7 +14,7 @@ import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
 import { toAssetDto, toRunDto } from "../lib/mappers.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
-import { uploadAsset } from "../lib/storage.js";
+import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
 
 const ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -217,4 +217,24 @@ runs.post("/:id/cancel", async (c) => {
   }
 
   return c.json(await loadRunDetail(id));
+});
+
+// ── DELETE /runs/:id — permanently remove a run and everything it owns ──
+// Wipes the run's stored files (uploads, sheets, final video) and the run
+// row; the FK `onDelete: cascade` removes its assets, step_events, and the
+// product/person/storyboard/video artifact rows. Storage cleanup runs first
+// and is best-effort — if it fails we still delete the DB rows so the chat
+// disappears (a stray storage object is harmless vs. an undeletable chat).
+runs.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+  await getRunOr404(id); // 404 if it doesn't exist
+
+  try {
+    await deleteRunObjects(id);
+  } catch (err) {
+    console.error(`[runs] storage cleanup failed for ${id}:`, err);
+  }
+
+  await db.delete(schema.runs).where(eq(schema.runs.id, id));
+  return c.json({ ok: true, id });
 });

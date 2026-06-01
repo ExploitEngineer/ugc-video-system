@@ -30,6 +30,7 @@ export async function storyboardGenerator(
   const reply = await ctx.openai.chat(
     buildStoryboardPrompt({
       adStyle: ctx.adStyle,
+      adType: ctx.adType,
       userPrompt: input.userPrompt,
       hasPerson: Boolean(input.personSheetRef),
       critique: input.critique,

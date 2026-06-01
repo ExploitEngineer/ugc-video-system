@@ -15,6 +15,7 @@
 // thing that may touch these rows; the public anon key gets zero access.
 
 import type {
+  AdType,
   ArtifactStatus,
   AssetKind,
   Mode,
@@ -22,6 +23,7 @@ import type {
   Step,
 } from "@ugc/shared";
 import {
+  adTypeSchema,
   assetKindSchema,
   artifactStatusSchema,
   modeSchema,
@@ -62,6 +64,10 @@ export const modeEnum = pgEnum(
   "mode",
   modeSchema.options as [Mode, ...Mode[]],
 );
+export const adTypeEnum = pgEnum(
+  "ad_type",
+  adTypeSchema.options as [AdType, ...AdType[]],
+);
 export const artifactStatusEnum = pgEnum(
   "artifact_status",
   artifactStatusSchema.options as [ArtifactStatus, ...ArtifactStatus[]],
@@ -89,6 +95,7 @@ export const runs = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     prompt: text("prompt").notNull(), // raw user prompt
     adStyle: text("ad_style"), // interpreted style propagated to agents
+    adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
     mode: modeEnum("mode").notNull(),
     criticEnabled: boolean("critic_enabled").notNull().default(true),
     status: runStatusEnum("status").notNull().default("queued"),
@@ -207,7 +214,7 @@ export const storyboardSheets = pgTable(
     assetId: uuid("asset_id")
       .notNull()
       .references(() => assets.id, { onDelete: "cascade" }),
-    scenes: jsonb("scenes"), // [{ index, cameraAngle, actionMovement, sceneDescription, adStyle }]
+    scenes: jsonb("scenes"), // [{ index, cameraAngle, actionMovement, sceneDescription, transcript, adStyle }]
     promptUsed: text("prompt_used"),
     status: artifactStatusEnum("status").notNull().default("draft"),
   },

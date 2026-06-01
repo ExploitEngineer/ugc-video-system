@@ -11,16 +11,18 @@ import { buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
   /**
-   * Approved storyboard sheet — kept for provenance only. It is NOT sent to the
-   * video provider as an image (its panel numbers/arrows/captions would leak
-   * into the clip); the plan reaches the model via `scenes` text instead.
+   * The clean storyboard sheet (no baked-in text/numbers/arrows). It IS sent to
+   * the video provider as the sole guidance image — the product/person
+   * reference sheets are NOT sent; identity reaches the model through these
+   * keyframes plus the `scenes` text and `transcript`s.
    */
   storyboardSheetRef: ImageRef;
-  /** Optional non-face reference sheets (e.g. product) sent as plain image references. */
-  referenceImages?: ImageRef[];
-  /** Optional person/face reference sheets — registered as BytePlus face assets. */
-  personReferences?: ImageRef[];
-  /** Scene metadata from the storyboard_sheets row. */
+  /**
+   * Whether the ad features a person. When true the storyboard is routed
+   * through the face-asset path so Seedance's real-human face filter accepts it.
+   */
+  hasPerson: boolean;
+  /** Scene metadata (incl. transcripts) from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   userPrompt: string;
   /** Target duration in seconds (~15). */
@@ -36,13 +38,13 @@ type Video = typeof schema.videos.$inferSelect;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Video Builder skill — compose an LLM motion prompt from the storyboard
- * scenes (text plan) and send it to Seedance 2.0 (via the injected video
- * provider) together with the clean product/person reference sheets for
- * identity. The annotated storyboard sheet is NOT sent as an image, so its
- * panel numbers, arrows and captions never leak into the clip. Poll until
- * ready, download, and persist `assets` (final_video) + `videos`. Final output
- * of the pipeline; no merge step.
+ * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
+ * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
+ * injected video provider) together with the CLEAN storyboard sheet as the sole
+ * guidance image. The storyboard now carries no baked-in text/numbers/arrows,
+ * so it is safe to send and grounds the model's framing; the product/person
+ * reference sheets are NOT sent. Poll until ready, download, and persist
+ * `assets` (final_video) + `videos`. Final output of the pipeline; no merge step.
  */
 export async function videoBuilder(
   ctx: SkillContext,
@@ -53,9 +55,10 @@ export async function videoBuilder(
   await writeStepEvent({ runId: ctx.runId, step: "video", status: "started" });
 
   try {
-    // 1. Compose the cinematic motion/audio prompt from the scenes.
+    // 1. Compose the cinematic motion/audio prompt from the scenes + transcripts.
     const messages = buildVideoPrompt({
       adStyle: ctx.adStyle,
+      adType: ctx.adType,
       userPrompt: input.userPrompt,
       scenes: input.scenes,
       durationSec,
@@ -67,13 +70,15 @@ export async function videoBuilder(
       throw new Error("LLM returned an empty videoPrompt");
     }
 
-    // 2. Submit to the video provider. The storyboard is conveyed as the TEXT
-    // plan only; identity comes from the clean product/person reference sheets.
-    // No storyboard image is sent, so no grid/numbers/arrows leak into the clip.
-    const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
+    // 2. Submit to the video provider. The CLEAN storyboard sheet is the sole
+    // guidance image (no product/person sheets); the scenes + transcripts ride
+    // in the text prompt. When the ad has a person, route the storyboard
+    // through the face-asset path so Seedance's face filter accepts it.
+    const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. The attached storyboard image is a set of keyframes to follow for framing and action; treat it as direction, NOT as something to reproduce on screen. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. ${videoPrompt}`;
+    const storyboardUrl = input.storyboardSheetRef.source;
     const task = await ctx.video.submitVideo({
-      referenceImages: input.referenceImages?.map((r) => r.source),
-      personReferences: input.personReferences?.map((r) => r.source),
+      referenceImages: input.hasPerson ? [] : [storyboardUrl],
+      personReferences: input.hasPerson ? [storyboardUrl] : [],
       referenceTag: ctx.runId,
       prompt,
       durationSec,
@@ -106,9 +111,22 @@ export async function videoBuilder(
 
     // 4. Download the mp4. Pass any auth headers the provider supplied
     // (Seedance's video_url is directly fetchable, so this is usually empty).
-    const res = await fetch(result.videoUrl, {
-      headers: result.downloadHeaders,
-    });
+    // Retry transient network blips so a flaky download doesn't waste the
+    // already-generated (paid) clip.
+    let res: Response | undefined;
+    let lastErr = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        res = await fetch(result.videoUrl, { headers: result.downloadHeaders });
+        break;
+      } catch (err) {
+        const cause = (err as { cause?: { code?: string; message?: string } })
+          .cause;
+        lastErr = cause?.code ?? cause?.message ?? (err as Error).message;
+        if (attempt < 3) await sleep(800 * attempt);
+      }
+    }
+    if (!res) throw new Error(`failed to download video: ${lastErr}`);
     if (!res.ok) {
       throw new Error(`failed to download video: ${res.status}`);
     }

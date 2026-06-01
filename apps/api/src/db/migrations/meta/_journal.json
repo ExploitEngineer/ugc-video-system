@@ -15,6 +15,13 @@
       "when": 1780177336042,
       "tag": "0001_nappy_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780347356258,
+      "tag": "0002_fearless_pandemic",
+      "breakpoints": true
     }
   ]
 }

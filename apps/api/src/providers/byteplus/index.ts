@@ -5,10 +5,11 @@
 // Seedance runs async: POST a generation task → poll the task id → video_url.
 // Native audio is requested via `generate_audio: true` (Seedance 2.0 feature).
 //
-// Generation is driven by the text prompt + the clean product/person reference
-// sheets (`referenceImages`). An optional clean first frame may also be passed;
-// the annotated storyboard sheet is deliberately NOT sent as an image, so its
-// panel numbers, arrows and captions never bleed into the clip.
+// Generation is driven by the text prompt + the clean storyboard keyframe sheet
+// passed as a guidance image — via `referenceImages` (no person) or
+// `personReferences` (with a person, so it clears Seedance's face filter). The
+// caller sends a storyboard with no baked-in text/numbers/arrows, so nothing
+// bleeds into the clip.
 
 import { env } from "../../config/index.js";
 import { ensureFaceAsset, isAssetMgmtConfigured } from "./assets.js";
@@ -55,14 +56,34 @@ function mapState(status: string): VideoTaskState {
 }
 
 async function bytePlusFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(`${env.BYTEPLUS_BASE_URL}/api/v3${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env.BYTEPLUS_API_KEY}`,
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
+  const url = `${env.BYTEPLUS_BASE_URL}/api/v3${path}`;
+  const headers = {
+    Authorization: `Bearer ${env.BYTEPLUS_API_KEY}`,
+    "Content-Type": "application/json",
+    ...init?.headers,
+  };
+
+  // Retry transient network failures (the bare "fetch failed" / connection
+  // reset / timeout that undici throws) a few times before giving up — a single
+  // blip on the submit or a poll shouldn't kill a whole video run. A thrown
+  // fetch never reached the server, so retrying is safe.
+  let res: Response | undefined;
+  let lastDetail = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      res = await fetch(url, { ...init, headers });
+      break;
+    } catch (err) {
+      const cause = (err as { cause?: { code?: string; message?: string } })
+        .cause;
+      lastDetail = cause?.code ?? cause?.message ?? (err as Error).message;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 800 * attempt));
+    }
+  }
+  if (!res) {
+    throw new Error(`BytePlus ${path} request failed: ${lastDetail}`);
+  }
+
   const text = await res.text();
   if (!res.ok) {
     throw new Error(
@@ -75,14 +96,14 @@ async function bytePlusFetch(path: string, init?: RequestInit): Promise<unknown>
 export function createBytePlusProvider(): VideoProvider {
   return {
     async submitVideo(input: SubmitVideoInput): Promise<VideoTask> {
-      // content[] = text prompt, then (optional) clean first frame, then the
-      // product reference sheet(s), then the registered face asset(s). The
-      // annotated storyboard sheet is intentionally never included.
+      // content[] = text prompt, then (optional) clean first frame, then any
+      // plain image refs, then the registered face asset(s). Callers pass the
+      // clean storyboard sheet here (as a plain ref or a face asset).
       const content: ContentPart[] = [{ type: "text", text: input.prompt }];
       if (input.firstFrame) {
         content.push(imagePart(input.firstFrame, "first_frame"));
       }
-      // Non-face refs (product) — passed as plain image URLs.
+      // Non-face refs — passed as plain image URLs.
       for (const url of input.referenceImages ?? []) {
         content.push(imagePart(url));
       }

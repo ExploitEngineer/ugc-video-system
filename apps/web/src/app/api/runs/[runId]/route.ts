@@ -23,3 +23,24 @@ export async function GET(
     return Response.json({ error: "API unreachable" }, { status: 502 });
   }
 }
+
+// Permanently delete a run (and all its stored files + DB rows) via the API.
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ runId: string }> },
+) {
+  const { runId } = await params;
+
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}`), {
+      method: "DELETE",
+      cache: "no-store",
+    });
+    const body = await res
+      .json()
+      .catch(() => ({ error: "Bad response from API" }));
+    return Response.json(body, { status: res.status });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
+  }
+}

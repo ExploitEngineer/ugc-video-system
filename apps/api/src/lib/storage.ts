@@ -69,3 +69,30 @@ export async function uploadAsset({
 export function getPublicUrl(storagePath: string): string {
   return supabase.storage.from(BUCKET).getPublicUrl(storagePath).data.publicUrl;
 }
+
+/**
+ * Delete every stored object for a run — all uploads + generated sheets +
+ * the final video live under the flat `runs/{runId}/` prefix. Best-effort:
+ * lists the folder and removes what's there (a run has only a handful of
+ * objects, well under the list page size).
+ */
+export async function deleteRunObjects(runId: string): Promise<void> {
+  const prefix = `runs/${runId}`;
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .list(prefix, { limit: 1000 });
+  if (error) {
+    throw internal(`Storage list failed for run ${runId}: ${error.message}`);
+  }
+  if (!data || data.length === 0) return;
+
+  const paths = data.map((obj) => `${prefix}/${obj.name}`);
+  const { error: removeError } = await supabase.storage
+    .from(BUCKET)
+    .remove(paths);
+  if (removeError) {
+    throw internal(
+      `Storage delete failed for run ${runId}: ${removeError.message}`,
+    );
+  }
+}

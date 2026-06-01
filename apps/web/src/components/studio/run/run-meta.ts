@@ -20,14 +20,29 @@ export const STEP_LABEL: Record<Step, string> = {
   video: "Final ad video",
 };
 
-export const STEP_SUBLABEL: Record<Step, string> = {
-  product_sheet: "Image agent · GPT Image 2",
-  person_sheet: "Image agent · GPT Image 2",
-  product_inspection: "Critic agent · vision",
-  storyboard: "Image agent · storyboard",
-  storyboard_inspection: "Critic agent · vision",
-  video: "Video agent · Kling 3.0",
+/** The skill + agent responsible for each step — surfaced live in the UI. */
+export interface StepAgent {
+  skill: string;
+  agent: string;
+}
+
+export const STEP_AGENT: Record<Step, StepAgent> = {
+  product_sheet: { skill: "Product Sheet Builder", agent: "Image Agent" },
+  person_sheet: { skill: "Person Sheet Builder", agent: "Image Agent" },
+  product_inspection: { skill: "Product Inspection", agent: "Critic Agent" },
+  storyboard: { skill: "Storyboard", agent: "Image Agent" },
+  storyboard_inspection: {
+    skill: "Storyboard Inspection",
+    agent: "Critic Agent",
+  },
+  video: { skill: "Video Builder", agent: "Video Agent" },
 };
+
+/** `"<skill> · <agent>"` — the timeline sublabel for a step. */
+export function stepSublabel(step: Step): string {
+  const { skill, agent } = STEP_AGENT[step];
+  return `${skill} · ${agent}`;
+}
 
 export type StepState =
   | "pending"
@@ -37,6 +52,26 @@ export type StepState =
   | "done"
   | "failed"
   | "skipped";
+
+/**
+ * The step currently executing — the one with a `started` event but no
+ * terminal (`passed`/`failed`) event yet. `currentStep` on the run is the LAST
+ * COMPLETED step, so it can't tell us what's running; step events can.
+ * Returns null when the run isn't actively working a step.
+ */
+export function activeStep(run: RunDetail): Step | null {
+  if (run.status !== "running" && run.status !== "regenerating") return null;
+  for (const step of STEP_ORDER) {
+    const events = run.stepEvents.filter((e) => e.step === step);
+    if (events.length === 0) continue;
+    const started = events.some((e) => e.status === "started");
+    const ended = events.some(
+      (e) => e.status === "passed" || e.status === "failed",
+    );
+    if (started && !ended) return step;
+  }
+  return null;
+}
 
 /** Resolve the display state of a single step from the run detail. */
 export function stepState(run: RunDetail, step: Step): StepState {
@@ -63,6 +98,13 @@ export function stepState(run: RunDetail, step: Step): StepState {
     return "skipped";
   }
 
+  // The genuinely in-flight step (derived from step events, not currentStep)
+  // shows live — this is what makes the long-running video step read as
+  // "Generating" instead of jumping straight to done.
+  if (step === activeStep(run)) {
+    return run.status === "regenerating" ? "regenerating" : "active";
+  }
+
   if (idx === currentIdx) {
     if (run.status === "completed") return "done";
     if (run.status === "failed") return "failed";
@@ -74,6 +116,11 @@ export function stepState(run: RunDetail, step: Step): StepState {
   if (idx < currentIdx || (hasPassed && run.status === "completed")) {
     return "done";
   }
+
+  // Steps already passed but not yet behind currentStep (e.g. while a later
+  // step is in flight) should read as done, not pending.
+  if (hasPassed) return "done";
+
   return "pending";
 }
 

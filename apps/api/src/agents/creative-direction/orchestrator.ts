@@ -76,6 +76,7 @@ function buildCtx(run: RunRow): SkillContext {
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
+    adType: run.adType ?? "ugc",
     openai,
     video,
   };
@@ -187,19 +188,16 @@ async function executeStep(
     case "video": {
       const storyboard = await latestStoryboardSheet(runId);
       if (!storyboard) throw new Error("no storyboard sheet for video");
-      // Product sheet → plain image reference. Person/face sheet → registered
-      // as a BytePlus face asset (asset://) so Seedance's face filter accepts it.
-      const product = await latestProductSheet(runId);
-      const personSheetRef = await resolvePersonRef(runId, personUpload);
-      const referenceImages = product
-        ? [{ source: product.assetUrl } as ImageRef]
-        : [];
-      const personReferences = personSheetRef ? [personSheetRef] : [];
+      // The video model receives ONLY the clean storyboard image + the scene
+      // descriptions and transcripts (text). The product/person reference
+      // sheets are NOT sent — they were inputs to the storyboard step. When the
+      // ad has a person, videoBuilder routes the storyboard through the
+      // face-asset path so Seedance's face filter accepts it.
+      const hasPerson = Boolean(await resolvePersonRef(runId, personUpload));
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
-        referenceImages,
-        personReferences,
+        hasPerson,
         scenes: (storyboard.scenes ?? []) as StoryboardScene[],
         userPrompt,
       });
@@ -221,9 +219,16 @@ export async function driveRun(runId: string): Promise<void> {
     const ctx = buildCtx(run);
     logRun(runId, "▶ interpreting ad style …");
     try {
-      const { adStyle } = await interpretAdStyle(ctx, { userPrompt: run.prompt });
-      await setRun(runId, { adStyle, status: "running", currentStep: null });
-      logRun(runId, `ad style: "${adStyle}"`);
+      const { adStyle, adType } = await interpretAdStyle(ctx, {
+        userPrompt: run.prompt,
+      });
+      await setRun(runId, {
+        adStyle,
+        adType,
+        status: "running",
+        currentStep: null,
+      });
+      logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`);
     } catch (err) {
       await failRun(runId, null, err);
       return;
