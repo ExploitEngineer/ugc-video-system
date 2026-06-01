@@ -46,13 +46,13 @@ const PILL: Record<StepState, { label: string; cls: string; dot: string }> = {
   },
   regenerating: {
     label: "Regenerating",
-    cls: "border-amber-500/40 bg-amber-500/10 text-amber-500",
-    dot: "bg-amber-500 animate-pulse",
+    cls: "border-warning/40 bg-warning/10 text-warning",
+    dot: "bg-warning animate-pulse",
   },
   done: {
     label: "Passed",
-    cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
-    dot: "bg-emerald-500",
+    cls: "border-success/30 bg-success/10 text-success",
+    dot: "bg-success",
   },
   failed: {
     label: "Failed",
@@ -106,12 +106,7 @@ function Indicator({ state, n }: { state: StepState; n: number }) {
       );
     case "regenerating":
       return (
-        <span
-          className={cn(
-            base,
-            "border-amber-500 text-amber-500 bg-amber-500/10",
-          )}
-        >
+        <span className={cn(base, "border-warning text-warning bg-warning/10")}>
           <Loader2Icon className="size-4 animate-spin" />
         </span>
       );

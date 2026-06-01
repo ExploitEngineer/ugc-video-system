@@ -90,9 +90,9 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
 export const STATUS_DOT: Record<RunStatus, string> = {
   queued: "bg-muted-foreground",
   running: "bg-brand animate-pulse",
-  awaiting_confirmation: "bg-amber-500",
-  regenerating: "bg-amber-500 animate-pulse",
-  completed: "bg-emerald-500",
+  awaiting_confirmation: "bg-warning",
+  regenerating: "bg-warning animate-pulse",
+  completed: "bg-success",
   failed: "bg-destructive",
 };
 

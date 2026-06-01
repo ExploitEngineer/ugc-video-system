@@ -33,7 +33,7 @@ export function HowItWorks() {
         aria-hidden
         className="bg-grid pointer-events-none absolute inset-0"
       />
-      <div className="relative mx-auto w-full max-w-6xl px-4 py-24 sm:px-6 lg:py-32">
+      <div className="relative mx-auto w-full max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
         <Reveal className="max-w-2xl">
           <p className="text-brand text-sm font-semibold tracking-wide uppercase">
             How it works
@@ -46,7 +46,7 @@ export function HowItWorks() {
         <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2">
           {STEPS.map((step) => (
             <RevealItem key={step.n}>
-              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.58_0.22_277/0.35)]">
+              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.6_0.16_250/0.35)]">
                 <span className="text-brand-gradient text-display text-5xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
                   {step.n}
                 </span>

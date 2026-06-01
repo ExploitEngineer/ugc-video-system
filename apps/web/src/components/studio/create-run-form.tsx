@@ -26,11 +26,17 @@ const MAX = 2000;
 const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
 const ACCEPT = ["image/png", "image/jpeg", "image/webp", "image/avif"];
 
-export function CreateRunForm() {
+export function CreateRunForm({
+  initialPrompt = "",
+  autoFocus = false,
+}: {
+  initialPrompt?: string;
+  autoFocus?: boolean;
+}) {
   const router = useRouter();
   const [productFile, setProductFile] = useState<File | null>(null);
   const [personFile, setPersonFile] = useState<File | null>(null);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<Mode>("automatic");
   const [criticEnabled, setCriticEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +93,8 @@ export function CreateRunForm() {
       <div className="ring-glow bg-card/80 focus-within:border-brand/50 relative flex flex-col gap-2 rounded-3xl border border-border/60 p-2.5 shadow-xl backdrop-blur transition-shadow">
         <textarea
           ref={taRef}
+          // biome-ignore lint/a11y/noAutofocus: opt-in only, off by default
+          autoFocus={autoFocus}
           value={prompt}
           maxLength={MAX}
           rows={1}
@@ -128,7 +136,7 @@ export function CreateRunForm() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
+            <span className="text-muted-foreground hidden font-mono text-[11px] tabular-nums sm:inline">
               {prompt.length}/{MAX}
             </span>
             <Button

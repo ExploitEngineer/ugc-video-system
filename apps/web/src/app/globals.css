@@ -4,89 +4,122 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Design tokens — shadcn/ui contract in oklch, plus a distinctive brand
- * accent (indigo → violet → fuchsia) so the UI isn't default-zinc.
- * Dark-cinematic, dark-first: .dark is the primary/most-polished mode.
- * Light values under :root, dark overrides under .dark. Mapped into
- * Tailwind v4 utilities via @theme inline below.
+ * Design tokens — shadcn/ui contract in oklch. Identity: "realistic studio"
+ * — a bluish near-black canvas, hairline borders, and one confident cyan
+ * accent over a tight cyan → blue ramp (near-solid, not a laser show).
+ * Dark-first: .dark is the primary, most-polished mode; :root is a clean
+ * cool-neutral light fallback. Mapped into Tailwind v4 utilities via
+ * @theme inline below.
  */
 :root {
-  --radius: 0.75rem;
+  --radius: 0.7rem;
 
-  --background: oklch(0.99 0.004 285);
-  --foreground: oklch(0.18 0.02 285);
+  --background: oklch(0.99 0.003 235);
+  --foreground: oklch(0.2 0.02 240);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 285);
+  --card-foreground: oklch(0.2 0.02 240);
 
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 285);
+  --popover-foreground: oklch(0.2 0.02 240);
 
-  --primary: oklch(0.51 0.23 277);
-  --primary-foreground: oklch(0.99 0.01 285);
+  /* Cyan accent, deepened for AA contrast on light surfaces. */
+  --primary: oklch(0.55 0.12 220);
+  --primary-foreground: oklch(0.99 0.01 220);
 
-  --secondary: oklch(0.965 0.012 285);
-  --secondary-foreground: oklch(0.26 0.03 285);
+  --secondary: oklch(0.965 0.005 235);
+  --secondary-foreground: oklch(0.26 0.02 240);
 
-  --muted: oklch(0.97 0.008 285);
-  --muted-foreground: oklch(0.5 0.03 285);
+  --muted: oklch(0.97 0.004 235);
+  --muted-foreground: oklch(0.5 0.02 240);
 
-  --accent: oklch(0.95 0.04 293);
-  --accent-foreground: oklch(0.3 0.08 285);
+  --accent: oklch(0.95 0.03 215);
+  --accent-foreground: oklch(0.35 0.07 230);
 
   --destructive: oklch(0.58 0.22 27);
   --destructive-foreground: oklch(0.98 0.01 27);
 
-  --border: oklch(0.915 0.012 285);
-  --input: oklch(0.915 0.012 285);
-  --ring: oklch(0.51 0.23 277);
+  /* Semantic status — green / amber, AA on light surfaces. */
+  --success: oklch(0.58 0.14 150);
+  --success-foreground: oklch(0.99 0.01 150);
+  --warning: oklch(0.62 0.15 75);
+  --warning-foreground: oklch(0.99 0.01 75);
 
-  /* Brand gradient stops + surfaces — indigo → violet → fuchsia. */
-  --brand: oklch(0.58 0.22 277);
-  --brand-2: oklch(0.6 0.25 293);
-  --brand-3: oklch(0.64 0.26 322);
-  --brand-foreground: oklch(0.99 0.01 285);
+  --border: oklch(0.9 0.006 235);
+  --input: oklch(0.9 0.006 235);
+  --ring: oklch(0.55 0.12 220);
 
-  --chart-1: oklch(0.58 0.22 277);
-  --chart-2: oklch(0.6 0.25 293);
-  --chart-3: oklch(0.64 0.26 322);
-  --chart-4: oklch(0.62 0.24 308);
-  --chart-5: oklch(0.55 0.24 264);
+  /* Brand accent + a tight cyan → blue ramp (low chroma, near-solid). */
+  --brand: oklch(0.55 0.12 220);
+  --brand-2: oklch(0.6 0.13 235);
+  --brand-3: oklch(0.62 0.12 255);
+  --brand-foreground: oklch(0.99 0.01 220);
+
+  /* Scrim for dialogs / drawers; near-black media placeholder; CTA sheen. */
+  --overlay: oklch(0.2 0.02 240 / 0.45);
+  --media: oklch(0.12 0.005 235);
+  --sheen: oklch(1 0 0 / 0.25);
+
+  /* Card elevation on light surfaces. */
+  --shadow-elev:
+    0 1px 2px oklch(0.2 0.02 240 / 0.06), 0 8px 24px -12px
+    oklch(0.2 0.02 240 / 0.12);
+
+  --chart-1: oklch(0.55 0.12 220);
+  --chart-2: oklch(0.6 0.13 235);
+  --chart-3: oklch(0.62 0.12 255);
+  --chart-4: oklch(0.66 0.13 200);
+  --chart-5: oklch(0.5 0.1 270);
 }
 
 .dark {
-  --background: oklch(0.13 0.012 285);
-  --foreground: oklch(0.96 0.006 285);
+  --background: oklch(0.15 0.008 235);
+  --foreground: oklch(0.96 0.004 230);
 
-  --card: oklch(0.175 0.016 285);
-  --card-foreground: oklch(0.96 0.006 285);
+  --card: oklch(0.185 0.009 235);
+  --card-foreground: oklch(0.96 0.004 230);
 
-  --popover: oklch(0.175 0.016 285);
-  --popover-foreground: oklch(0.96 0.006 285);
+  --popover: oklch(0.185 0.009 235);
+  --popover-foreground: oklch(0.96 0.004 230);
 
-  --primary: oklch(0.62 0.23 277);
-  --primary-foreground: oklch(0.14 0.02 285);
+  /* Electric cyan — bright enough to read as text on near-black and to
+     carry a button fill with dark foreground text. */
+  --primary: oklch(0.8 0.13 205);
+  --primary-foreground: oklch(0.2 0.04 220);
 
-  --secondary: oklch(0.21 0.02 285);
-  --secondary-foreground: oklch(0.96 0.006 285);
+  --secondary: oklch(0.23 0.01 235);
+  --secondary-foreground: oklch(0.96 0.004 230);
 
-  --muted: oklch(0.19 0.015 285);
-  --muted-foreground: oklch(0.68 0.03 285);
+  --muted: oklch(0.215 0.01 235);
+  --muted-foreground: oklch(0.66 0.013 235);
 
-  --accent: oklch(0.26 0.06 293);
-  --accent-foreground: oklch(0.92 0.05 293);
+  --accent: oklch(0.26 0.03 215);
+  --accent-foreground: oklch(0.9 0.06 205);
 
   --destructive: oklch(0.66 0.2 25);
   --destructive-foreground: oklch(0.98 0.01 25);
 
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.62 0.23 277);
+  /* Semantic status — brighter on near-black. */
+  --success: oklch(0.75 0.15 155);
+  --success-foreground: oklch(0.2 0.04 155);
+  --warning: oklch(0.8 0.14 78);
+  --warning-foreground: oklch(0.22 0.04 78);
 
-  --brand: oklch(0.64 0.23 277);
-  --brand-2: oklch(0.66 0.25 293);
-  --brand-3: oklch(0.7 0.26 322);
-  --brand-foreground: oklch(0.14 0.02 285);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 11%);
+  --ring: oklch(0.8 0.13 205);
+
+  --brand: oklch(0.8 0.13 205);
+  --brand-2: oklch(0.74 0.14 225);
+  --brand-3: oklch(0.68 0.14 250);
+  --brand-foreground: oklch(0.2 0.04 220);
+
+  --overlay: oklch(0.1 0.01 235 / 0.6);
+  --media: oklch(0.1 0.005 235);
+  --sheen: oklch(1 0 0 / 0.22);
+
+  --shadow-elev:
+    0 1px 2px oklch(0 0 0 / 0.4), 0 16px 50px -22px oklch(0 0 0 / 0.7);
 }
 
 @theme inline {
@@ -106,6 +139,13 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-overlay: var(--overlay);
+  --color-media: var(--media);
+  --color-sheen: var(--sheen);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -124,6 +164,8 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-display);
+
+  --shadow-elev: var(--shadow-elev);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -145,7 +187,8 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* Fixed ambient page glow behind all content — layered brand stops. */
+  /* Quiet ambient backdrop — a single restrained cyan wash plus a neutral
+     top vignette. Cinematic-calm, not a laser show. */
   body::before {
     content: "";
     position: fixed;
@@ -154,58 +197,55 @@
     pointer-events: none;
     background:
       radial-gradient(
-        ellipse 70% 50% at 12% -5%,
-        oklch(0.6 0.25 293 / 0.1),
+        ellipse 80% 50% at 50% -8%,
+        oklch(0.55 0.12 220 / 0.05),
         transparent 60%
       ),
       radial-gradient(
-        ellipse 60% 50% at 92% 0%,
-        oklch(0.64 0.26 322 / 0.1),
+        ellipse 60% 40% at 88% 4%,
+        oklch(0.62 0.12 255 / 0.04),
         transparent 60%
-      ),
-      radial-gradient(
-        ellipse 90% 60% at 50% 0%,
-        oklch(0.58 0.22 277 / 0.14),
-        transparent 72%
       ), var(--background);
   }
 
   .dark body::before {
     background:
       radial-gradient(
-        ellipse 70% 50% at 12% -5%,
-        oklch(0.66 0.25 293 / 0.2),
+        ellipse 90% 55% at 50% -10%,
+        oklch(0.8 0.13 205 / 0.06),
+        transparent 62%
+      ),
+      radial-gradient(
+        ellipse 55% 45% at 90% 2%,
+        oklch(0.68 0.14 250 / 0.045),
         transparent 60%
       ),
       radial-gradient(
-        ellipse 60% 50% at 92% 0%,
-        oklch(0.7 0.26 322 / 0.18),
-        transparent 60%
-      ),
-      radial-gradient(
-        ellipse 90% 60% at 50% 0%,
-        oklch(0.58 0.22 277 / 0.24),
+        ellipse 70% 60% at 12% 8%,
+        oklch(0.5 0.02 235 / 0.5),
         transparent 70%
       ), var(--background);
   }
 
   ::selection {
-    background-color: color-mix(in oklch, var(--brand) 28%, transparent);
+    background-color: color-mix(in oklch, var(--brand) 30%, transparent);
+    color: var(--foreground);
   }
 }
 
+/* Accent text — near-solid cyan with a faint shimmer across the ramp. */
 @utility text-brand-gradient {
   background-image: linear-gradient(
     100deg,
     var(--brand) 0%,
-    var(--brand-2) 50%,
+    var(--brand-2) 55%,
     var(--brand-3) 100%
   );
   background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
-  animation: brand-pan 8s ease-in-out infinite alternate;
+  animation: brand-pan 9s ease-in-out infinite alternate;
 }
 
 @keyframes brand-pan {
@@ -224,23 +264,24 @@
   background-image: linear-gradient(
     100deg,
     var(--brand) 0%,
-    var(--brand-2) 55%,
+    var(--brand-2) 60%,
     var(--brand-3) 100%
   );
 }
 
 @utility glass-panel {
-  background: color-mix(in oklch, var(--card) 70%, transparent);
-  backdrop-filter: blur(12px) saturate(140%);
+  background: color-mix(in oklch, var(--card) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(135%);
 }
 
+/* Cyan focus/elevation halo for cards + composer. */
 @utility ring-glow {
   box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--brand) 22%, transparent),
-    0 18px 60px -20px color-mix(in oklch, var(--brand) 35%, transparent);
+    0 0 0 1px color-mix(in oklch, var(--brand) 20%, transparent),
+    0 20px 60px -28px color-mix(in oklch, var(--brand) 40%, transparent);
 }
 
-/* Editorial display type — headings + wordmark. */
+/* Editorial display type — headings + wordmark (Cabinet Grotesk). */
 @utility text-display {
   font-family: var(--font-display), var(--font-sans), sans-serif;
   font-weight: 700;
@@ -251,10 +292,10 @@
 /* Faint dot grid for section backdrops; fades with a radial mask. */
 @utility bg-grid {
   background-image: radial-gradient(
-    color-mix(in oklch, var(--foreground) 14%, transparent) 1px,
+    color-mix(in oklch, var(--foreground) 12%, transparent) 1px,
     transparent 1px
   );
-  background-size: 22px 22px;
+  background-size: 24px 24px;
   -webkit-mask-image: radial-gradient(
     ellipse 75% 70% at 50% 40%,
     #000,
@@ -270,8 +311,8 @@
     linear-gradient(var(--card), var(--card)) padding-box,
     linear-gradient(
       130deg,
-      color-mix(in oklch, var(--brand) 55%, transparent),
-      color-mix(in oklch, var(--brand-3) 40%, transparent) 55%,
+      color-mix(in oklch, var(--brand) 50%, transparent),
+      color-mix(in oklch, var(--brand-3) 35%, transparent) 55%,
       transparent
     )
     border-box;
@@ -286,7 +327,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.04;
+  opacity: 0.035;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
