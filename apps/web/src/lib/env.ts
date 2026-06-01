@@ -1,6 +1,6 @@
 // Public web env. ONLY `NEXT_PUBLIC_*` vars — these are inlined into the
 // browser bundle, so nothing secret may live here (no service-role key, no
-// OpenAI/Ark keys, no DATABASE_URL — those stay server-side in apps/api).
+// OpenAI/OpenRouter keys, no DATABASE_URL — those stay server-side in apps/api).
 //
 // Each var is accessed as a literal `process.env.NEXT_PUBLIC_*` so Next.js
 // statically replaces it at build time. A missing var throws at module load.

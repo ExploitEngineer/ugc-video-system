@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { RunDetail } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
-  ArrowRightIcon,
   CheckCircle2Icon,
+  SparklesIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -16,6 +17,7 @@ import {
   confirmStepAction,
   rejectStepAction,
 } from "@/app/studio/actions";
+import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { ConfirmBar } from "@/components/studio/run/confirm-bar";
 import { RunHeader } from "@/components/studio/run/run-header";
@@ -29,6 +31,20 @@ import { addRun } from "@/lib/run-history";
 
 const POLL_MS = 1500;
 
+// Stable module-level poller — poll while active; stop at terminal states
+// and while awaiting the user's confirm/reject (a mutation resumes it by
+// writing fresh data). Hoisted so its identity is stable across renders
+// (React Compiler does not memoize query-option closures).
+function runPollInterval(query: {
+  state: { data?: RunDetail };
+}): number | false {
+  const status = query.state.data?.status;
+  if (!status) return POLL_MS;
+  if (isTerminal(status)) return false;
+  if (status === "awaiting_confirmation") return false;
+  return POLL_MS;
+}
+
 export function RunView({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
   const queryKey = ["run", runId] as const;
@@ -41,15 +57,7 @@ export function RunView({ runId }: { runId: string }) {
   } = useQuery({
     queryKey,
     queryFn: () => fetchRun(runId),
-    // Poll while active; stop at terminal states and while awaiting the
-    // user's confirm/reject (a mutation resumes it by writing fresh data).
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (!status) return POLL_MS;
-      if (isTerminal(status)) return false;
-      if (status === "awaiting_confirmation") return false;
-      return POLL_MS;
-    },
+    refetchInterval: runPollInterval,
     retry: (count, err) => err.message !== "not-found" && count < 2,
   });
 
@@ -82,13 +90,13 @@ export function RunView({ runId }: { runId: string }) {
         <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
           <TriangleAlertIcon className="text-muted-foreground size-8" />
           <div>
-            <h2 className="font-semibold">Run not found</h2>
+            <h2 className="font-semibold">Chat not found</h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              This run doesn’t exist or has been removed.
+              This chat doesn’t exist or has been removed.
             </p>
           </div>
           <Button asChild variant="brand">
-            <Link href="/studio">Start a new run</Link>
+            <Link href="/studio">Start a new chat</Link>
           </Button>
         </CardContent>
       </Card>
@@ -102,8 +110,8 @@ export function RunView({ runId }: { runId: string }) {
         <Skeleton className="h-7 w-72" />
         <Card>
           <CardContent className="flex flex-col gap-6 py-6">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="flex gap-4">
+            {["a", "b", "c", "d"].map((k) => (
+              <div key={k} className="flex gap-4">
                 <Skeleton className="size-9 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-40" />
@@ -132,7 +140,7 @@ export function RunView({ runId }: { runId: string }) {
         >
           <div className="border-b p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
-              <CheckCircle2Icon className="size-4 text-emerald-500" />
+              <CheckCircle2Icon className="size-4 text-success" />
               Your ad video is ready
             </div>
           </div>
@@ -144,19 +152,14 @@ export function RunView({ runId }: { runId: string }) {
 
       {run.status === "failed" && (
         <Card className="border-destructive/40">
-          <CardContent className="flex items-center justify-between gap-4 py-5">
-            <div className="flex items-center gap-3">
-              <TriangleAlertIcon className="text-destructive size-5" />
-              <div>
-                <p className="text-sm font-medium">Run ended</p>
-                <p className="text-muted-foreground text-sm">
-                  {run.error ?? "The run was stopped."}
-                </p>
-              </div>
+          <CardContent className="flex items-center gap-3 py-5">
+            <TriangleAlertIcon className="text-destructive size-5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Run ended</p>
+              <p className="text-muted-foreground text-sm">
+                {run.error ?? "The run was stopped."}
+              </p>
             </div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/studio">Start again</Link>
-            </Button>
           </CardContent>
         </Card>
       )}
@@ -190,15 +193,22 @@ export function RunView({ runId }: { runId: string }) {
         </div>
       )}
 
-      {run.status === "completed" && (
-        <div className="flex justify-center">
-          <Button asChild variant="brand">
-            <Link href="/studio">
-              Create another
-              <ArrowRightIcon className="size-4" />
-            </Link>
-          </Button>
-        </div>
+      {isTerminal(run.status) && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          className="border-border/60 bg-card/40 rounded-2xl border p-4 backdrop-blur sm:p-5"
+        >
+          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <SparklesIcon className="text-brand size-4 shrink-0" />
+            <span className="font-medium">Start a new chat</span>
+            <span className="text-muted-foreground">
+              — tweak your prompt or try a new idea. Each run makes one video.
+            </span>
+          </div>
+          <CreateRunForm />
+        </motion.div>
       )}
     </div>
   );

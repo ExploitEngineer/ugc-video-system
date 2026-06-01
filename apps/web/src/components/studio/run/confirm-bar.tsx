@@ -22,7 +22,7 @@ export function ConfirmBar({
   const awaiting = run.status === "awaiting_confirmation";
 
   return (
-    <div className="bg-card/80 sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border p-4 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+    <div className="glass-panel sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border p-4 shadow-lg sm:flex-row sm:items-center sm:justify-between">
       <div className="text-sm">
         {awaiting ? (
           <>

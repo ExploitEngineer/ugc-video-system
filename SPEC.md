@@ -8,7 +8,7 @@
 
 Turns a **product image** (required) + an **optional person image** + a **text prompt** into a finished **~15-second advertisement video with audio**. The ad can be **any style** the user asks for — UGC, inspirational, cinematic, minimalist, luxury, comedic, etc. Agents read the user's intent and adapt; nothing assumes UGC.
 
-Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the **full storyboard sheet** to Seedance 2.0, which produces **one** video with audio — there is no per-scene video building, no separate audio step, and no merge step.
+Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the storyboard scene plan (as text) + the clean product/person reference sheets to Seedance 2.0 (via BytePlus), which produces **one** video with audio — there is no per-scene video building, no separate audio step, and no merge step.
 
 ---
 
@@ -58,7 +58,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 | **Creative Direction Agent** (orchestrator) | OpenAI (LLM)                                                        | Holds all guidelines + workflow logic. Decides agent order for both modes, interprets requested ad style, propagates it downstream, drives the run state machine, applies mode gating. |
 | **Image Generation Agent**                  | OpenAI — **GPT Image 2** for images, OpenAI LLM for prompt building | `Product Sheet Builder`, `Generate Person Image`, `StoryBoard Generator`                                                                                                               |
 | **Critic Agent** (QA/validation)            | OpenAI (LLM, vision)                                                | `Product Sheet Inspection` (full or localized partial regen), `StoryBoard Sheet Inspection`                                                                                            |
-| **Video Generation Agent**                  | **Volcengine / BytePlus Ark — Seedance 2.0**                        | `Video Builder`                                                                                                                                                                        |
+| **Video Generation Agent**                  | **BytePlus ModelArk — Seedance 2.0** (`dreamina-seedance-2-0-260128`) | `Video Builder`                                                                                                                                                                       |
 
 #### Skill detail
 
@@ -67,7 +67,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 - **StoryBoard Generator** — takes the product sheet (+ person sheet if present) → **Storyboard/Keyframe Sheet** of scenes, each with camera/angle, action/movement, scene description, consistent with the ad style.
 - **Product Sheet Inspection** — validates the product sheet; regenerates the whole sheet, or **only the localized part**, when the problem is local.
 - **StoryBoard Sheet Inspection** — validates the storyboard sheet; regenerates if problems.
-- **Video Builder** — sends the **full storyboard sheet** to Seedance 2.0 → final ~15s video with audio. Final output; no merge.
+- **Video Builder** — sends the storyboard scene plan (text) + clean product/person reference sheets to Seedance 2.0 (via BytePlus) → final ~15s video with audio. Final output; no merge.
 
 ### End-to-end flow
 
@@ -86,7 +86,7 @@ flowchart TD
     F --> SBS[(Storyboard Sheet)]
     SBS --> G["Critic Agent · StoryBoard Sheet Inspection"]
     G -- issues --> F
-    G -- ok --> H["Video Agent · Video Builder<br/>→ Ark Seedance 2.0"]
+    G -- ok --> H["Video Agent · Video Builder<br/>→ BytePlus Seedance 2.0"]
     H --> VID[(Final ~15s video w/ audio)]
 
     CDA -. confirm-every-step gating .-> B
@@ -224,7 +224,7 @@ Ordered scenes, each with camera/angle, action/movement, description, in the cho
 
 #### Final Video — `videos`
 
-Single ~15s clip with audio from Seedance 2.0. No merge.
+Single ~15s clip with audio from Seedance 2.0 (via BytePlus). No merge.
 
 | Field        | Type                             | Notes                                 |
 | ------------ | -------------------------------- | ------------------------------------- |
@@ -243,15 +243,15 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | Service                         | Used for                                                                               | Client                                       | Key (env)                                                                        |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
 | **OpenAI**                      | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **BytePlus**                    | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | REST (`/api/v3/contents/generations/tasks`)  | `BYTEPLUS_API_KEY`                                                                |
+| **BytePlus**                    | Seedance 2.0 video (storyboard plan + reference sheets → ~15s video w/ audio)          | REST (`POST /api/v3/contents/generations/tasks` async) | `BYTEPLUS_API_KEY`                                                      |
 | **Supabase**                    | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
-**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus}`) so the concrete model/provider is swappable without touching agent logic. BytePlus is the sole video provider; it speaks the `/api/v3/contents/generations/tasks` REST shape.
+**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus}`) so the concrete model/provider is swappable without touching agent logic. BytePlus is the sole video provider; it speaks the async `POST /api/v3/contents/generations/tasks` → poll task id REST shape.
 
 **Invocation shape:**
 
 - GPT Image 2 — Image Agent builds a prompt (via LLM skill) → image generation call → store composite sheet to Supabase Storage → row in `assets` + artifact table.
-- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a video task to BytePlus, polls until complete, downloads the ~15s video to Supabase Storage.
+- Seedance 2.0 — Video Builder submits the storyboard scene plan (text) + the clean product/person reference sheets (the annotated storyboard sheet is NOT sent as an image, so its panel numbers/arrows can't leak into the clip) as a video task to BytePlus, polls until complete, downloads the ~15s video to Supabase Storage.
 
 ---
 
@@ -273,7 +273,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Open questions**
 
 - Exact OpenAI model id/endpoint mapped to "GPT Image 2", and whether a reference "sheet" is **one composite image** (multiple views in a grid) vs several separate images. **Assumption:** one composite sheet image per artifact.
-- Exact **Seedance 2.0 model slug/endpoint** on BytePlus, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
+- Exact **Seedance 2.0 model slug/region** on BytePlus, whether it accepts multiple reference images (product + person sheets) alongside the text prompt, and confirmation of **native audio** output at the requested ~15s duration (resolved in code: `dreamina-seedance-2-0-260128`, async `POST /api/v3/contents/generations/tasks`, `generate_audio:true`; live run pending).
 - Agent runtime: OpenAI Responses/Chat + tool-calling vs Assistants API; how "skills" map to code. **Assumption:** each skill = a prompt module + a function, orchestrated in code by the Creative Direction Agent.
 - Worker host: in-process loop vs separate queue process (pg-boss/BullMQ). **Assumption:** in-process loop in `apps/api` through F7.
 - Regeneration **retry caps / cost guards** — max auto-regens per step before failing the run.
@@ -313,7 +313,7 @@ Critic Agent under `apps/api/src/agents/critic/`. Two skills, each a single-pass
 
 ## F6 — Video Generation Agent + Video Builder (Seedance 2.0) — **Done (code; live verification pending)**
 
-Video Agent under `apps/api/src/agents/video/`. Provider boundary: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the sole adapter** (`providers/byteplus/index.ts`) — `POST /api/v3/contents/generations/tasks` (Bearer key, body `{model, content:[text,image_url], duration, resolution:"720p", aspect_ratio:"16:9", generate_audio:true}`), polling maps `succeeded→completed`, `failed|cancelled|expired→failed`. `createVideoProvider()` in `providers/index.ts` returns the BytePlus provider. **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet URL + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`/`BYTEPLUS_POLL_INTERVAL_MS`/`BYTEPLUS_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
+Video Agent under `apps/api/src/agents/video/`. Provider boundary: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the sole adapter** (`providers/byteplus/index.ts`) — async `POST /api/v3/contents/generations/tasks` (Bearer key, body `{model, content:[text, image_url…], duration, resolution:"720p", aspect_ratio:"16:9", generate_audio:true}`) → `{id}`; polling `GET …/tasks/{id}` maps `succeeded→completed`, `failed|cancelled|expired→failed`, else `processing`, reading `content.video_url`. `createVideoProvider()` in `providers/index.ts` returns the BytePlus provider. **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes (text plan), submits the clean product/person reference sheets (the annotated storyboard sheet is NOT sent as an image — its panel numbers/arrows would leak into the clip) + prompt + optional clean first frame, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL` (`dreamina-seedance-2-0-260128`)/`BYTEPLUS_POLL_INTERVAL_MS`/`BYTEPLUS_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
 
 ## F7 — Creative Direction Agent orchestration + modes — **Done (code; live end-to-end pending)**
 
@@ -326,6 +326,12 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 ---
 
 ## Progress Log
+
+### 2026-06-01
+
+- **Video provider switch (reverted): OpenRouter Kling 3.0 → BytePlus Seedance 2.0 again.** Branch `feat/seedance-2.0`. The user is going back to **Seedance 2.0 via the official BytePlus provider** (proper Seedance setup details to follow). Surgical revert of the **API only** — web UI untouched. Restored `providers/byteplus/index.ts` (async `POST /api/v3/contents/generations/tasks` → poll task id → `content.video_url`, `generate_audio:true`), `createVideoProvider()` → BytePlus, config/env `OPENROUTER_*` → `BYTEPLUS_*` (`dreamina-seedance-2-0-260128`, base `https://ark.ap-southeast.bytepluses.com`), `hasAudio` default back to `true`, Seedance naming across CLAUDE.md/SPEC/README/db-schema doc, and the `seedance-v2` entry in `skills-lock.json`. **Kept** the grid-leak fix (the annotated storyboard sheet is NOT sent as an image — only the storyboard scene plan as text + the clean product/person reference sheets reach the model) and the photorealism prompt hardening; the BytePlus adapter was adapted to the current `firstFrame`/`referenceImages` `VideoProvider` interface (the reference sheets become `content[]` `image_url` parts). Deleted `providers/openrouter`. ⚠️ Open: exact Seedance multi-image content shape, pending the user's setup details. `pnpm --filter api typecheck` + `build` green. **Not yet run against live BytePlus.**
+
+- **Video provider switch: BytePlus/Seedance 2.0 → OpenRouter Kling 3.0 Standard.** Seedance's real-person face filter blocked the product/person ad use case, so the sole video provider is now **Kling 3.0 Standard** (`kwaivgi/kling-v3.0-std`) via **OpenRouter**. Removed `providers/byteplus`; added `providers/openrouter/index.ts` implementing the shared `VideoProvider` against OpenRouter's async video API: `POST /api/v1/videos` (`{model, prompt, duration, resolution, aspect_ratio, frame_images:[{first_frame}], input_references[], generate_audio:true}`) → `{id, polling_url}`, then `GET polling_url` until `completed`/`failed`, reading `unsigned_urls[0]` (download carries the bearer header). `createVideoProvider()` returns the OpenRouter provider — no fallbacks. The storyboard sheet is the first frame; person/product sheets ride along as `input_references` (Kling has no face restriction → photorealistic refs). **Audio on** (`generate_audio:true`; `videos.has_audio` stays default `true`). Config env renamed `BYTEPLUS_*` → `OPENROUTER_API_KEY`/`OPENROUTER_BASE_URL`/`OPENROUTER_VIDEO_MODEL`/`OPENROUTER_POLL_INTERVAL_MS`/`OPENROUTER_POLL_TIMEOUT_MS`. Purged Seedance/BytePlus/Ark naming from CLAUDE.md, this SPEC's live sections, `apps/api/docs/database-schema.md`, the web `run-meta.ts` sublabel, and dropped the `seedance-v2` skill from `skills-lock.json`. Deleted the stale pre-byteplus `apps/api/dist/` build (the ghost that kept serving old provider code via `pnpm start`). `pnpm --filter api typecheck` green. **Not yet run against live OpenRouter** — first F6/F7 live run pending.
 
 ### 2026-05-31
 

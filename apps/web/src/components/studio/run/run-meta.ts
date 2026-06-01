@@ -26,7 +26,7 @@ export const STEP_SUBLABEL: Record<Step, string> = {
   product_inspection: "Critic agent · vision",
   storyboard: "Image agent · storyboard",
   storyboard_inspection: "Critic agent · vision",
-  video: "Video agent · Seedance 2.0",
+  video: "Video agent · Kling 3.0",
 };
 
 export type StepState =
@@ -90,9 +90,9 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
 export const STATUS_DOT: Record<RunStatus, string> = {
   queued: "bg-muted-foreground",
   running: "bg-brand animate-pulse",
-  awaiting_confirmation: "bg-amber-500",
-  regenerating: "bg-amber-500 animate-pulse",
-  completed: "bg-emerald-500",
+  awaiting_confirmation: "bg-warning",
+  regenerating: "bg-warning animate-pulse",
+  completed: "bg-success",
   failed: "bg-destructive",
 };
 

@@ -5,22 +5,22 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
   {
     variants: {
       variant: {
         default:
           "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
         brand:
-          "bg-brand-gradient text-brand-foreground shadow-sm hover:opacity-95 hover:shadow-md",
+          "bg-brand-gradient text-brand-foreground font-semibold shadow-[0_1px_0_oklch(1_0_0/0.25)_inset,0_8px_24px_-10px_color-mix(in_oklch,var(--brand)_60%,transparent)] hover:brightness-105 hover:shadow-[0_1px_0_oklch(1_0_0/0.3)_inset,0_12px_30px_-10px_color-mix(in_oklch,var(--brand)_70%,transparent)]",
         destructive:
           "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
+          "border border-border bg-transparent shadow-xs hover:bg-accent hover:text-accent-foreground hover:border-brand/40",
         secondary:
           "bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-brand underline-offset-4 hover:underline",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

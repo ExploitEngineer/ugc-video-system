@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 export function CtaBand() {
   return (
     <section className="border-t border-border/60">
-      <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl px-6 py-20 lg:px-8">
         <Reveal>
           <div className="bg-brand-gradient ring-glow relative overflow-hidden rounded-[2rem] px-6 py-16 text-center shadow-2xl shadow-brand/30 sm:px-12">
             <div
@@ -16,7 +16,7 @@ export function CtaBand() {
             />
             <div
               aria-hidden
-              className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-white/20 blur-3xl"
+              className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-sheen blur-3xl"
             />
             <div aria-hidden className="noise-overlay absolute inset-0" />
             <h2 className="text-display text-brand-foreground relative text-4xl sm:text-5xl">

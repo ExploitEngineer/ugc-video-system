@@ -1,23 +1,33 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
+import { Geist_Mono, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const geistSans = Geist({
+// Neutral, highly legible body face — cleaner than Geist's default look.
+const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
+// Monospace for deliberate accents: counters, kbd, step numbers, status codes.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  display: "swap",
 });
 
-// Grotesk display face for headings + wordmark; body stays on Geist.
-const spaceGrotesk = Space_Grotesk({
+// Cabinet Grotesk — distinctive display face for headings + wordmark.
+// Self-hosted (Fontshare) so it isn't the recognizable Geist/Inter default.
+const cabinet = localFont({
   variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  display: "swap",
+  src: [
+    { path: "./fonts/CabinetGrotesk-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/CabinetGrotesk-Bold.woff2", weight: "700", style: "normal" },
+    { path: "./fonts/CabinetGrotesk-Extrabold.woff2", weight: "800", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {
@@ -38,7 +48,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}
+      className={`${inter.variable} ${geistMono.variable} ${cabinet.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>

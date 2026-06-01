@@ -59,6 +59,15 @@ export function buildStoryboardPrompt({
     "  the attached reference sheets in EVERY panel — the SAME product with all",
     "  its real markings, text and logos intact, the same person, same colors,",
     "  materials and proportions. Do not restyle, garble, or invent product text.",
+    ...(hasPerson
+      ? [
+          "- PERSON: render the PERSON photorealistically in EVERY panel — a real,",
+          "  lifelike human with natural skin and a realistic face, recognizable",
+          "  and consistent with the person sheet (same face, hair, build,",
+          "  wardrobe and palette). The product, setting, lighting and everything",
+          "  else stays PHOTOREALISTIC and faithful to the references too.",
+        ]
+      : []),
     "",
     "PANEL ANNOTATIONS — keep it MINIMAL, like a clean classic storyboard. Each",
     "panel shows ONLY:",
@@ -80,7 +89,16 @@ export function buildStoryboardPrompt({
     "MUST itself state the four-panel 2×2 layout with thin separator borders, the",
     `${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution, the product/person fidelity rule,`,
     "and the minimal-annotation rule (number + arrows + one tiny caption per",
-    "panel). `scenes` MUST have exactly",
+    "panel).",
+    ...(hasPerson
+      ? [
+          "The `imagePrompt` MUST also explicitly instruct the image model to",
+          "render the person photorealistically (a real, lifelike human with a",
+          "realistic face and skin) in every panel, faithful to the person sheet,",
+          "while keeping the product realistic and faithful to the product sheet.",
+        ]
+      : []),
+    "`scenes` MUST have exactly",
     "4 entries, in order; the `sceneDescription` is richer metadata for the",
     "video step (NOT all drawn on the panel). Set every scene's `adStyle` to",
     `"${style}".`,

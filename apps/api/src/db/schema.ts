@@ -217,7 +217,7 @@ export const storyboardSheets = pgTable(
   ],
 ).enableRLS();
 
-/** The single ~15s final clip with native Seedance audio. No merge step. */
+/** The single ~15s final clip with native Seedance 2.0 audio. No merge step. */
 export const videos = pgTable(
   "videos",
   {
@@ -230,7 +230,7 @@ export const videos = pgTable(
       .references(() => assets.id, { onDelete: "cascade" }),
     durationSec: numeric("duration_sec"), // ~15
     hasAudio: boolean("has_audio").notNull().default(true),
-    providerMeta: jsonb("provider_meta"), // Ark task id, model slug, params
+    providerMeta: jsonb("provider_meta"), // BytePlus task id, model slug, params
     status: text("status").notNull().default("processing"), // processing / completed / failed
   },
   (t) => [

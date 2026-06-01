@@ -27,7 +27,7 @@ export function ArtifactCard({
         <video
           src={asset.url}
           controls
-          className="aspect-video w-full bg-black"
+          className="aspect-video w-full bg-media"
         />
       </div>
     );

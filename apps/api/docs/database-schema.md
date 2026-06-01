@@ -145,7 +145,7 @@ The single ~15s final clip with native Seedance audio. No merge step, one video 
 | `asset_id` | uuid | no | — | **FK** → `assets.id`, indexed |
 | `duration_sec` | numeric | yes | — | **CK** `videos_duration_sec_check`: `> 0` |
 | `has_audio` | boolean | no | `true` | native Seedance audio |
-| `provider_meta` | jsonb | yes | — | Ark task id, model slug, params |
+| `provider_meta` | jsonb | yes | — | BytePlus task id, model slug, params |
 | `status` | text | no | `processing` | **CK** `videos_status_check`: in (`processing`,`completed`,`failed`) |
 
 ---

@@ -1,7 +1,7 @@
 /**
  * Standalone runner for the Video Generation Agent skill (F6).
  * No worker yet (F7) — exercises Video Builder directly against the live
- * video provider (Ark Seedance 2.0 by default).
+ * video provider (BytePlus Seedance 2.0).
  *
  * Usage: pnpm --filter api video:verify <runId> ["ad style"]
  *

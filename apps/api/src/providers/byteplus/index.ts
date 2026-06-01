@@ -4,6 +4,11 @@
 // interface only, never on this REST shape, so the provider is swappable.
 // Seedance runs async: POST a generation task → poll the task id → video_url.
 // Native audio is requested via `generate_audio: true` (Seedance 2.0 feature).
+//
+// Generation is driven by the text prompt + the clean product/person reference
+// sheets (`referenceImages`). An optional clean first frame may also be passed;
+// the annotated storyboard sheet is deliberately NOT sent as an image, so its
+// panel numbers, arrows and captions never bleed into the clip.
 
 import { env } from "../../config/index.js";
 import type {
@@ -28,6 +33,10 @@ export type BytePlusProvider = VideoProvider;
 const DEFAULT_DURATION_SEC = 15;
 const DEFAULT_RESOLUTION = "720p";
 const DEFAULT_ASPECT_RATIO = "16:9";
+
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 /** Map BytePlus task status → our coarse VideoTaskState. */
 function mapState(status: string): VideoTaskState {
@@ -59,12 +68,20 @@ async function bytePlusFetch(path: string, init?: RequestInit): Promise<unknown>
 export function createBytePlusProvider(): VideoProvider {
   return {
     async submitVideo(input: SubmitVideoInput): Promise<VideoTask> {
+      // content[] = text prompt, then (optional) clean first frame, then the
+      // product/person reference sheets as image guidance. The annotated
+      // storyboard sheet is intentionally never included.
+      const content: ContentPart[] = [{ type: "text", text: input.prompt }];
+      if (input.firstFrame) {
+        content.push({ type: "image_url", image_url: { url: input.firstFrame } });
+      }
+      for (const url of input.referenceImages ?? []) {
+        content.push({ type: "image_url", image_url: { url } });
+      }
+
       const body = {
         model: env.BYTEPLUS_VIDEO_MODEL,
-        content: [
-          { type: "text", text: input.prompt },
-          { type: "image_url", image_url: { url: input.storyboardSheet } },
-        ],
+        content,
         duration: input.durationSec ?? DEFAULT_DURATION_SEC,
         resolution: DEFAULT_RESOLUTION,
         aspect_ratio: DEFAULT_ASPECT_RATIO, // Seedance 2.0 key (16:9 widescreen)
