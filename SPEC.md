@@ -8,7 +8,7 @@
 
 Turns a **product image** (required) + an **optional person image** + a **text prompt** into a finished **~15-second advertisement video with audio**. The ad can be **any style** the user asks for — UGC, inspirational, cinematic, minimalist, luxury, comedic, etc. Agents read the user's intent and adapt; nothing assumes UGC.
 
-Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the **full storyboard sheet** to Seedance 2.0, which produces **one** video with audio — there is no per-scene video building, no separate audio step, and no merge step.
+Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the **full storyboard sheet** to Kling 3.0 Standard (via OpenRouter), which produces **one** video with audio — there is no per-scene video building, no separate audio step, and no merge step.
 
 ---
 
@@ -58,7 +58,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 | **Creative Direction Agent** (orchestrator) | OpenAI (LLM)                                                        | Holds all guidelines + workflow logic. Decides agent order for both modes, interprets requested ad style, propagates it downstream, drives the run state machine, applies mode gating. |
 | **Image Generation Agent**                  | OpenAI — **GPT Image 2** for images, OpenAI LLM for prompt building | `Product Sheet Builder`, `Generate Person Image`, `StoryBoard Generator`                                                                                                               |
 | **Critic Agent** (QA/validation)            | OpenAI (LLM, vision)                                                | `Product Sheet Inspection` (full or localized partial regen), `StoryBoard Sheet Inspection`                                                                                            |
-| **Video Generation Agent**                  | **Volcengine / BytePlus Ark — Seedance 2.0**                        | `Video Builder`                                                                                                                                                                        |
+| **Video Generation Agent**                  | **OpenRouter — Kling 3.0 Standard** (`kwaivgi/kling-v3.0-std`)       | `Video Builder`                                                                                                                                                                        |
 
 #### Skill detail
 
@@ -67,7 +67,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 - **StoryBoard Generator** — takes the product sheet (+ person sheet if present) → **Storyboard/Keyframe Sheet** of scenes, each with camera/angle, action/movement, scene description, consistent with the ad style.
 - **Product Sheet Inspection** — validates the product sheet; regenerates the whole sheet, or **only the localized part**, when the problem is local.
 - **StoryBoard Sheet Inspection** — validates the storyboard sheet; regenerates if problems.
-- **Video Builder** — sends the **full storyboard sheet** to Seedance 2.0 → final ~15s video with audio. Final output; no merge.
+- **Video Builder** — sends the **full storyboard sheet** to Kling 3.0 Standard (via OpenRouter) → final ~15s video with audio. Final output; no merge.
 
 ### End-to-end flow
 
@@ -86,7 +86,7 @@ flowchart TD
     F --> SBS[(Storyboard Sheet)]
     SBS --> G["Critic Agent · StoryBoard Sheet Inspection"]
     G -- issues --> F
-    G -- ok --> H["Video Agent · Video Builder<br/>→ Ark Seedance 2.0"]
+    G -- ok --> H["Video Agent · Video Builder<br/>→ OpenRouter Kling 3.0 Standard"]
     H --> VID[(Final ~15s video w/ audio)]
 
     CDA -. confirm-every-step gating .-> B
@@ -224,7 +224,7 @@ Ordered scenes, each with camera/angle, action/movement, description, in the cho
 
 #### Final Video — `videos`
 
-Single ~15s clip with audio from Seedance 2.0. No merge.
+Single ~15s clip with audio from Kling 3.0 Standard (via OpenRouter). No merge.
 
 | Field        | Type                             | Notes                                 |
 | ------------ | -------------------------------- | ------------------------------------- |
@@ -232,7 +232,7 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | runId        | uuid FK                          |                                       |
 | assetId      | uuid FK → assets (`final_video`) |                                       |
 | durationSec  | numeric                          | ~15                                   |
-| hasAudio     | boolean                          | true (native Seedance audio)          |
+| hasAudio     | boolean                          | true (native Kling audio)             |
 | providerMeta | jsonb                            | provider, model slug, task id, params |
 | status       | text                             | `processing` / `completed` / `failed` |
 
@@ -243,15 +243,15 @@ Single ~15s clip with audio from Seedance 2.0. No merge.
 | Service                         | Used for                                                                               | Client                                       | Key (env)                                                                        |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
 | **OpenAI**                      | GPT Image 2 (all image artifacts) **and** agent LLM reasoning/prompt-building/critique | `openai` SDK                                 | `OPENAI_API_KEY`                                                                 |
-| **BytePlus**                    | Seedance 2.0 video (full storyboard sheet → ~15s video w/ audio)                       | REST (`/api/v3/contents/generations/tasks`)  | `BYTEPLUS_API_KEY`                                                                |
+| **OpenRouter**                  | Kling 3.0 Standard video (full storyboard sheet → ~15s video w/ audio)                 | REST (`POST /api/v1/videos` async)           | `OPENROUTER_API_KEY`                                                              |
 | **Supabase**                    | Postgres DB (via Drizzle) + Storage + Auth (F8)                                        | `@supabase/supabase-js` + `postgres`/Drizzle | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
 
-**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,byteplus}`) so the concrete model/provider is swappable without touching agent logic. BytePlus is the sole video provider; it speaks the `/api/v3/contents/generations/tasks` REST shape.
+**Config location:** env loaded + Zod-validated in `apps/api/src/config` (server secrets) and `apps/web` env (public-safe vars only). Provider calls live behind a thin **adapter boundary** (`apps/api/src/providers/{openai,openrouter}`) so the concrete model/provider is swappable without touching agent logic. OpenRouter is the sole video provider; it speaks the async `POST /api/v1/videos` → poll `polling_url` REST shape.
 
 **Invocation shape:**
 
 - GPT Image 2 — Image Agent builds a prompt (via LLM skill) → image generation call → store composite sheet to Supabase Storage → row in `assets` + artifact table.
-- Seedance 2.0 — Video Builder submits the full storyboard sheet (image + text) as a video task to BytePlus, polls until complete, downloads the ~15s video to Supabase Storage.
+- Kling 3.0 Standard — Video Builder submits the full storyboard sheet (as the first-frame image + text prompt) as a video job to OpenRouter, polls until complete, downloads the ~15s video to Supabase Storage.
 
 ---
 
@@ -273,7 +273,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 **Open questions**
 
 - Exact OpenAI model id/endpoint mapped to "GPT Image 2", and whether a reference "sheet" is **one composite image** (multiple views in a grid) vs several separate images. **Assumption:** one composite sheet image per artifact.
-- Exact **Seedance 2.0 model slug/endpoint** on BytePlus, whether it accepts the storyboard as a single image + text prompt, and confirmation of **native audio** output.
+- Confirm Kling 3.0 Standard on OpenRouter accepts `1080p`/`16:9` at the requested ~15s duration and that `generate_audio:true` yields usable native audio (resolved in code: `kwaivgi/kling-v3.0-std`, async `POST /api/v1/videos`; live run pending).
 - Agent runtime: OpenAI Responses/Chat + tool-calling vs Assistants API; how "skills" map to code. **Assumption:** each skill = a prompt module + a function, orchestrated in code by the Creative Direction Agent.
 - Worker host: in-process loop vs separate queue process (pg-boss/BullMQ). **Assumption:** in-process loop in `apps/api` through F7.
 - Regeneration **retry caps / cost guards** — max auto-regens per step before failing the run.
@@ -285,7 +285,7 @@ State machine: `queued → running → (regenerating ⇄ running) → [awaiting_
 ---
 # Build Status
 
-> Per-feature status of the F0–F8 build order. "Done" = code complete and locally verified (typecheck/build/route smoke tests) unless noted. Live OpenAI/BytePlus end-to-end verification is still outstanding across the agent pipeline (F4–F7).
+> Per-feature status of the F0–F8 build order. "Done" = code complete and locally verified (typecheck/build/route smoke tests) unless noted. Live OpenAI/OpenRouter end-to-end verification is still outstanding across the agent pipeline (F4–F7).
 
 ## F0 — Project scaffolding & config — **Done**
 
@@ -311,13 +311,13 @@ Image Agent + 3 skills under `apps/api/src/agents/image/`. Convention: each skil
 
 Critic Agent under `apps/api/src/agents/critic/`. Two skills, each a single-pass inspection + inspect-and-remediate wrapper: **Product Sheet Inspection** and **StoryBoard Sheet Inspection**; inspections attach the sheet as a vision image and parse a strict `InspectionVerdict`. Critic does NOT own `run.status` (F7's job) — returns `CriticVerdict { outcome, attempts, finalArtifact, lastVerdict }`. Plumbing: verdict types, `CRITIC_RETRY_CAP = 1`, `events.ts` `writeStepEvent` (first writer of `step_events`), draft→approved/rejected status, generic remediate engine, localized product-view regen. Retry cap = 1; inspections cover product + storyboard only; localized partial regen = product sheet only (storyboard always full regen). Full regen re-invokes the F4 producer steered by an additive `critique?` field. Invoked standalone via `agents/critic/verify.ts`. **Not yet run against live OpenAI vision.**
 
-## F6 — Video Generation Agent + Video Builder (Seedance 2.0) — **Done (code; live verification pending)**
+## F6 — Video Generation Agent + Video Builder (Kling 3.0 Standard) — **Done (code; live verification pending)**
 
-Video Agent under `apps/api/src/agents/video/`. Provider boundary: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **BytePlus is the sole adapter** (`providers/byteplus/index.ts`) — `POST /api/v3/contents/generations/tasks` (Bearer key, body `{model, content:[text,image_url], duration, resolution:"720p", aspect_ratio:"16:9", generate_audio:true}`), polling maps `succeeded→completed`, `failed|cancelled|expired→failed`. `createVideoProvider()` in `providers/index.ts` returns the BytePlus provider. **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet URL + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `BYTEPLUS_API_KEY`/`BYTEPLUS_BASE_URL`/`BYTEPLUS_VIDEO_MODEL`/`BYTEPLUS_POLL_INTERVAL_MS`/`BYTEPLUS_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live BytePlus.**
+Video Agent under `apps/api/src/agents/video/`. Provider boundary: shared `VideoProvider` interface + types in `providers/video.ts` (`submitVideo`/`pollVideo`). **OpenRouter is the sole adapter** (`providers/openrouter/index.ts`) — async `POST /api/v1/videos` (Bearer key, body `{model, prompt, duration, resolution:"1080p", aspect_ratio:"16:9", frame_images:[{first_frame}], input_references[], generate_audio:true}`) → `{id, polling_url}`; polling `GET polling_url` maps `completed→completed`, `failed|cancelled|expired→failed`, else `processing`, reading `unsigned_urls[0]` (download needs the bearer header). `createVideoProvider()` in `providers/index.ts` returns the OpenRouter provider. **Skill: Video Builder** composes ONE cinematic motion/audio prompt from the storyboard scenes, submits the storyboard sheet (first frame) + person/product reference sheets (`input_references`) + prompt, polls until terminal/timeout, downloads the mp4, persists via shared `persistSheet` (`kind:"final_video"`) → `assets` + `videos` row (`providerMeta:{provider,model,taskId,videoPrompt}`). Config: `OPENROUTER_API_KEY`/`OPENROUTER_BASE_URL`/`OPENROUTER_VIDEO_MODEL` (`kwaivgi/kling-v3.0-std`)/`OPENROUTER_POLL_INTERVAL_MS`/`OPENROUTER_POLL_TIMEOUT_MS`. `SkillContext` gains `video: VideoProvider`. Invoked standalone via `agents/video/verify.ts`. **Not yet run against live OpenRouter.**
 
 ## F7 — Creative Direction Agent orchestration + modes — **Done (code; live end-to-end pending)**
 
-CDA orchestrator + in-process background worker under `apps/api/src/agents/creative-direction/`. (1) **Style skill** `interpret-style` distils the raw prompt into a concise style-agnostic `adStyle` brief, run once on leaving `queued`, persisted to `runs.adStyle`, threaded into every downstream skill via `ctx.adStyle`. (2) **State machine** `orchestrator.ts` (`driveRun`) + **worker** `worker.ts` (`startWorker`). Fixed pipeline in `plan.ts`: `product_sheet → [person_sheet if no person] → product_inspection → [gate] → storyboard → storyboard_inspection → [gate] → video → completed`. Convention: `currentStep` = last completed step; `status` drives the worker (`queued`→interpret; `running`→`nextStep`; `regenerating`→re-run stage; `awaiting_confirmation`/`completed`/`failed` terminal). Existing confirm/reject/cancel routes work unchanged. Gating (confirm mode only) pauses after each validated stage; Critic auto-checks run in both modes. Resumable: each step persists state + reloads inputs from DB. Worker = recursive-`setTimeout` poll, single-flight per `runId`, gated by `WORKER_ENABLED`. **Outstanding: full live OpenAI + BytePlus end-to-end run in both modes (automatic + confirm) — not yet verified.**
+CDA orchestrator + in-process background worker under `apps/api/src/agents/creative-direction/`. (1) **Style skill** `interpret-style` distils the raw prompt into a concise style-agnostic `adStyle` brief, run once on leaving `queued`, persisted to `runs.adStyle`, threaded into every downstream skill via `ctx.adStyle`. (2) **State machine** `orchestrator.ts` (`driveRun`) + **worker** `worker.ts` (`startWorker`). Fixed pipeline in `plan.ts`: `product_sheet → [person_sheet if no person] → product_inspection → [gate] → storyboard → storyboard_inspection → [gate] → video → completed`. Convention: `currentStep` = last completed step; `status` drives the worker (`queued`→interpret; `running`→`nextStep`; `regenerating`→re-run stage; `awaiting_confirmation`/`completed`/`failed` terminal). Existing confirm/reject/cancel routes work unchanged. Gating (confirm mode only) pauses after each validated stage; Critic auto-checks run in both modes. Resumable: each step persists state + reloads inputs from DB. Worker = recursive-`setTimeout` poll, single-flight per `runId`, gated by `WORKER_ENABLED`. **Outstanding: full live OpenAI + OpenRouter end-to-end run in both modes (automatic + confirm) — not yet verified.**
 
 ## F8 — Auth (Supabase) + hardening + cleanup — **Not started (deferred to last)**
 
@@ -326,6 +326,10 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 ---
 
 ## Progress Log
+
+### 2026-06-01
+
+- **Video provider switch: BytePlus/Seedance 2.0 → OpenRouter Kling 3.0 Standard.** Seedance's real-person face filter blocked the product/person ad use case, so the sole video provider is now **Kling 3.0 Standard** (`kwaivgi/kling-v3.0-std`) via **OpenRouter**. Removed `providers/byteplus`; added `providers/openrouter/index.ts` implementing the shared `VideoProvider` against OpenRouter's async video API: `POST /api/v1/videos` (`{model, prompt, duration, resolution, aspect_ratio, frame_images:[{first_frame}], input_references[], generate_audio:true}`) → `{id, polling_url}`, then `GET polling_url` until `completed`/`failed`, reading `unsigned_urls[0]` (download carries the bearer header). `createVideoProvider()` returns the OpenRouter provider — no fallbacks. The storyboard sheet is the first frame; person/product sheets ride along as `input_references` (Kling has no face restriction → photorealistic refs). **Audio on** (`generate_audio:true`; `videos.has_audio` stays default `true`). Config env renamed `BYTEPLUS_*` → `OPENROUTER_API_KEY`/`OPENROUTER_BASE_URL`/`OPENROUTER_VIDEO_MODEL`/`OPENROUTER_POLL_INTERVAL_MS`/`OPENROUTER_POLL_TIMEOUT_MS`. Purged Seedance/BytePlus/Ark naming from CLAUDE.md, this SPEC's live sections, `apps/api/docs/database-schema.md`, the web `run-meta.ts` sublabel, and dropped the `seedance-v2` skill from `skills-lock.json`. Deleted the stale pre-byteplus `apps/api/dist/` build (the ghost that kept serving old provider code via `pnpm start`). `pnpm --filter api typecheck` green. **Not yet run against live OpenRouter** — first F6/F7 live run pending.
 
 ### 2026-05-31
 

@@ -136,7 +136,7 @@ Ordered storyboard scenes in the chosen ad style.
 | `status` | `artifact_status` | no | `draft` | |
 
 ### `videos`
-The single ~15s final clip with native Seedance audio. No merge step, one video per run.
+The single ~15s final clip with native Kling audio. No merge step, one video per run.
 
 | Column | Type | Null | Default | Key / Constraint |
 |---|---|---|---|---|
@@ -144,8 +144,8 @@ The single ~15s final clip with native Seedance audio. No merge step, one video 
 | `run_id` | uuid | no | — | **FK** → `runs.id`, indexed |
 | `asset_id` | uuid | no | — | **FK** → `assets.id`, indexed |
 | `duration_sec` | numeric | yes | — | **CK** `videos_duration_sec_check`: `> 0` |
-| `has_audio` | boolean | no | `true` | native Seedance audio |
-| `provider_meta` | jsonb | yes | — | Ark task id, model slug, params |
+| `has_audio` | boolean | no | `true` | native Kling audio |
+| `provider_meta` | jsonb | yes | — | OpenRouter task id, model slug, params |
 | `status` | text | no | `processing` | **CK** `videos_status_check`: in (`processing`,`completed`,`failed`) |
 
 ---

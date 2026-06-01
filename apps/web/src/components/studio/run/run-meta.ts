@@ -26,7 +26,7 @@ export const STEP_SUBLABEL: Record<Step, string> = {
   product_inspection: "Critic agent · vision",
   storyboard: "Image agent · storyboard",
   storyboard_inspection: "Critic agent · vision",
-  video: "Video agent · Seedance 2.0",
+  video: "Video agent · Kling 3.0",
 };
 
 export type StepState =

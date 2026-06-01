@@ -2,7 +2,7 @@
 
 Agents as code, not a framework. Each **skill** = a prompt module (`prompt.ts`)
 + a function (`index.ts`) of shape `(ctx: SkillContext, input) => Promise<SkillResult<T>>`.
-The OpenAI/Ark provider adapters are injected via `SkillContext` (see `types.ts`),
+The OpenAI/OpenRouter provider adapters are injected via `SkillContext` (see `types.ts`),
 never imported inside a skill — so skills stay swappable and testable.
 
 Layout:
@@ -18,7 +18,7 @@ agents/
     person-image/          { prompt.ts, index.ts }  Generate Person Image
     storyboard/            { prompt.ts, index.ts }  StoryBoard Generator
   critic/                  Critic Agent (vision QA) — F5 (reserved home)
-  video/                   Video Generation Agent (Seedance 2.0) — F6 (reserved home)
+  video/                   Video Generation Agent (Kling 3.0 Standard) — F6 (reserved home)
   creative-direction/      Creative Direction Agent (orchestrator) — F7 (reserved home)
 ```
 

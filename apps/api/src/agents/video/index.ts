@@ -10,8 +10,10 @@ import { logRun } from "../../lib/log.js";
 import { buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
-  /** Approved storyboard sheet (public URL or data URI) — the visual reference. */
+  /** Approved storyboard sheet (public URL or data URI) — the first-frame reference. */
   storyboardSheetRef: ImageRef;
+  /** Optional person/product reference sheets sent as Kling input_references. */
+  referenceImages?: ImageRef[];
   /** Scene metadata from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   userPrompt: string;
@@ -28,10 +30,10 @@ type Video = typeof schema.videos.$inferSelect;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Video Builder skill — send the full storyboard sheet + an LLM-composed motion
- * /audio prompt to Seedance 2.0 (via the injected video provider), poll until
- * the clip is ready, download it, and persist `assets` (final_video) + `videos`.
- * Final output of the pipeline; no merge, native audio.
+ * Video Builder skill — send the full storyboard sheet (as the first frame) +
+ * an LLM-composed motion prompt to Kling 3.0 Pro (via the injected video
+ * provider), poll until the clip is ready, download it, and persist `assets`
+ * (final_video) + `videos`. Final output of the pipeline; no merge step.
  */
 export async function videoBuilder(
   ctx: SkillContext,
@@ -56,25 +58,32 @@ export async function videoBuilder(
       throw new Error("LLM returned an empty videoPrompt");
     }
 
-    // 2. Submit to the video provider (storyboard sheet = visual reference).
+    // 2. Submit to the video provider. The storyboard sheet is the first frame;
+    // the person/product reference sheets steer style (Kling 3.0 has no
+    // real-person face restriction, so the references stay photorealistic).
+    const prompt = `Render the FINAL VIDEO as fully photorealistic live-action footage — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
     const task = await ctx.video.submitVideo({
       storyboardSheet: input.storyboardSheetRef.source,
-      prompt: videoPrompt,
+      referenceImages: input.referenceImages?.map((r) => r.source),
+      prompt,
       durationSec,
     });
 
     // 3. Poll until completed / failed / timeout.
     const startedAt = Date.now();
-    const deadline = startedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
-    logRun(ctx.runId, `video task ${task.taskId} submitted — polling BytePlus …`);
+    const deadline = startedAt + env.OPENROUTER_POLL_TIMEOUT_MS;
+    logRun(
+      ctx.runId,
+      `video task ${task.taskId} submitted — polling OpenRouter …`,
+    );
     let result = await ctx.video.pollVideo(task);
     while (result.state === "processing") {
       if (Date.now() > deadline) {
         throw new Error(
-          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms`,
+          `video task ${task.taskId} timed out after ${env.OPENROUTER_POLL_TIMEOUT_MS}ms`,
         );
       }
-      await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
+      await sleep(env.OPENROUTER_POLL_INTERVAL_MS);
       logRun(
         ctx.runId,
         `video still processing … ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`,
@@ -85,13 +94,16 @@ export async function videoBuilder(
       throw new Error(result.error ?? "video generation failed");
     }
 
-    // 4. Download the mp4.
-    const res = await fetch(result.videoUrl);
+    // 4. Download the mp4. The content URL is unsigned — pass any auth headers
+    // the provider supplied (Kling's content endpoint needs the bearer token).
+    const res = await fetch(result.videoUrl, {
+      headers: result.downloadHeaders,
+    });
     if (!res.ok) {
       throw new Error(`failed to download video: ${res.status}`);
     }
     const bytes = new Uint8Array(await res.arrayBuffer());
-    const hasAudio = result.hasAudio ?? true;
+    const hasAudio = result.hasAudio ?? false;
 
     // 5. Persist: Storage → assets (final_video) → videos row, in one tx.
     const persisted = await persistSheet<Video>({
@@ -108,8 +120,8 @@ export async function videoBuilder(
             durationSec: String(durationSec),
             hasAudio,
             providerMeta: {
-              provider: "byteplus",
-              model: env.BYTEPLUS_VIDEO_MODEL,
+              provider: "openrouter",
+              model: env.OPENROUTER_VIDEO_MODEL,
               taskId: task.taskId,
               videoPrompt,
             },
