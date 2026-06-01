@@ -11,6 +11,7 @@
 // panel numbers, arrows and captions never bleed into the clip.
 
 import { env } from "../../config/index.js";
+import { ensureFaceAsset, isAssetMgmtConfigured } from "./assets.js";
 import type {
   SubmitVideoInput,
   VideoProvider,
@@ -32,11 +33,17 @@ export type BytePlusProvider = VideoProvider;
 
 const DEFAULT_DURATION_SEC = 15;
 const DEFAULT_RESOLUTION = "720p";
-const DEFAULT_ASPECT_RATIO = "16:9";
+const DEFAULT_RATIO = "16:9";
 
 type ContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
+  | { type: "image_url"; role?: string; image_url: { url: string } };
+
+const imagePart = (url: string, role = "reference_image"): ContentPart => ({
+  type: "image_url",
+  role,
+  image_url: { url },
+});
 
 /** Map BytePlus task status → our coarse VideoTaskState. */
 function mapState(status: string): VideoTaskState {
@@ -69,14 +76,34 @@ export function createBytePlusProvider(): VideoProvider {
   return {
     async submitVideo(input: SubmitVideoInput): Promise<VideoTask> {
       // content[] = text prompt, then (optional) clean first frame, then the
-      // product/person reference sheets as image guidance. The annotated
-      // storyboard sheet is intentionally never included.
+      // product reference sheet(s), then the registered face asset(s). The
+      // annotated storyboard sheet is intentionally never included.
       const content: ContentPart[] = [{ type: "text", text: input.prompt }];
       if (input.firstFrame) {
-        content.push({ type: "image_url", image_url: { url: input.firstFrame } });
+        content.push(imagePart(input.firstFrame, "first_frame"));
       }
+      // Non-face refs (product) — passed as plain image URLs.
       for (const url of input.referenceImages ?? []) {
-        content.push({ type: "image_url", image_url: { url } });
+        content.push(imagePart(url));
+      }
+      // Face/person refs — register as BytePlus assets so Seedance's real-human
+      // face filter accepts them, then reference via asset://<id>. When AK/SK
+      // are absent, fall back to the raw URL (likely rejected by the filter).
+      const personRefs = input.personReferences ?? [];
+      if (personRefs.length > 0) {
+        if (isAssetMgmtConfigured()) {
+          const tag = input.referenceTag ?? "run";
+          let i = 0;
+          for (const url of personRefs) {
+            const assetId = await ensureFaceAsset(url, `${tag}-person-${i++}`);
+            content.push(imagePart(`asset://${assetId}`));
+          }
+        } else {
+          console.warn(
+            "[byteplus] BYTEPLUS_ACCESS_KEY/SECRET_KEY not set — sending face refs as raw image_url; Seedance's face filter may reject them. See docs/byteplus-face-assets.md",
+          );
+          for (const url of personRefs) content.push(imagePart(url));
+        }
       }
 
       const body = {
@@ -84,8 +111,9 @@ export function createBytePlusProvider(): VideoProvider {
         content,
         duration: input.durationSec ?? DEFAULT_DURATION_SEC,
         resolution: DEFAULT_RESOLUTION,
-        aspect_ratio: DEFAULT_ASPECT_RATIO, // Seedance 2.0 key (16:9 widescreen)
+        ratio: DEFAULT_RATIO, // Seedance 2.0 key (16:9 widescreen)
         generate_audio: true, // native synchronized audio
+        watermark: false,
       };
 
       const json = (await bytePlusFetch("/contents/generations/tasks", {

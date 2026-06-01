@@ -18,7 +18,8 @@
     "agents:verify": "tsx src/agents/image/verify.ts",
     "critic:verify": "tsx src/agents/critic/verify.ts",
     "video:verify": "tsx src/agents/video/verify.ts",
-    "cda:verify": "tsx src/agents/creative-direction/verify.ts"
+    "cda:verify": "tsx src/agents/creative-direction/verify.ts",
+    "byteplus:probe": "tsx src/providers/byteplus/probe.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
