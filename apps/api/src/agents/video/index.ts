@@ -10,7 +10,11 @@ import { logRun } from "../../lib/log.js";
 import { buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
-  /** Approved storyboard sheet (public URL or data URI) — the first-frame reference. */
+  /**
+   * Approved storyboard sheet — kept for provenance only. It is NOT sent to the
+   * video provider as an image (its panel numbers/arrows/captions would leak
+   * into the clip); the plan reaches the model via `scenes` text instead.
+   */
   storyboardSheetRef: ImageRef;
   /** Optional person/product reference sheets sent as Kling input_references. */
   referenceImages?: ImageRef[];
@@ -30,10 +34,13 @@ type Video = typeof schema.videos.$inferSelect;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Video Builder skill — send the full storyboard sheet (as the first frame) +
- * an LLM-composed motion prompt to Kling 3.0 Pro (via the injected video
- * provider), poll until the clip is ready, download it, and persist `assets`
- * (final_video) + `videos`. Final output of the pipeline; no merge step.
+ * Video Builder skill — compose an LLM motion prompt from the storyboard
+ * scenes (text plan) and send it to Kling 3.0 Standard (via the injected video
+ * provider) together with the clean product/person reference sheets for
+ * identity. The annotated storyboard sheet is NOT sent as an image, so its
+ * panel numbers, arrows and captions never leak into the clip. Poll until
+ * ready, download, and persist `assets` (final_video) + `videos`. Final output
+ * of the pipeline; no merge step.
  */
 export async function videoBuilder(
   ctx: SkillContext,
@@ -58,12 +65,12 @@ export async function videoBuilder(
       throw new Error("LLM returned an empty videoPrompt");
     }
 
-    // 2. Submit to the video provider. The storyboard sheet is the first frame;
-    // the person/product reference sheets steer style (Kling 3.0 has no
-    // real-person face restriction, so the references stay photorealistic).
-    const prompt = `Render the FINAL VIDEO as fully photorealistic live-action footage — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
+    // 2. Submit to the video provider. The storyboard is conveyed as the TEXT
+    // plan only; identity comes from the clean product/person reference sheets
+    // (Kling 3.0 has no real-person face restriction, so refs stay
+    // photorealistic). No storyboard image is sent, so no grid/numbers/arrows.
+    const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
     const task = await ctx.video.submitVideo({
-      storyboardSheet: input.storyboardSheetRef.source,
       referenceImages: input.referenceImages?.map((r) => r.source),
       prompt,
       durationSec,

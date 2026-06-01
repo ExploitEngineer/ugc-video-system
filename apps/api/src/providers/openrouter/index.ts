@@ -5,10 +5,12 @@
 // Kling runs async: POST a generation job → poll the returned polling_url →
 // download the unsigned content URL (which itself needs the auth header).
 //
-// Image-to-video: the storyboard sheet is sent as `frame_images[0]` with
-// `frame_type: "first_frame"`; optional person/product reference sheets go in
-// `input_references` as style guidance. Kling 3.0 has no real-person face
-// restriction, so the references can be fully photorealistic, and it emits
+// Generation is driven by the person/product reference sheets (`input_references`,
+// identity/style guidance) + the text prompt. An optional clean first frame may
+// be passed as `frame_images[0]` (`frame_type: "first_frame"`); the annotated
+// storyboard sheet is deliberately NOT used as a frame, so its panel numbers,
+// arrows and captions never bleed into the video. Kling 3.0 has no real-person
+// face restriction, so the references can be fully photorealistic, and it emits
 // native synchronized audio (`generate_audio: true`).
 
 import { env } from "../../config/index.js";
@@ -76,15 +78,19 @@ export function createOpenRouterProvider(): VideoProvider {
         duration: input.durationSec ?? DEFAULT_DURATION_SEC,
         resolution: DEFAULT_RESOLUTION,
         aspect_ratio: DEFAULT_ASPECT_RATIO,
-        frame_images: [
-          {
-            type: "image_url",
-            image_url: { url: input.storyboardSheet },
-            frame_type: "first_frame", // image-to-video keyframe
-          },
-        ],
         generate_audio: true,
       };
+      if (input.firstFrame) {
+        // Image-to-video keyframe — only ever a CLEAN frame, never the
+        // annotated storyboard sheet (would animate the numbers/arrows/text).
+        body.frame_images = [
+          {
+            type: "image_url",
+            image_url: { url: input.firstFrame },
+            frame_type: "first_frame",
+          },
+        ];
+      }
       if (references.length > 0) {
         // Person + product reference sheets as style guidance (no face limit).
         body.input_references = references.map((url) => ({

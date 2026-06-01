@@ -5,13 +5,18 @@
 // poll until the video is ready, then download the (auth-gated) content URL.
 
 export interface SubmitVideoInput {
-  /** Full storyboard sheet (URL or data URI) sent as the first-frame reference. */
-  storyboardSheet: string;
   /** Text prompt describing motion/ad style for the ~15s clip. */
   prompt: string;
   /** Target duration in seconds (~15). */
   durationSec?: number;
-  /** Optional person/product reference sheet URLs sent as style guidance. */
+  /**
+   * Optional clean first-frame image (URL or data URI) for image-to-video.
+   * Omit to drive generation purely from the reference sheets + prompt — this
+   * is deliberately NOT the annotated storyboard sheet, whose panel numbers,
+   * arrows and captions would otherwise be animated into the final clip.
+   */
+  firstFrame?: string;
+  /** Person/product reference sheet URLs sent as identity/style guidance. */
   referenceImages?: string[];
 }
 
