@@ -16,7 +16,7 @@ export interface VideoBuilderInput {
    * into the clip); the plan reaches the model via `scenes` text instead.
    */
   storyboardSheetRef: ImageRef;
-  /** Optional person/product reference sheets sent as Kling input_references. */
+  /** Optional person/product reference sheets sent as Seedance image references. */
   referenceImages?: ImageRef[];
   /** Scene metadata from the storyboard_sheets row. */
   scenes: StoryboardScene[];
@@ -35,7 +35,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Video Builder skill — compose an LLM motion prompt from the storyboard
- * scenes (text plan) and send it to Kling 3.0 Standard (via the injected video
+ * scenes (text plan) and send it to Seedance 2.0 (via the injected video
  * provider) together with the clean product/person reference sheets for
  * identity. The annotated storyboard sheet is NOT sent as an image, so its
  * panel numbers, arrows and captions never leak into the clip. Poll until
@@ -66,9 +66,8 @@ export async function videoBuilder(
     }
 
     // 2. Submit to the video provider. The storyboard is conveyed as the TEXT
-    // plan only; identity comes from the clean product/person reference sheets
-    // (Kling 3.0 has no real-person face restriction, so refs stay
-    // photorealistic). No storyboard image is sent, so no grid/numbers/arrows.
+    // plan only; identity comes from the clean product/person reference sheets.
+    // No storyboard image is sent, so no grid/numbers/arrows leak into the clip.
     const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. Keep the product and the people consistent with the reference sheets. ${videoPrompt}`;
     const task = await ctx.video.submitVideo({
       referenceImages: input.referenceImages?.map((r) => r.source),
@@ -78,19 +77,19 @@ export async function videoBuilder(
 
     // 3. Poll until completed / failed / timeout.
     const startedAt = Date.now();
-    const deadline = startedAt + env.OPENROUTER_POLL_TIMEOUT_MS;
+    const deadline = startedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
     logRun(
       ctx.runId,
-      `video task ${task.taskId} submitted — polling OpenRouter …`,
+      `video task ${task.taskId} submitted — polling BytePlus …`,
     );
     let result = await ctx.video.pollVideo(task);
     while (result.state === "processing") {
       if (Date.now() > deadline) {
         throw new Error(
-          `video task ${task.taskId} timed out after ${env.OPENROUTER_POLL_TIMEOUT_MS}ms`,
+          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms`,
         );
       }
-      await sleep(env.OPENROUTER_POLL_INTERVAL_MS);
+      await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
       logRun(
         ctx.runId,
         `video still processing … ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`,
@@ -101,8 +100,8 @@ export async function videoBuilder(
       throw new Error(result.error ?? "video generation failed");
     }
 
-    // 4. Download the mp4. The content URL is unsigned — pass any auth headers
-    // the provider supplied (Kling's content endpoint needs the bearer token).
+    // 4. Download the mp4. Pass any auth headers the provider supplied
+    // (Seedance's video_url is directly fetchable, so this is usually empty).
     const res = await fetch(result.videoUrl, {
       headers: result.downloadHeaders,
     });
@@ -110,7 +109,7 @@ export async function videoBuilder(
       throw new Error(`failed to download video: ${res.status}`);
     }
     const bytes = new Uint8Array(await res.arrayBuffer());
-    const hasAudio = result.hasAudio ?? false;
+    const hasAudio = result.hasAudio ?? true;
 
     // 5. Persist: Storage → assets (final_video) → videos row, in one tx.
     const persisted = await persistSheet<Video>({
@@ -127,8 +126,8 @@ export async function videoBuilder(
             durationSec: String(durationSec),
             hasAudio,
             providerMeta: {
-              provider: "openrouter",
-              model: env.OPENROUTER_VIDEO_MODEL,
+              provider: "byteplus",
+              model: env.BYTEPLUS_VIDEO_MODEL,
               taskId: task.taskId,
               videoPrompt,
             },

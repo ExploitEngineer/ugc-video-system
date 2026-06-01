@@ -46,15 +46,15 @@ packages/shared   @ugc/shared — types/schemas shared by web + api
 
 Once built, system is:
 
-- **Agents as code, not framework.** Creative Direction Agent (orchestrator) interprets requested ad style, propagates downstream, drives run state machine. Image Agent (OpenAI GPT Image 2) produces reference/storyboard sheets; Critic Agent (OpenAI vision) validates + triggers regeneration; Video Agent (Kling 3.0 Standard via OpenRouter) turns full storyboard sheet into final video. Each "skill" = prompt module + function.
-- **Provider adapter boundary:** all OpenAI/OpenRouter calls live behind `apps/api/src/providers/{openai,openrouter}` so models swappable without touching agent logic.
+- **Agents as code, not framework.** Creative Direction Agent (orchestrator) interprets requested ad style, propagates downstream, drives run state machine. Image Agent (OpenAI GPT Image 2) produces reference/storyboard sheets; Critic Agent (OpenAI vision) validates + triggers regeneration; Video Agent (BytePlus ModelArk — Seedance 2.0) turns full storyboard sheet into final video. Each "skill" = prompt module + function.
+- **Provider adapter boundary:** all OpenAI/BytePlus calls live behind `apps/api/src/providers/{openai,byteplus}` so models swappable without touching agent logic.
 - **Execution = background worker + polling.** Hono route enqueues a `run`; in-process worker loop in `apps/api` advances it step-by-step. `runs` DB row = authoritative state machine, so refresh never loses progress. Frontend polls status endpoint.
 - **Two run modes:** `automatic` (no gating) and `confirm` (pauses at `awaiting_confirmation` after each step). Critic auto-checks run in **both** modes.
 - **Persistence:** Drizzle over Supabase Postgres; files in Supabase Storage (DB rows hold path + URL); Zod validates every API route using shared schemas.
-- **Hard non-goals:** no per-scene video generation, no separate audio step, no merge step, one output video per run. Kling 3.0 produces single final video with native audio.
+- **Hard non-goals:** no per-scene video generation, no separate audio step, no merge step, one output video per run. Seedance 2.0 produces single final video with native audio.
 
-Config/secrets Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `OPENROUTER_API_KEY` (+ optional `OPENROUTER_*` tuning), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`.
+Config/secrets Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `BYTEPLUS_API_KEY` (+ optional `BYTEPLUS_*` tuning), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`.
 
 ## Relevant skills
 
-`.claude/skills/` includes project-matched skills — `supabase`, `supabase-postgres-best-practices`, `next-best-practices`, `frontend-design`, `tailwind-design-system`, `framer-motion-animator`, `ai-image-generation`. Use for corresponding subsystems.
+`.claude/skills/` includes project-matched skills — `supabase`, `supabase-postgres-best-practices`, `next-best-practices`, `frontend-design`, `tailwind-design-system`, `framer-motion-animator`, `seedance-v2`, `ai-image-generation`. Use for corresponding subsystems.

@@ -15,15 +15,15 @@ const serverEnvSchema = z.object({
   // OpenAI — GPT Image 2 + LLM reasoning/critique
   OPENAI_API_KEY: z.string().min(1),
 
-  // OpenRouter — Kling 3.0 Standard video (sole video provider).
-  OPENROUTER_API_KEY: z.string().min(1),
-  OPENROUTER_BASE_URL: z
+  // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
+  BYTEPLUS_API_KEY: z.string().min(1),
+  BYTEPLUS_BASE_URL: z
     .string()
     .url()
-    .default("https://openrouter.ai/api/v1"),
-  OPENROUTER_VIDEO_MODEL: z.string().default("kwaivgi/kling-v3.0-std"),
-  OPENROUTER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
-  OPENROUTER_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
+    .default("https://ark.ap-southeast.bytepluses.com"),
+  BYTEPLUS_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-260128"),
+  BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
 
   // Supabase — Postgres (Drizzle), Storage, Auth (F8)
   SUPABASE_URL: z.string().url(),

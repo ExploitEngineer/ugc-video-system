@@ -1,8 +1,8 @@
-// Shared video-provider boundary — Kling 3.0 Pro via the OpenRouter adapter.
+// Shared video-provider boundary — Seedance 2.0 via the BytePlus adapter.
 //
 // The Video Builder skill depends on this interface only, never on a concrete
-// SDK/REST, so the provider is swappable. Kling runs async: submit a job, then
-// poll until the video is ready, then download the (auth-gated) content URL.
+// SDK/REST, so the provider is swappable. Seedance runs async: submit a task,
+// then poll until the video is ready.
 
 export interface SubmitVideoInput {
   /** Text prompt describing motion/ad style for the ~15s clip. */

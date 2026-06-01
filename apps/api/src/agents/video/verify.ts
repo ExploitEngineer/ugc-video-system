@@ -1,7 +1,7 @@
 /**
  * Standalone runner for the Video Generation Agent skill (F6).
  * No worker yet (F7) — exercises Video Builder directly against the live
- * video provider (OpenRouter Kling 3.0 Pro).
+ * video provider (BytePlus Seedance 2.0).
  *
  * Usage: pnpm --filter api video:verify <runId> ["ad style"]
  *
@@ -63,7 +63,7 @@ async function main() {
     video: createVideoProvider(),
   };
 
-  console.log("\n[1/1] Video Builder … (provider=openrouter)");
+  console.log("\n[1/1] Video Builder … (provider=byteplus)");
   const video = await videoAgent.videoBuilder(ctx, {
     storyboardSheetRef: { source: asset.url },
     scenes: (storyboard.scenes ?? []) as StoryboardScene[],
