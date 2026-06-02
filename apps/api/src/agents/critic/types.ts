@@ -6,6 +6,7 @@
 // live with the critic, not in the generic `agents/types.ts`.
 
 import type { Step } from "@ugc/shared";
+import { z } from "zod";
 
 /** A single defect the vision model found in a sheet. */
 export interface CriticIssue {
@@ -32,6 +33,29 @@ export interface InspectionVerdict {
   /** One-line rationale, stored in the `step_events` payload. */
   summary: string;
 }
+
+/**
+ * Tolerant validator for the inspection verdict. Field-level `.catch()` keeps a
+ * slightly-off LLM reply from corrupting the regen decision: a missing/odd
+ * `pass` normalizes to `false` (= "regenerate", the safe direction), and bad
+ * issue entries degrade gracefully. A structurally non-object reply still fails
+ * `safeParse`, so `parseJsonObject` throws a clear error rather than feeding the
+ * engine garbage. `region` is kept loose (string) — the strict union lives on
+ * the `CriticIssue` type and the localized-regen mapper tolerates unknowns.
+ */
+const criticIssueSchema = z.object({
+  severity: z.enum(["minor", "major", "blocking"]).catch("major"),
+  region: z.string().optional(),
+  problem: z.string().catch(""),
+  fixHint: z.string().optional(),
+});
+
+export const inspectionVerdictSchema = z.object({
+  pass: z.boolean().catch(false),
+  localizedRegen: z.boolean().catch(false),
+  issues: z.array(criticIssueSchema).catch([]),
+  summary: z.string().catch(""),
+});
 
 /** Outcome of one inspect-and-remediate cycle, returned to F7 (orchestrator). */
 export type CriticOutcome =

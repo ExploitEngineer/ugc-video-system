@@ -15,7 +15,11 @@ import {
   type SheetRef,
   toSheetRef,
 } from "../remediate.js";
-import type { CriticVerdict, InspectionVerdict } from "../types.js";
+import {
+  type CriticVerdict,
+  type InspectionVerdict,
+  inspectionVerdictSchema,
+} from "../types.js";
 import { buildStoryboardInspectionPrompt } from "./prompt.js";
 
 type StoryboardSheet = typeof schema.storyboardSheets.$inferSelect;
@@ -43,7 +47,7 @@ export async function inspectStoryboard(
       sheetRef: input.sheetRef,
     }),
   );
-  return parseJsonObject<InspectionVerdict>(reply);
+  return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
 }
 
 export interface StoryboardRemediateInput {

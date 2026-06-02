@@ -16,7 +16,11 @@ import {
   type SheetRef,
   toSheetRef,
 } from "../remediate.js";
-import type { CriticVerdict, InspectionVerdict } from "../types.js";
+import {
+  type CriticVerdict,
+  type InspectionVerdict,
+  inspectionVerdictSchema,
+} from "../types.js";
 import { buildProductInspectionPrompt } from "./prompt.js";
 
 type ProductReferenceSheet = typeof schema.productReferenceSheets.$inferSelect;
@@ -42,7 +46,7 @@ export async function inspectProductSheet(
       sheetRef: input.sheetRef,
     }),
   );
-  return parseJsonObject<InspectionVerdict>(reply);
+  return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
 }
 
 export interface ProductRemediateInput {

@@ -8,6 +8,9 @@
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { createLogger } from "./log.js";
+
+const log = createLogger("api");
 
 export class ApiError extends Error {
   readonly status: ContentfulStatusCode;
@@ -54,6 +57,8 @@ export function onError(err: Error, c: Context) {
   if (err instanceof HTTPException) {
     return c.json({ error: err.message }, err.status);
   }
-  console.error("[api] unhandled error:", err);
+  log.error("unhandled error", {
+    err: err instanceof Error ? (err.stack ?? err.message) : String(err),
+  });
   return c.json({ error: "Internal server error" }, 500);
 }

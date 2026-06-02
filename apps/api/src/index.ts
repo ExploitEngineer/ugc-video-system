@@ -2,7 +2,9 @@ import { serve } from "@hono/node-server";
 import { startWorker } from "./agents/creative-direction/index.js";
 import { createApp } from "./app.js";
 import { env } from "./config/index.js";
+import { createLogger } from "./lib/log.js";
 
+const log = createLogger("server");
 const app = createApp();
 
 const server = serve(
@@ -11,7 +13,7 @@ const server = serve(
     port: env.PORT,
   },
   (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
+    log.info("listening", { port: info.port });
   },
 );
 
@@ -27,7 +29,7 @@ let shuttingDown = false;
 function shutdown(signal: NodeJS.Signals): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`\n${signal} received — shutting down…`);
+  log.warn("shutting down", { signal });
   stopWorker();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
