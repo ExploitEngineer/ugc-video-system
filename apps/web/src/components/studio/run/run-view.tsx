@@ -15,14 +15,18 @@ import { toast } from "sonner";
 import {
   cancelRunAction,
   confirmStepAction,
-  rejectStepAction,
+  submitFeedbackAction,
 } from "@/app/studio/actions";
 import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
-import { ConfirmBar } from "@/components/studio/run/confirm-bar";
+import { FeedbackBar } from "@/components/studio/run/feedback-bar";
 import { NowRunning } from "@/components/studio/run/now-running";
 import { RunHeader } from "@/components/studio/run/run-header";
-import { isTerminal } from "@/components/studio/run/run-meta";
+import {
+  GATE_NEXT_LABEL,
+  gateOf,
+  isTerminal,
+} from "@/components/studio/run/run-meta";
 import { ScriptPanel } from "@/components/studio/run/script-panel";
 import { StepTimeline } from "@/components/studio/run/step-timeline";
 import { Button } from "@/components/ui/button";
@@ -72,18 +76,29 @@ export function RunView({ runId }: { runId: string }) {
   });
 
   const mutation = useMutation({
-    mutationFn: (action: "confirm" | "reject" | "cancel") => {
+    mutationFn: (action: "confirm" | "cancel") => {
       if (action === "confirm") return confirmStepAction(runId);
-      if (action === "reject") return rejectStepAction(runId);
       return cancelRunAction(runId);
     },
     onSuccess: (detail, action) => {
       if (detail) queryClient.setQueryData(queryKey, detail);
-      if (action === "confirm") toast.success("Step confirmed");
-      if (action === "reject") toast.message("Regenerating step…");
+      if (action === "confirm") toast.success("Approved — continuing");
       if (action === "cancel") toast.error("Run cancelled");
     },
     onError: () => toast.error("Action failed — try again"),
+  });
+
+  const feedbackMutation = useMutation({
+    mutationFn: (message: string) => submitFeedbackAction(runId, message),
+    onSuccess: (detail) => {
+      if (detail) queryClient.setQueryData(queryKey, detail);
+      toast.message(
+        detail?.status === "regenerating"
+          ? "Applying your changes…"
+          : "Continuing…",
+      );
+    },
+    onError: () => toast.error("Couldn’t send feedback — try again"),
   });
 
   // Record this run in the sidebar history — covers both freshly-created runs
@@ -136,7 +151,10 @@ export function RunView({ runId }: { runId: string }) {
   }
 
   const finalVideo = run.assets.find((a) => a.kind === "final_video");
-  const pending = mutation.isPending;
+  const pending = mutation.isPending || feedbackMutation.isPending;
+  // The gate a paused run sits at — names the agent its approval will start.
+  const awaitingGate =
+    run.status === "awaiting_confirmation" ? gateOf(run.currentStep) : null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -184,12 +202,21 @@ export function RunView({ runId }: { runId: string }) {
 
       <ScriptPanel run={run} />
 
+      {run.status === "awaiting_confirmation" && (
+        <div className="border-brand/40 bg-brand/10 text-brand flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium">
+          <SparklesIcon className="size-4 shrink-0" />
+          {awaitingGate
+            ? `Paused — review below, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
+            : "Paused — awaiting your feedback before the next step."}
+        </div>
+      )}
+
       {run.mode === "confirm" && !isTerminal(run.status) && (
-        <ConfirmBar
+        <FeedbackBar
           run={run}
           pending={pending}
-          onConfirm={() => mutation.mutate("confirm")}
-          onReject={() => mutation.mutate("reject")}
+          onApprove={() => mutation.mutate("confirm")}
+          onSubmitFeedback={(message) => feedbackMutation.mutate(message)}
           onCancel={() => mutation.mutate("cancel")}
         />
       )}

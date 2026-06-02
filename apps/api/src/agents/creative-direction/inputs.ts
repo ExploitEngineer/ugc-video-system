@@ -96,14 +96,19 @@ export async function latestPersonSheetUrl(
 }
 
 /**
- * Resolve the person reference for the storyboard steps: the uploaded image
- * when present, else the latest generated person sheet, else undefined.
+ * Resolve the person reference for the storyboard steps: the latest generated
+ * person sheet when one exists, else the uploaded image, else undefined.
+ *
+ * Generated-sheet-wins precedence lets a step-by-step REVISE of an uploaded
+ * person take effect — a revise generates a person sheet that then overrides
+ * the upload. Normal uploaded runs (no revise) have no generated sheet, so the
+ * upload is used as before.
  */
 export async function resolvePersonRef(
   runId: string,
   personUpload?: ImageRef,
 ): Promise<ImageRef | undefined> {
-  if (personUpload) return personUpload;
   const url = await latestPersonSheetUrl(runId);
-  return url ? { source: url, mime: "image/png" } : undefined;
+  if (url) return { source: url, mime: "image/png" };
+  return personUpload;
 }

@@ -60,6 +60,8 @@ const serverEnvSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
+  // Backend log verbosity. Unset → `debug` in development, else `info`.
+  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional(),
   PORT: z.coerce.number().int().positive().default(3001),
   // Allowed CORS origin(s) for the browser-facing API. Comma-separate multiple
   // origins; use "*" to allow any. Change the deployed frontend URL here without

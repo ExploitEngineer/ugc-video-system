@@ -9,7 +9,7 @@ const STEPS = [
   {
     n: "02",
     title: "Pick a run mode",
-    body: "Automatic runs end-to-end. Confirm-every-step pauses after each artifact so you approve or regenerate.",
+    body: "Automatic runs end-to-end. Step-by-step pauses after each artifact so you give feedback to approve or revise.",
   },
   {
     n: "03",

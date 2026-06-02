@@ -56,6 +56,8 @@ export const runSchema = z.object({
   status: runStatusSchema,
   currentStep: stepSchema,
   error: z.string().nullable(),
+  /** Pending step-by-step feedback message, consumed by the next regen. */
+  feedback: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -96,3 +98,13 @@ export const createRunInputSchema = z.object({
   hasPersonImage: z.boolean(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
+
+/**
+ * Body for `POST /runs/:id/feedback` — the user's free-text reply at a
+ * step-by-step gate. The API classifies it (approve → continue, revise →
+ * regenerate with this text threaded into the agent prompt).
+ */
+export const feedbackInputSchema = z.object({
+  message: z.string().trim().min(1, "Feedback is required").max(2000),
+});
+export type FeedbackInput = z.infer<typeof feedbackInputSchema>;

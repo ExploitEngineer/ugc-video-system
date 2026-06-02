@@ -11,6 +11,8 @@ import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/consta
 export interface PersonImagePromptInput {
   adStyle: string;
   userPrompt: string;
+  /** Step-by-step revision request — changes to apply to the previous sheet. */
+  feedback?: string;
 }
 
 /** Shape the LLM must return as strict JSON. */
@@ -32,8 +34,10 @@ export interface PersonImagePlan {
 export function buildPersonImagePrompt({
   adStyle,
   userPrompt,
+  feedback,
 }: PersonImagePromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
+  const revision = feedback?.trim();
 
   const system = [
     "You are the Generate Person Image skill of an ad-video Image Agent.",
@@ -93,6 +97,14 @@ export function buildPersonImagePrompt({
   const user = [
     `Ad style: ${style}`,
     `User prompt: ${userPrompt}`,
+    ...(revision
+      ? [
+          "",
+          "REVISION REQUEST — the user reviewed the previous person sheet and asked",
+          "for the following changes. Apply them precisely while keeping every sheet",
+          `rule above (four-view 2×2 layout, photorealism, images only):\n${revision}`,
+        ]
+      : []),
     "The product reference sheet is attached in the image-generation step.",
     "Produce the composite person reference sheet plan — exactly FOUR views in a",
     "2×2 grid with thin separators between them, images only, no added text or",

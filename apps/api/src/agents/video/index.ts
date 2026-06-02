@@ -6,7 +6,7 @@ import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
-import { logRun } from "../../lib/log.js";
+import { createLogger } from "../../lib/log.js";
 import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
@@ -51,6 +51,12 @@ export async function videoBuilder(
   input: VideoBuilderInput,
 ): Promise<SkillResult<Video>> {
   const durationSec = input.durationSec ?? DEFAULT_DURATION_SEC;
+  const log = createLogger("video", { run: ctx.runId });
+  log.info("▶ building video", {
+    durationSec,
+    hasPerson: input.hasPerson,
+    scenes: input.scenes.length,
+  });
 
   await writeStepEvent({ runId: ctx.runId, step: "video", status: "started" });
 
@@ -74,10 +80,10 @@ export async function videoBuilder(
         videoPrompt =
           parseJsonObject<{ videoPrompt?: string }>(planRaw).videoPrompt?.trim() ?? "";
       } catch (err) {
-        logRun(
-          ctx.runId,
-          `video prompt attempt ${attempt} unparseable: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        log.warn("video prompt unparseable", {
+          attempt,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     if (!videoPrompt) {
@@ -87,10 +93,7 @@ export async function videoBuilder(
         scenes: input.scenes,
         durationSec,
       });
-      logRun(
-        ctx.runId,
-        "video prompt: LLM step failed twice — using deterministic fallback",
-      );
+      log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
 
     // 2. Submit to the video provider. The CLEAN storyboard sheet is the sole
@@ -110,10 +113,7 @@ export async function videoBuilder(
     // 3. Poll until completed / failed / timeout.
     const startedAt = Date.now();
     const deadline = startedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
-    logRun(
-      ctx.runId,
-      `video task ${task.taskId} submitted — polling BytePlus …`,
-    );
+    log.info("task submitted — polling BytePlus", { taskId: task.taskId });
     let result = await ctx.video.pollVideo(task);
     while (result.state === "processing") {
       if (Date.now() > deadline) {
@@ -122,10 +122,10 @@ export async function videoBuilder(
         );
       }
       await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
-      logRun(
-        ctx.runId,
-        `video still processing … ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`,
-      );
+      log.debug("still processing", {
+        taskId: task.taskId,
+        elapsedSec: Math.round((Date.now() - startedAt) / 1000),
+      });
       result = await ctx.video.pollVideo(task);
     }
     if (result.state === "failed" || !result.videoUrl) {
@@ -189,6 +189,11 @@ export async function videoBuilder(
       status: "passed",
       payload: { taskId: task.taskId, durationSec, hasAudio },
     });
+    log.info("✓ video persisted", {
+      assetId: persisted.assetId,
+      durationSec,
+      hasAudio,
+    });
 
     return {
       assetId: persisted.assetId,
@@ -197,6 +202,9 @@ export async function videoBuilder(
       promptUsed: JSON.stringify({ messages, videoPrompt }),
     };
   } catch (err) {
+    log.error("✗ video failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     await writeStepEvent({
       runId: ctx.runId,
       step: "video",

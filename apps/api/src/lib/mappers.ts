@@ -6,13 +6,34 @@
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
 import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
-import type { Run, StepEventStatus } from "@ugc/shared";
+import type { Run } from "@ugc/shared";
+import { sceneSchema, stepEventStatusSchema } from "@ugc/shared";
 import type { schema } from "../db/index.js";
+import { createLogger } from "./log.js";
 
 type AssetRow = typeof schema.assets.$inferSelect;
 type StepEventRow = typeof schema.stepEvents.$inferSelect;
 type RunRow = typeof schema.runs.$inferSelect;
 type StoryboardRow = typeof schema.storyboardSheets.$inferSelect;
+
+const log = createLogger("mappers");
+
+/**
+ * Validate the jsonb `scenes` blob against the shared `Scene` schema (the stored
+ * `StoryboardScene` shape matches it). On any drift, log and return null rather
+ * than 500-ing the poll — the script panel degrades instead of breaking.
+ */
+function parseScenes(raw: unknown): Scene[] | null {
+  if (raw == null) return null;
+  const result = sceneSchema.array().safeParse(raw);
+  if (!result.success) {
+    log.warn("storyboard scenes failed schema — returning null", {
+      err: result.error.message,
+    });
+    return null;
+  }
+  return result.data;
+}
 
 /** `storagePath` is intentionally dropped — internal only. */
 export function toAssetDto(row: AssetRow): Asset {
@@ -32,8 +53,9 @@ export function toStepEventDto(row: StepEventRow): StepEvent {
     id: row.id,
     runId: row.runId,
     step: row.step,
-    // DB `status` is free text guarded by a CHECK to these 4 values.
-    status: row.status as StepEventStatus,
+    // DB `status` is free text guarded by a CHECK to these 4 values; validate at
+    // the wire boundary instead of an unchecked cast.
+    status: stepEventStatusSchema.parse(row.status),
     payload: (row.payload as Record<string, unknown> | null) ?? null,
     createdAt: row.createdAt.toISOString(),
   };
@@ -52,6 +74,7 @@ export function toRunDto(row: RunRow): Run {
     status: row.status,
     currentStep: row.currentStep ?? "product_sheet",
     error: row.error ?? null,
+    feedback: row.feedback ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -67,6 +90,6 @@ export function toRunDetailDto(
     ...toRunDto(run),
     assets: assets.map(toAssetDto),
     stepEvents: stepEvents.map(toStepEventDto),
-    scenes: (storyboard?.scenes as Scene[] | null) ?? null,
+    scenes: parseScenes(storyboard?.scenes),
   };
 }

@@ -101,6 +101,10 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
     error: text("error"),
+    feedback: text("feedback"), // pending step-by-step feedback, consumed by next regen
+    lockedAt: timestamp("locked_at", { withTimezone: true }), // worker lock — one driver per run
+    lockedBy: text("locked_by"), // worker fencing token (workerId) — losing driver self-aborts
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

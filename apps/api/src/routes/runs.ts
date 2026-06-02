@@ -7,17 +7,25 @@
 // from any non-terminal status.
 
 import type { AssetKind } from "@ugc/shared";
-import { createRunInputSchema } from "@ugc/shared";
+import { createRunInputSchema, feedbackInputSchema } from "@ugc/shared";
 import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import {
+  gateForCurrentStep,
+  getOpenAI,
+  interpretFeedback,
+} from "../agents/creative-direction/index.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
+import { createLogger } from "../lib/log.js";
 import { toAssetDto, toRunDto } from "../lib/mappers.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
 import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
 
 const ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+const log = createLogger("runs");
 
 export const runs = new Hono();
 
@@ -166,6 +174,7 @@ runs.post("/:id/confirm", async (c) => {
   const id = c.req.param("id");
   const run = await getRunOr404(id);
   assertStatus(run, ["awaiting_confirmation"], "Run is not awaiting confirmation.");
+  log.info("confirm awaiting→running", { run: id, currentStep: run.currentStep });
 
   await db.transaction(async (tx) => {
     await tx.insert(schema.stepEvents).values({
@@ -187,6 +196,7 @@ runs.post("/:id/reject", async (c) => {
   const id = c.req.param("id");
   const run = await getRunOr404(id);
   assertStatus(run, ["awaiting_confirmation"], "Run is not awaiting confirmation.");
+  log.info("reject awaiting→regenerating", { run: id, currentStep: run.currentStep });
 
   await db.transaction(async (tx) => {
     await tx.insert(schema.stepEvents).values({
@@ -203,6 +213,57 @@ runs.post("/:id/reject", async (c) => {
   return c.json(await loadRunDetail(id));
 });
 
+// ── POST /runs/:id/feedback — step-by-step free-text gate reply ───────
+// Classifies the user's reply: approve → advance (like /confirm); revise →
+// regenerate the gated artifact (like /reject) with the feedback threaded
+// into the agent prompt. The product sheet is hidden, so a reference-gate
+// revise always re-runs the person sheet.
+runs.post("/:id/feedback", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["awaiting_confirmation"], "Run is not awaiting confirmation.");
+
+  const parsed = feedbackInputSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    throw badRequest(
+      parsed.error.issues[0]?.message ?? "Invalid feedback",
+      parsed.error.issues,
+    );
+  }
+  const { message } = parsed.data;
+
+  const step = run.currentStep ?? "product_sheet";
+  const gate = gateForCurrentStep(step);
+  if (!gate) throw badRequest("Run is not at a feedback gate.");
+
+  const verdict = await interpretFeedback(getOpenAI(), { stage: gate, message });
+  log.info("feedback", {
+    run: id,
+    gate,
+    verdict: verdict.intent,
+    next: verdict.intent === "approve" ? "running" : "regenerating",
+    msg: message.slice(0, 60),
+  });
+
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.stepEvents).values({
+      runId: id,
+      step,
+      status: verdict.intent === "approve" ? "passed" : "regenerated",
+    });
+    await tx
+      .update(schema.runs)
+      .set(
+        verdict.intent === "approve"
+          ? { status: "running", feedback: null, updatedAt: new Date() }
+          : { status: "regenerating", feedback: message, updatedAt: new Date() },
+      )
+      .where(eq(schema.runs.id, id));
+  });
+
+  return c.json(await loadRunDetail(id));
+});
+
 // ── POST /runs/:id/cancel — terminate a run (idempotent) ──────────────
 runs.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
@@ -210,6 +271,7 @@ runs.post("/:id/cancel", async (c) => {
 
   // Idempotent: already-terminal runs return their current state unchanged.
   if (run.status !== "completed" && run.status !== "failed") {
+    log.info("cancel →failed", { run: id, from: run.status });
     await db
       .update(schema.runs)
       .set({ status: "failed", error: "Run cancelled.", updatedAt: new Date() })
@@ -232,7 +294,10 @@ runs.delete("/:id", async (c) => {
   try {
     await deleteRunObjects(id);
   } catch (err) {
-    console.error(`[runs] storage cleanup failed for ${id}:`, err);
+    log.error("storage cleanup failed", {
+      run: id,
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
 
   await db.delete(schema.runs).where(eq(schema.runs.id, id));

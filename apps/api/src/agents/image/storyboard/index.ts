@@ -6,10 +6,11 @@
 // (c) persist: storage → assets(storyboard_sheet) → storyboard_sheets
 
 import { schema } from "../../../db/index.js";
+import { createLogger } from "../../../lib/log.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
-import { persistSheet } from "../persist.js";
+import { persistSheet } from "../../persist.js";
 import { buildStoryboardPrompt, type StoryboardPlan } from "./prompt.js";
 
 type StoryboardSheet = typeof schema.storyboardSheets.$inferSelect;
@@ -27,6 +28,12 @@ export async function storyboardGenerator(
   ctx: SkillContext,
   input: StoryboardInput,
 ): Promise<SkillResult<StoryboardSheet>> {
+  const log = createLogger("image", { run: ctx.runId, skill: "storyboard" });
+  log.info("▶ planning storyboard", {
+    hasPerson: Boolean(input.personSheetRef),
+    critique: Boolean(input.critique),
+  });
+
   const reply = await ctx.openai.chat(
     buildStoryboardPrompt({
       adStyle: ctx.adStyle,
@@ -43,10 +50,15 @@ export async function storyboardGenerator(
   const refs: ImageRef[] = [input.productSheetRef];
   if (input.personSheetRef) refs.push(input.personSheetRef);
 
+  log.debug("✓ plan ready — generating image", {
+    scenes: plan.scenes.length,
+    refs: refs.length,
+  });
   const { bytes, mime } = await ctx.openai.generateImage({
     prompt: plan.imagePrompt,
     refs,
   });
+  log.debug("✓ image generated", { bytes: bytes.length, mime });
 
   const { assetId, assetUrl, artifact } = await persistSheet({
     runId: ctx.runId,
@@ -68,5 +80,6 @@ export async function storyboardGenerator(
     },
   });
 
+  log.info("✓ storyboard persisted", { assetId, scenes: plan.scenes.length });
   return { assetId, assetUrl, artifact, promptUsed: plan.imagePrompt };
 }
