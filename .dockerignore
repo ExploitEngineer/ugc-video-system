@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/.cache
+.git
+.github
+**/.env
+**/.env.*
+*.md
+.claude
+apps/web/public
