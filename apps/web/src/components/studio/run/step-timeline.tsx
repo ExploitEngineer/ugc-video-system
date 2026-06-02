@@ -21,7 +21,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
-  product_sheet: "product_sheet",
+  // product_sheet intentionally omitted — the product reference sheet is a
+  // private internal artifact and must not be shown to the user.
   person_sheet: "person_sheet",
   storyboard: "storyboard_sheet",
   video: "final_video",
