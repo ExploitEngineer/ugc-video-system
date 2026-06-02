@@ -7,6 +7,5 @@
 .github
 **/.env
 **/.env.*
-*.md
 .claude
-apps/web/public
+*.md
