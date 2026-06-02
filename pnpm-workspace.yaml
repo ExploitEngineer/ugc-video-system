@@ -2,14 +2,14 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# Build scripts must be explicitly approved before they run (pnpm >= 10)
+# Build scripts must be explicitly approved before they run (pnpm >= 10).
+# Anything with a postinstall/build script that is NOT listed here is "ignored",
+# and pnpm fails the install in CI — keep this list complete.
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - esbuild
   - sharp
 
+# Explicitly skip these build scripts (silences the ignored-build error for them).
 ignoredBuiltDependencies:
   - unrs-resolver
-
-allowBuilds:
-  esbuild: set this to true or false

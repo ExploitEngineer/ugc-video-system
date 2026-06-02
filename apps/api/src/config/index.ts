@@ -61,6 +61,10 @@ const serverEnvSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
+  // Allowed CORS origin(s) for the browser-facing API. Comma-separate multiple
+  // origins; use "*" to allow any. Change the deployed frontend URL here without
+  // touching code (e.g. CORS_ORIGIN=https://your-app.vercel.app).
+  CORS_ORIGIN: z.string().default("http://localhost:3000"),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
