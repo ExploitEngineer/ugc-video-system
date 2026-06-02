@@ -12,11 +12,14 @@ import type {
 } from "openai/resources/chat/completions";
 import { env } from "../../config/index.js";
 import { internal } from "../../lib/errors.js";
+import { createLogger } from "../../lib/log.js";
 import {
   DEFAULT_IMAGE_SIZE,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
 } from "./constants.js";
+
+const log = createLogger("openai");
 
 /** A reference image passed into an image-gen or vision call. */
 export interface ImageRef {
@@ -112,15 +115,27 @@ export function createOpenAIProvider(): OpenAIProvider {
   return {
     async chat(messages) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
+      const t0 = Date.now();
+      log.debug("chat →", { model: OPENAI_CHAT_MODEL, msgs: sdkMessages.length });
       const completion = await getClient().chat.completions.create({
         model: OPENAI_CHAT_MODEL,
         messages: sdkMessages,
       });
-      return completion.choices[0]?.message?.content ?? "";
+      const content = completion.choices[0]?.message?.content ?? "";
+      log.debug("chat ✓", { ms: Date.now() - t0, chars: content.length });
+      return content;
     },
 
     async generateImage(input) {
       const size = input.size ?? DEFAULT_IMAGE_SIZE;
+      const mode = input.refs?.length ? "edit" : "generate";
+      const t0 = Date.now();
+      log.debug("image →", {
+        model: OPENAI_IMAGE_MODEL,
+        mode,
+        refs: input.refs?.length ?? 0,
+        size,
+      });
       const result = input.refs?.length
         ? await getClient().images.edit({
             model: OPENAI_IMAGE_MODEL,
@@ -136,6 +151,7 @@ export function createOpenAIProvider(): OpenAIProvider {
 
       const b64 = result.data?.[0]?.b64_json;
       if (!b64) throw internal("OpenAI image response missing image data.");
+      log.debug("image ✓", { ms: Date.now() - t0, mode });
       return { bytes: new Uint8Array(Buffer.from(b64, "base64")), mime: "image/png" };
     },
   };

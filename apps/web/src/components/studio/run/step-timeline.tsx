@@ -12,6 +12,8 @@ import {
 
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import {
+  gateOf,
+  gateStartsStep,
   STEP_LABEL,
   STEP_ORDER,
   type StepState,
@@ -21,7 +23,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
-  product_sheet: "product_sheet",
+  // product_sheet intentionally omitted — the product reference sheet is a
+  // private internal artifact and must not be shown to the user.
   person_sheet: "person_sheet",
   storyboard: "storyboard_sheet",
   video: "final_video",
@@ -81,9 +84,44 @@ function StatusPill({ state }: { state: StepState }) {
   );
 }
 
-function Indicator({ state, n }: { state: StepState; n: number }) {
+/**
+ * Pill for the step a paused run is held BEFORE — makes the "pause before the
+ * next agent" explicit instead of leaving the gated step reading as a plain
+ * "Pending". Purely presentational; `stepState` still returns "pending".
+ */
+function UpNextPill() {
+  return (
+    <span className="border-brand/40 bg-brand/10 text-brand inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium">
+      <span className="bg-brand size-1.5 rounded-full" />
+      Up next — approve to start
+    </span>
+  );
+}
+
+function Indicator({
+  state,
+  n,
+  upNext,
+}: {
+  state: StepState;
+  n: number;
+  upNext?: boolean;
+}) {
   const base =
     "relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full border text-sm font-semibold transition-colors";
+  if (upNext) {
+    return (
+      <span
+        className={cn(
+          base,
+          "border-brand/60 text-brand bg-brand/5 tabular-nums",
+        )}
+      >
+        <span className="border-brand/40 absolute inset-0 animate-pulse rounded-full border" />
+        {n}
+      </span>
+    );
+  }
   switch (state) {
     case "done":
       return (
@@ -154,18 +192,26 @@ function Indicator({ state, n }: { state: StepState; n: number }) {
 }
 
 export function StepTimeline({ run }: { run: RunDetail }) {
+  // The step a paused run is held BEFORE (storyboard at the reference gate,
+  // video at the storyboard gate) — surfaced as an explicit "Up next" cue.
+  const awaitingGate =
+    run.status === "awaiting_confirmation" ? gateOf(run.currentStep) : null;
+  const upNextStep = awaitingGate ? gateStartsStep(awaitingGate) : null;
+
   return (
     <ol className="relative">
       {STEP_ORDER.map((step, i) => {
         const state = stepState(run, step);
+        const upNext = step === upNextStep && state === "pending";
         const assetKind = STEP_ASSET_KIND[step];
         const asset = assetKind
           ? run.assets.find((a) => a.kind === assetKind)
           : undefined;
         const showAsset = asset && (state === "done" || state === "awaiting");
         const last = i === STEP_ORDER.length - 1;
-        const dim = state === "pending" || state === "skipped";
+        const dim = (state === "pending" || state === "skipped") && !upNext;
         const live =
+          upNext ||
           state === "active" ||
           state === "awaiting" ||
           state === "regenerating";
@@ -190,7 +236,7 @@ export function StepTimeline({ run }: { run: RunDetail }) {
               />
             )}
 
-            <Indicator state={state} n={i + 1} />
+            <Indicator state={state} n={i + 1} upNext={upNext} />
 
             <div
               className={cn(
@@ -210,7 +256,7 @@ export function StepTimeline({ run }: { run: RunDetail }) {
                 >
                   {STEP_LABEL[step]}
                 </h3>
-                <StatusPill state={state} />
+                {upNext ? <UpNextPill /> : <StatusPill state={state} />}
               </div>
               <p className="text-muted-foreground mt-1 text-xs">
                 {stepSublabel(step)}

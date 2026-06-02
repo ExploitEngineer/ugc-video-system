@@ -14,6 +14,14 @@ export const creativeDirectionAgent = {
 export type CreativeDirectionAgent = typeof creativeDirectionAgent;
 
 export { interpretAdStyle } from "./interpret-style/index.js";
-export { driveRun } from "./orchestrator.js";
+export { interpretFeedback } from "./interpret-feedback/index.js";
+export { driveRun, getOpenAI } from "./orchestrator.js";
 export { startWorker } from "./worker.js";
-export { firstStep, nextStep, isGateStep, genStepForGate } from "./plan.js";
+export {
+  firstStep,
+  nextStep,
+  gateForNext,
+  gateForCurrentStep,
+  genStepForRevise,
+  type Gate,
+} from "./plan.js";

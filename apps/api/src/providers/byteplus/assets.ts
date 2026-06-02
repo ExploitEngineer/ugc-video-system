@@ -18,8 +18,10 @@
 // Status: "Active" (usable) | "Failed"/"Rejected" (moderation) | else processing.
 
 import { env } from "../../config/index.js";
+import { createLogger } from "../../lib/log.js";
 import { signedFetch, type SignedFetchResult } from "./sign.js";
 
+const log = createLogger("byteplus");
 const GROUP_TYPE = "AIGC";
 const ACTIVE_STATUS = "Active";
 const REJECTED_STATUSES = new Set(["Failed", "Rejected", "Banned"]);
@@ -66,9 +68,9 @@ export async function ensureGroup(): Promise<string> {
   if (!id) throw new Error(`BytePlus CreateAssetGroup returned no Id: ${res.raw.slice(0, 300)}`);
 
   memoizedGroupId = id;
-  console.log(
-    `[byteplus] created asset group ${id} — pin it as BYTEPLUS_ASSET_GROUP_ID to reuse across restarts`,
-  );
+  log.info("created asset group — pin as BYTEPLUS_ASSET_GROUP_ID to reuse across restarts", {
+    group: id,
+  });
   return id;
 }
 

@@ -293,7 +293,7 @@ function ModeToggle({
 }) {
   const opts: Array<{ value: Mode; label: string; icon: typeof GaugeIcon }> = [
     { value: "automatic", label: "Auto", icon: GaugeIcon },
-    { value: "confirm", label: "Confirm", icon: ListChecksIcon },
+    { value: "confirm", label: "Step-by-step", icon: ListChecksIcon },
   ];
   return (
     <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
@@ -308,7 +308,7 @@ function ModeToggle({
             title={
               opt.value === "automatic"
                 ? "Run end-to-end with no gating"
-                : "Pause after each step to confirm or regenerate"
+                : "Pause after each artifact for your feedback to approve or revise"
             }
             className={cn(
               "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",

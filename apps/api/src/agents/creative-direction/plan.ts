@@ -41,16 +41,46 @@ export function nextStep(
   }
 }
 
-/** Confirm-mode pause points: after a Critic stage validates an artifact. */
-export function isGateStep(step: Step): boolean {
-  return step === "product_inspection" || step === "storyboard_inspection";
+/**
+ * Step-by-step pause points. Decoupled from the Critic: instead of keying off
+ * inspection steps (which vanish when the Critic is off), we gate on WHAT THE
+ * NEXT STEP WOULD BE. `nextStep` already collapses inspection steps, so this
+ * fires whether or not they run:
+ *   - reference gate  → right before `storyboard` (both reference sheets ready)
+ *   - storyboard gate → right before `video`
+ */
+export type Gate = "reference" | "storyboard";
+
+/** The gate we land at by completing the step whose next step is `next`. */
+export function gateForNext(next: Step | null): Gate | null {
+  if (next === "storyboard") return "reference";
+  if (next === "video") return "storyboard";
+  return null;
 }
 
 /**
- * The generation step to re-run when the user rejects a gated artifact
- * (status `regenerating`). Maps a gate (inspection) step back to the producer
- * step that owns its stage.
+ * Recover the gate of a paused run from its `currentStep` (= last completed
+ * step). Mirrors `gateForNext` for every step that can sit at a gate.
  */
-export function genStepForGate(step: Step): Step {
-  return step === "storyboard_inspection" ? "storyboard" : "product_sheet";
+export function gateForCurrentStep(step: Step): Gate | null {
+  switch (step) {
+    case "product_sheet":
+    case "person_sheet":
+    case "product_inspection":
+      return "reference";
+    case "storyboard":
+    case "storyboard_inspection":
+      return "storyboard";
+    default:
+      return null;
+  }
+}
+
+/**
+ * The generation step to re-run when the user revises a gated artifact
+ * (status `regenerating`). The reference gate always re-runs `person_sheet`
+ * (the product sheet is hidden from the user, so `target` "product" is ignored).
+ */
+export function genStepForRevise(gate: Gate, _target: "product" | "person" | null): Step {
+  return gate === "storyboard" ? "storyboard" : "person_sheet";
 }

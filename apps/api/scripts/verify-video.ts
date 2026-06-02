@@ -10,19 +10,19 @@
  * storyboard sheet + scenes, generates the video, and prints the videos row +
  * the run's step_events.
  */
-import { db, schema } from "../../db/index.js";
+import { db, schema } from "../src/db/index.js";
 import { eq, asc, desc } from "drizzle-orm";
-import { createOpenAIProvider } from "../../providers/openai/index.js";
-import { createVideoProvider } from "../../providers/index.js";
-import type { SkillContext } from "../types.js";
-import type { StoryboardScene } from "../image/storyboard/prompt.js";
-import { videoAgent } from "./index.js";
+import { createOpenAIProvider } from "../src/providers/openai/index.js";
+import { createVideoProvider } from "../src/providers/index.js";
+import type { SkillContext } from "../src/agents/types.js";
+import type { StoryboardScene } from "../src/agents/image/storyboard/prompt.js";
+import { videoAgent } from "../src/agents/video/index.js";
 
 async function main() {
   const runId = process.argv[2];
   const adStyle = process.argv[3] ?? "clean, neutral commercial";
   if (!runId) {
-    console.error("usage: tsx src/agents/video/verify.ts <runId> [adStyle]");
+    console.error("usage: tsx scripts/verify-video.ts <runId> [adStyle]");
     process.exit(1);
   }
 

@@ -22,6 +22,27 @@
       "when": 1780347356258,
       "tag": "0002_fearless_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780347356259,
+      "tag": "0003_fearless_tusk",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780426210975,
+      "tag": "0004_equal_gamora",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780429292156,
+      "tag": "0005_parallel_steve_rogers",
+      "breakpoints": true
     }
   ]
 }

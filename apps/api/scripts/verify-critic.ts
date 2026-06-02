@@ -12,13 +12,13 @@
 // money and is slow. Only run it explicitly; never in CI/tests.
 
 import { desc, eq } from "drizzle-orm";
-import { db, schema } from "../../db/index.js";
-import type { ImageRef } from "../../providers/openai/index.js";
-import { createOpenAIProvider } from "../../providers/openai/index.js";
-import { createVideoProvider } from "../../providers/index.js";
-import type { SkillContext } from "../types.js";
-import { criticAgent } from "./index.js";
-import type { CriticVerdict } from "./types.js";
+import { db, schema } from "../src/db/index.js";
+import type { ImageRef } from "../src/providers/openai/index.js";
+import { createOpenAIProvider } from "../src/providers/openai/index.js";
+import { createVideoProvider } from "../src/providers/index.js";
+import type { SkillContext } from "../src/agents/types.js";
+import { criticAgent } from "../src/agents/critic/index.js";
+import type { CriticVerdict } from "../src/agents/critic/types.js";
 
 /** Newest product sheet for the run joined to its asset URL. */
 async function latestProductSheet(runId: string) {

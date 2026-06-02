@@ -10,7 +10,7 @@
 import { schema } from "../../db/index.js";
 import type { ImageRef } from "../../providers/openai/index.js";
 import type { SkillContext, SkillResult } from "../types.js";
-import { persistSheet } from "../image/persist.js";
+import { persistSheet } from "../persist.js";
 import type { CriticIssue } from "./types.js";
 
 type ProductReferenceSheet = typeof schema.productReferenceSheets.$inferSelect;

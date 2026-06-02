@@ -37,7 +37,7 @@ export function RunHeader({ run }: { run: RunDetail }) {
           ) : (
             <ListChecksIcon className="size-3" />
           )}
-          {run.mode === "automatic" ? "Automatic" : "Confirm every step"}
+          {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
         </Badge>
       </div>
 

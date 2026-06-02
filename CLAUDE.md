@@ -8,7 +8,9 @@ AI ad-video generator: product image (+ optional person image) + text prompt →
 
 **`SPEC.md` = authoritative design + progress tracker.** Defines full architecture, data model, agent/skill design, F0–F8 build order. Read before any non-trivial work. Keep its `- [ ]` checklists and **Progress Log** updated as items land — that section source of truth for what done.
 
-**Current state:** scaffold only. Monorepo, tooling, stub `web`/`api`/`shared` exist. None of SPEC architecture (agents, DB, providers, worker, real UI) built yet — F0 onward greenfield. Don't assume code described in SPEC.md exists; verify first.
+**Subsystem docs:** `docs/` holds [architecture](docs/architecture.md), [agents-and-skills](docs/agents-and-skills.md), [api-reference](docs/api-reference.md), [worker-state-machine](docs/worker-state-machine.md); `apps/api/docs/` has DB schema, RLS, and BytePlus face-asset deep dives.
+
+**Current state:** F0–F7 are built and wired end to end — the agents (creative-direction / image / critic / video), provider adapters (OpenAI, BytePlus), the Drizzle/Supabase schema + migrations, the in-process worker, the `/runs` API, and the studio UI all exist. **F8 (auth / RLS policies) is NOT started** — RLS is enabled with no policies and the API is unauthenticated (see docs/architecture.md → Known pre-production gaps). Still verify specifics against the code; SPEC.md tracks per-feature status.
 
 ## Commands
 
@@ -34,7 +36,7 @@ After dependency installs, pnpm requires explicit build-script approval for `@bi
 
 ```
 apps/web      Next.js 16 + React 19 + Tailwind 4 (Turbopack, Biome, React Compiler)
-apps/api      Hono + @hono/node-server (tsx watch in dev, tsc → dist/ for prod)
+apps/api      Hono + @hono/node-server — runs via tsx in dev (watch) AND prod (no bundle/dist step)
 packages/shared   @ugc/shared — types/schemas shared by web + api
 ```
 
@@ -53,7 +55,9 @@ Once built, system is:
 - **Persistence:** Drizzle over Supabase Postgres; files in Supabase Storage (DB rows hold path + URL); Zod validates every API route using shared schemas.
 - **Hard non-goals:** no per-scene video generation, no separate audio step, no merge step, one output video per run. Seedance 2.0 produces single final video with native audio.
 
-Config/secrets Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `BYTEPLUS_API_KEY` (+ optional `BYTEPLUS_*` tuning), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`.
+Config/secrets Zod-validated in `apps/api/src/config` (server) and `NEXT_PUBLIC_*`-only on web. Keys: `OPENAI_API_KEY`, `BYTEPLUS_API_KEY` (+ optional `BYTEPLUS_*` tuning), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, plus `CORS_ORIGIN`, `WORKER_ENABLED`, `WORKER_POLL_INTERVAL_MS`, `LOG_LEVEL`.
+
+**Local dev DB:** point `apps/api/.env` `DATABASE_URL` at a LOCAL Postgres (`docker-compose.yml`, or a native cluster — both at `postgresql://postgres:postgres@localhost:5432/ugc`), never the prod Supabase. The worker claims runs by DB lock, so sharing one DB makes local + prod both drive the same runs. Then `pnpm --filter api db:migrate`. See README → Getting started.
 
 ## Relevant skills
 

@@ -12,6 +12,7 @@
 // returns a `CriticVerdict` whose `outcome` tells F7 what to do next.
 
 import type { Step } from "@ugc/shared";
+import { createLogger } from "../../lib/log.js";
 import type { SkillContext, SkillResult } from "../types.js";
 import { MAX_REGEN_PER_RUN } from "./constants.js";
 import { countRegenEvents, writeStepEvent } from "./events.js";
@@ -81,6 +82,7 @@ export async function inspectAndRemediate(
   ctx: SkillContext,
   cfg: RemediateConfig,
 ): Promise<CriticVerdict> {
+  const log = createLogger("critic", { run: ctx.runId, step: cfg.step });
   let current = cfg.initial;
   let attempts = 0;
   // Regens already spent on earlier inspection steps of this run.
@@ -92,14 +94,21 @@ export async function inspectAndRemediate(
     status: "started",
     payload: { artifactId: current.artifactId },
   });
+  log.info("▶ inspecting", { artifactId: current.artifactId, priorRegens });
 
   for (;;) {
     const verdict = await cfg.inspect(current.assetUrl);
     attempts += 1;
     const regensUsed = attempts - 1;
+    log.debug("verdict", {
+      pass: verdict.pass,
+      issues: verdict.issues.length,
+      attempt: regensUsed,
+    });
 
     if (verdict.pass) {
       await approveArtifact(cfg.table, current.artifactId);
+      log.info("✓ passed", { regensUsed });
       await writeStepEvent({
         runId: ctx.runId,
         step: cfg.step,
@@ -119,6 +128,10 @@ export async function inspectAndRemediate(
     await rejectArtifact(cfg.table, current.artifactId);
 
     if (priorRegens + regensUsed >= MAX_REGEN_PER_RUN) {
+      log.warn("✗ rejected — retry cap reached", {
+        regensUsed,
+        cap: MAX_REGEN_PER_RUN,
+      });
       await writeStepEvent({
         runId: ctx.runId,
         step: cfg.step,
@@ -135,6 +148,11 @@ export async function inspectAndRemediate(
     }
 
     const localized = isLocalized(verdict) && Boolean(cfg.regenLocalized);
+    log.info("⟳ regenerating", {
+      strategy: localized ? "localized" : "full",
+      attempt: regensUsed,
+      issues: verdict.issues.length,
+    });
     const next =
       localized && cfg.regenLocalized
         ? await cfg.regenLocalized(verdict.issues, current)

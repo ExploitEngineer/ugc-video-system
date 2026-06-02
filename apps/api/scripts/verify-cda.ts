@@ -11,8 +11,8 @@
 // WARNING: hits live OpenAI + the video provider — costs money and is slow.
 
 import { asc, eq } from "drizzle-orm";
-import { db, schema } from "../../db/index.js";
-import { driveRun } from "./orchestrator.js";
+import { db, schema } from "../src/db/index.js";
+import { driveRun } from "../src/agents/creative-direction/orchestrator.js";
 
 async function main() {
   const runId = process.argv[2];

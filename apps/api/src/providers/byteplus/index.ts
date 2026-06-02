@@ -12,6 +12,7 @@
 // bleeds into the clip.
 
 import { env } from "../../config/index.js";
+import { createLogger } from "../../lib/log.js";
 import { ensureFaceAsset, isAssetMgmtConfigured } from "./assets.js";
 import type {
   SubmitVideoInput,
@@ -20,6 +21,8 @@ import type {
   VideoTaskResult,
   VideoTaskState,
 } from "../video.js";
+
+const log = createLogger("byteplus");
 
 export type {
   SubmitVideoInput,
@@ -120,8 +123,9 @@ export function createBytePlusProvider(): VideoProvider {
             content.push(imagePart(`asset://${assetId}`));
           }
         } else {
-          console.warn(
-            "[byteplus] BYTEPLUS_ACCESS_KEY/SECRET_KEY not set — sending face refs as raw image_url; Seedance's face filter may reject them. See docs/byteplus-face-assets.md",
+          log.warn(
+            "AK/SK not set — sending face refs as raw image_url; Seedance's face filter may reject them. See docs/byteplus-face-assets.md",
+            { run: input.referenceTag },
           );
           for (const url of personRefs) content.push(imagePart(url));
         }
@@ -137,6 +141,13 @@ export function createBytePlusProvider(): VideoProvider {
         watermark: false,
       };
 
+      log.info("submit task", {
+        run: input.referenceTag,
+        model: env.BYTEPLUS_VIDEO_MODEL,
+        refs: input.referenceImages?.length ?? 0,
+        personRefs: personRefs.length,
+        durationSec: body.duration,
+      });
       const json = (await bytePlusFetch("/contents/generations/tasks", {
         method: "POST",
         body: JSON.stringify(body),
@@ -147,6 +158,7 @@ export function createBytePlusProvider(): VideoProvider {
           `BytePlus submit returned no task id: ${JSON.stringify(json)}`,
         );
       }
+      log.info("task created", { run: input.referenceTag, taskId: json.id });
       return { taskId: json.id };
     },
 
@@ -160,6 +172,7 @@ export function createBytePlusProvider(): VideoProvider {
       };
 
       const state = mapState(json.status ?? "running");
+      log.debug("poll", { taskId: task.taskId, status: json.status, state });
       if (state === "completed") {
         const videoUrl = json.content?.video_url;
         if (!videoUrl) {

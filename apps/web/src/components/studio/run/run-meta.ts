@@ -44,6 +44,46 @@ export function stepSublabel(step: Step): string {
   return `${skill} · ${agent}`;
 }
 
+/**
+ * Step-by-step pause points, mirroring the API's `gateForCurrentStep`. A paused
+ * run sits at one of two gates, named for the artifact just produced:
+ *   - reference  → after the product/person sheets, BEFORE the storyboard agent
+ *   - storyboard → after the storyboard sheet, BEFORE the video agent
+ */
+export type Gate = "reference" | "storyboard";
+
+/** The gate a paused run sits at, derived from its `currentStep` (last completed). */
+export function gateOf(step: Step | null): Gate | null {
+  switch (step) {
+    case "product_sheet":
+    case "person_sheet":
+    case "product_inspection":
+      return "reference";
+    case "storyboard":
+    case "storyboard_inspection":
+      return "storyboard";
+    default:
+      return null;
+  }
+}
+
+/** The agent step that approving a gate will START next. */
+export function gateStartsStep(gate: Gate): Step {
+  return gate === "reference" ? "storyboard" : "video";
+}
+
+/** Short label for the artifact under review at each gate. */
+export const GATE_READY_LABEL: Record<Gate, string> = {
+  reference: "Reference sheets",
+  storyboard: "Storyboard",
+};
+
+/** Short label for the agent each gate's approval kicks off. */
+export const GATE_NEXT_LABEL: Record<Gate, string> = {
+  reference: "Storyboard",
+  storyboard: "Video",
+};
+
 export type StepState =
   | "pending"
   | "active"
@@ -110,7 +150,13 @@ export function stepState(run: RunDetail, step: Step): StepState {
     if (run.status === "failed") return "failed";
     if (run.status === "awaiting_confirmation") return "awaiting";
     if (run.status === "regenerating") return "regenerating";
-    return "active";
+    // `currentStep` is the LAST COMPLETED step — never the in-flight one. The
+    // genuinely-running step is resolved above via activeStep() (step events).
+    // So while `running`, this checkpoint step is done; the next step only
+    // reads as "Generating" once the backend writes ITS `started` event. This
+    // is what stops a just-approved gate step (e.g. storyboard) from showing
+    // "Generating" while the backend is actually starting the next agent.
+    return "done";
   }
 
   if (idx < currentIdx || (hasPassed && run.status === "completed")) {

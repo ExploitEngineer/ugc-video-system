@@ -40,7 +40,13 @@ import {
   loadUploads,
   resolvePersonRef,
 } from "./inputs.js";
-import { firstStep, genStepForGate, isGateStep, nextStep } from "./plan.js";
+import {
+  firstStep,
+  gateForCurrentStep,
+  gateForNext,
+  genStepForRevise,
+  nextStep,
+} from "./plan.js";
 
 type RunRow = typeof schema.runs.$inferSelect;
 
@@ -54,6 +60,9 @@ const providers = () => {
   video ??= createVideoProvider();
   return { openai, video };
 };
+
+/** Shared OpenAI singleton for callers outside the worker (e.g. the /feedback route). */
+export const getOpenAI = (): OpenAIProvider => (openai ??= createOpenAIProvider());
 
 const readRun = (runId: string): Promise<RunRow | undefined> =>
   db.query.runs.findFirst({ where: eq(schema.runs.id, runId) });
@@ -69,6 +78,18 @@ async function setRun(runId: string, fields: Partial<RunRow>): Promise<void> {
 async function isTerminated(runId: string): Promise<boolean> {
   const run = await readRun(runId);
   return !run || run.status === "failed" || run.status === "completed";
+}
+
+/**
+ * Fencing check: does THIS worker still own the run's lock? If another worker
+ * reclaimed it (stale takeover, restart overlap), the losing driver must abort
+ * BEFORE writing so it can never overwrite the winner's state (e.g. a pause).
+ * `myId` undefined (direct/test calls, no worker) ⇒ treated as owned.
+ */
+async function ownsRun(runId: string, myId?: string): Promise<boolean> {
+  if (!myId) return true;
+  const run = await readRun(runId);
+  return run?.lockedBy === myId;
 }
 
 function buildCtx(run: RunRow): SkillContext {
@@ -90,6 +111,7 @@ function buildCtx(run: RunRow): SkillContext {
 async function executeStep(
   ctx: SkillContext,
   step: Step,
+  feedback?: string,
 ): Promise<{ outcome?: CriticOutcome }> {
   const runId = ctx.runId;
   const { productUpload, personUpload } = await loadUploads(runId);
@@ -119,6 +141,7 @@ async function executeStep(
       const res = await imageAgent.generatePersonImage(ctx, {
         productSheetRef: { source: product.assetUrl, mime: "image/png" },
         userPrompt,
+        feedback,
       });
       await writeStepEvent({
         runId,
@@ -155,6 +178,7 @@ async function executeStep(
         productSheetRef: { source: product.assetUrl, mime: "image/png" },
         personSheetRef,
         userPrompt,
+        critique: feedback,
       });
       await writeStepEvent({
         runId,
@@ -210,14 +234,21 @@ async function executeStep(
  * Drive a run to its next stopping point. Safe to call repeatedly and
  * concurrently is guarded by the worker (single-flight per runId).
  */
-export async function driveRun(runId: string): Promise<void> {
+export async function driveRun(runId: string, workerId?: string): Promise<void> {
+  const tag = workerId ? `wid=${workerId}` : undefined;
   let run = await readRun(runId);
   if (!run) return;
+
+  logRun(
+    runId,
+    `↪ driveRun entry status=${run.status} currentStep=${run.currentStep ?? "—"} mode=${run.mode} critic=${run.criticEnabled}`,
+    tag,
+  );
 
   // Phase 0 — interpret the ad style once, when leaving `queued`.
   if (run.status === "queued") {
     const ctx = buildCtx(run);
-    logRun(runId, "▶ interpreting ad style …");
+    logRun(runId, "▶ interpreting ad style …", tag);
     try {
       const { adStyle, adType } = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
@@ -228,7 +259,7 @@ export async function driveRun(runId: string): Promise<void> {
         status: "running",
         currentStep: null,
       });
-      logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`);
+      logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`, tag);
     } catch (err) {
       await failRun(runId, null, err);
       return;
@@ -250,28 +281,65 @@ export async function driveRun(runId: string): Promise<void> {
     ) {
       return;
     }
+    // Fencing: bail if another worker took over this run (e.g. restart overlap).
+    if (!(await ownsRun(runId, workerId))) {
+      logRun(runId, "⚠ lost ownership — aborting driver", tag);
+      return;
+    }
 
     const ctx = buildCtx(run);
 
-    // ── regenerating: re-run the generation step of the rejected stage ──
+    // ── regenerating: re-run the generation step of the revised gate, with
+    // the user's feedback threaded into the agent prompt ──
     if (status === "regenerating") {
-      const gate = run.currentStep;
+      const gateStep = run.currentStep;
+      const gate = gateStep ? gateForCurrentStep(gateStep) : null;
       if (!gate) {
-        await failRun(runId, null, new Error("regenerating without a current step"));
+        await failRun(runId, null, new Error("regenerating without a gate step"));
         return;
       }
-      const genStep = genStepForGate(gate);
+      // Reference gate always re-runs person_sheet (product is hidden); the
+      // storyboard gate re-runs storyboard. Thread the stored feedback in.
+      const genStep = genStepForRevise(gate, "person");
+      const feedback = run.feedback ?? undefined;
       const t0 = Date.now();
-      logRun(runId, `▶ ${genStep} (regenerate) …`);
+      logRun(
+        runId,
+        `⟳ revise gate=${gate} genStep=${genStep} feedback=${feedback ? "yes" : "none"}`,
+        tag,
+      );
+      logRun(runId, `▶ ${genStep} (revise) …`, tag);
       try {
-        await executeStep(ctx, genStep);
+        await executeStep(ctx, genStep, feedback);
       } catch (err) {
         await failRun(runId, genStep, err);
         return;
       }
-      logRun(runId, `✓ ${genStep} regenerated (${Date.now() - t0}ms)`);
+      logRun(runId, `✓ ${genStep} revised (${Date.now() - t0}ms)`, tag);
       if (await isTerminated(runId)) return; // cancelled mid-step
-      await setRun(runId, { status: "running", currentStep: genStep });
+      if (!(await ownsRun(runId, workerId))) {
+        logRun(runId, "⚠ lost ownership — aborting driver", tag);
+        return;
+      }
+      // Re-pause at the SAME gate so the user reviews the regenerated artifact
+      // and can approve or revise again (loop until approve). Clear feedback to
+      // avoid bleed. `gate` is the regenerated step's gate — genStepForRevise
+      // keeps us on the same gate (person_sheet→reference, storyboard→storyboard).
+      if (run.mode === "confirm" && gate) {
+        await setRun(runId, {
+          status: "awaiting_confirmation",
+          currentStep: genStep,
+          feedback: null,
+        });
+        logRun(runId, `⏸ PAUSED — review revised ${genStep} (${gate} gate)`, tag);
+        return;
+      }
+      // No gate (automatic mode safety net): advance via the loop.
+      await setRun(runId, {
+        status: "running",
+        currentStep: genStep,
+        feedback: null,
+      });
       continue;
     }
 
@@ -286,7 +354,7 @@ export async function driveRun(runId: string): Promise<void> {
 
     let outcome: CriticOutcome | undefined;
     const t0 = Date.now();
-    logRun(runId, `▶ ${step} …`);
+    logRun(runId, `▶ ${step} …`, tag);
     try {
       ({ outcome } = await executeStep(ctx, step));
     } catch (err) {
@@ -296,11 +364,18 @@ export async function driveRun(runId: string): Promise<void> {
     logRun(
       runId,
       `✓ ${step} (${Date.now() - t0}ms)${outcome ? ` — critic: ${outcome}` : ""}`,
+      tag,
     );
     if (await isTerminated(runId)) return; // cancelled mid-step
+    // Fencing: a step can take minutes; if another worker reclaimed the run
+    // meanwhile, abort BEFORE writing so we never overwrite its pause/state.
+    if (!(await ownsRun(runId, workerId))) {
+      logRun(runId, "⚠ lost ownership — aborting driver", tag);
+      return;
+    }
 
     if (outcome === "failed_retry_cap") {
-      logRunError(runId, `${step} rejected by critic after the retry cap`);
+      logRunError(runId, `${step} rejected by critic after the retry cap`, tag);
       await setRun(runId, {
         status: "failed",
         currentStep: step,
@@ -311,14 +386,30 @@ export async function driveRun(runId: string): Promise<void> {
 
     // Success — advance the checkpoint, then decide the next state.
     if (step === "video") {
-      logRun(runId, "✓ run completed — final video ready");
+      logRun(runId, "✓ run completed — final video ready", tag);
       await setRun(runId, { status: "completed", currentStep: step });
       return;
     }
-    if (isGateStep(step) && run.mode === "confirm") {
+    // Step-by-step gate: pause if completing this step lands us at a gate
+    // boundary (next step is storyboard or video). Independent of the Critic
+    // — gateForNext works whether or not inspection steps run.
+    const next = nextStep(step, personUploaded, run.criticEnabled);
+    const gate = gateForNext(next);
+    if (run.mode === "confirm" && gate) {
+      logRun(
+        runId,
+        `✓ ${step} → next=${next ?? "—"} gate=${gate} mode=${run.mode} ⇒ PAUSE`,
+        tag,
+      );
       await setRun(runId, { status: "awaiting_confirmation", currentStep: step });
+      logRun(runId, `⏸ PAUSED — awaiting feedback (${gate} gate)`, tag);
       return;
     }
+    logRun(
+      runId,
+      `✓ ${step} → next=${next ?? "—"} gate=${gate ?? "none"} mode=${run.mode} ⇒ ADVANCE`,
+      tag,
+    );
     await setRun(runId, { currentStep: step }); // stay running, loop on
   }
 }
@@ -337,11 +428,21 @@ async function failRun(
       step,
       status: "failed",
       payload: { error: message },
-    }).catch(() => {});
+    }).catch((e) =>
+      logRunError(
+        runId,
+        `could not record failed step_event: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
   }
   await setRun(runId, {
     status: "failed",
     ...(step ? { currentStep: step } : {}),
     error: message,
-  }).catch(() => {});
+  }).catch((e) =>
+    logRunError(
+      runId,
+      `could not mark run failed: ${e instanceof Error ? e.message : String(e)}`,
+    ),
+  );
 }
