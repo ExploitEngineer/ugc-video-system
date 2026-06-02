@@ -10,12 +10,12 @@
 // it explicitly; never in CI/tests.
 
 import { eq } from "drizzle-orm";
-import { db, schema } from "../../db/index.js";
-import { createOpenAIProvider } from "../../providers/openai/index.js";
-import { createVideoProvider } from "../../providers/index.js";
-import type { ImageRef } from "../../providers/openai/index.js";
-import type { SkillContext } from "../types.js";
-import { imageAgent } from "./index.js";
+import { db, schema } from "../src/db/index.js";
+import { createOpenAIProvider } from "../src/providers/openai/index.js";
+import { createVideoProvider } from "../src/providers/index.js";
+import type { ImageRef } from "../src/providers/openai/index.js";
+import type { SkillContext } from "../src/agents/types.js";
+import { imageAgent } from "../src/agents/image/index.js";
 
 async function main() {
   const runId = process.argv[2];

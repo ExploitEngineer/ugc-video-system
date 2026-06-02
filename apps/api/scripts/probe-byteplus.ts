@@ -8,8 +8,8 @@
 // resulting asset id. Creates real data in your BytePlus account.
 
 import { desc, eq } from "drizzle-orm";
-import { db, schema } from "../../db/index.js";
-import { isAssetMgmtConfigured, ensureFaceAsset } from "./assets.js";
+import { db, schema } from "../src/db/index.js";
+import { isAssetMgmtConfigured, ensureFaceAsset } from "../src/providers/byteplus/assets.js";
 
 async function main() {
   const runId = process.argv[2];
