@@ -7,7 +7,7 @@ import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { logRun } from "../../lib/log.js";
-import { buildVideoPrompt } from "./prompt.js";
+import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
   /**
@@ -56,6 +56,9 @@ export async function videoBuilder(
 
   try {
     // 1. Compose the cinematic motion/audio prompt from the scenes + transcripts.
+    // Try the LLM up to twice; if it returns empty/unparseable JSON, fall back to
+    // a deterministic prompt built straight from the scenes so the video step
+    // NEVER fails on a prompt/parse hiccup.
     const messages = buildVideoPrompt({
       adStyle: ctx.adStyle,
       adType: ctx.adType,
@@ -64,17 +67,37 @@ export async function videoBuilder(
       durationSec,
       critique: input.critique,
     });
-    const planRaw = await ctx.openai.chat(messages);
-    const { videoPrompt } = parseJsonObject<{ videoPrompt: string }>(planRaw);
-    if (!videoPrompt?.trim()) {
-      throw new Error("LLM returned an empty videoPrompt");
+    let videoPrompt = "";
+    for (let attempt = 1; attempt <= 2 && !videoPrompt.trim(); attempt++) {
+      try {
+        const planRaw = await ctx.openai.chat(messages);
+        videoPrompt =
+          parseJsonObject<{ videoPrompt?: string }>(planRaw).videoPrompt?.trim() ?? "";
+      } catch (err) {
+        logRun(
+          ctx.runId,
+          `video prompt attempt ${attempt} unparseable: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (!videoPrompt) {
+      videoPrompt = buildDeterministicVideoPrompt({
+        adStyle: ctx.adStyle,
+        adType: ctx.adType,
+        scenes: input.scenes,
+        durationSec,
+      });
+      logRun(
+        ctx.runId,
+        "video prompt: LLM step failed twice — using deterministic fallback",
+      );
     }
 
     // 2. Submit to the video provider. The CLEAN storyboard sheet is the sole
     // guidance image (no product/person sheets); the scenes + transcripts ride
     // in the text prompt. When the ad has a person, route the storyboard
     // through the face-asset path so Seedance's face filter accepts it.
-    const prompt = `Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. The attached storyboard image is a set of keyframes to follow for framing and action; treat it as direction, NOT as something to reproduce on screen. This is a finished commercial ad, NOT a storyboard: do NOT render any panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text — none of these may appear anywhere in the frame. ${videoPrompt}`;
+    const prompt = `@Image 1 is the attached storyboard keyframe image — the authoritative reference for product/person identity, framing and composition. Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Follow @Image 1 (the keyframes) for identity and framing, but DO NOT reproduce it as panels, a grid or a storyboard. This is a finished commercial ad: NO panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text may appear anywhere in the frame.\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
     const task = await ctx.video.submitVideo({
       referenceImages: input.hasPerson ? [] : [storyboardUrl],
