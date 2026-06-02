@@ -2,14 +2,20 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# Build scripts must be explicitly approved before they run (pnpm >= 10).
-# Anything with a postinstall/build script that is NOT listed here is "ignored",
-# and pnpm fails the install in CI — keep this list complete.
+# Dependencies whose install/build scripts are allowed to run (pnpm >= 10).
+# pnpm 11 requires the `allowBuilds` map (name -> true); `onlyBuiltDependencies`
+# is kept for cross-version compatibility. Anything with a build script not
+# allowed here is "ignored" and pnpm fails the install in CI — keep both lists
+# complete and in sync.
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
+  sharp: true
+
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - esbuild
   - sharp
 
-# Explicitly skip these build scripts (silences the ignored-build error for them).
 ignoredBuiltDependencies:
   - unrs-resolver
