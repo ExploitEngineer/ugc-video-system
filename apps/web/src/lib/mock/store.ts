@@ -156,6 +156,9 @@ export function createRun(input: CreateRunInput): string {
     projectId: randomUUID(),
     prompt: input.prompt,
     adStyle: interpretAdStyle(input.prompt),
+    adType: /\b(inspir|cinematic|story|journey|dream)/i.test(input.prompt)
+      ? "inspirational"
+      : "ugc",
     mode: input.mode,
     criticEnabled: input.criticEnabled,
     status: "queued",
@@ -165,6 +168,7 @@ export function createRun(input: CreateRunInput): string {
     updatedAt: ts,
     assets: [],
     stepEvents: [],
+    scenes: null,
   };
   runs.set(id, { detail, plan, index: 0, stepStartedAt: 0 });
   return id;

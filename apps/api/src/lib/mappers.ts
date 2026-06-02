@@ -5,13 +5,14 @@
 // `adStyle`/`currentStep`/`url`/`mime`), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
-import type { Asset, RunDetail, StepEvent } from "@ugc/shared";
+import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
 import type { Run, StepEventStatus } from "@ugc/shared";
 import type { schema } from "../db/index.js";
 
 type AssetRow = typeof schema.assets.$inferSelect;
 type StepEventRow = typeof schema.stepEvents.$inferSelect;
 type RunRow = typeof schema.runs.$inferSelect;
+type StoryboardRow = typeof schema.storyboardSheets.$inferSelect;
 
 /** `storagePath` is intentionally dropped — internal only. */
 export function toAssetDto(row: AssetRow): Asset {
@@ -44,6 +45,8 @@ export function toRunDto(row: RunRow): Run {
     projectId: row.projectId,
     prompt: row.prompt,
     adStyle: row.adStyle ?? "",
+    // Default to `ugc` until the interpret step fills it in.
+    adType: row.adType ?? "ugc",
     mode: row.mode,
     criticEnabled: row.criticEnabled,
     status: row.status,
@@ -58,10 +61,12 @@ export function toRunDetailDto(
   run: RunRow,
   assets: AssetRow[],
   stepEvents: StepEventRow[],
+  storyboard?: StoryboardRow | null,
 ): RunDetail {
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),
     stepEvents: stepEvents.map(toStepEventDto),
+    scenes: (storyboard?.scenes as Scene[] | null) ?? null,
   };
 }

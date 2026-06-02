@@ -59,13 +59,23 @@ async function main() {
   const ctx: SkillContext = {
     runId,
     adStyle,
+    adType: run.adType ?? "ugc",
     openai: createOpenAIProvider(),
     video: createVideoProvider(),
   };
 
   console.log("\n[1/1] Video Builder … (provider=byteplus)");
+  // Person present if the run has a person upload or a generated person sheet.
+  const runAssets = await db
+    .select()
+    .from(schema.assets)
+    .where(eq(schema.assets.runId, runId));
+  const hasPerson = runAssets.some(
+    (a) => a.kind === "person_upload" || a.kind === "person_sheet",
+  );
   const video = await videoAgent.videoBuilder(ctx, {
     storyboardSheetRef: { source: asset.url },
+    hasPerson,
     scenes: (storyboard.scenes ?? []) as StoryboardScene[],
     userPrompt: run.prompt,
   });

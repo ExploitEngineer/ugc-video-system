@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RunDetail } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -14,8 +14,10 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { deleteRunAction } from "@/app/studio/actions";
 import { BrandGlyph, BrandMark } from "@/components/brand-mark";
 import { isTerminal, STATUS_DOT } from "@/components/studio/run/run-meta";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -49,12 +51,14 @@ function mergeRuns(
   );
 }
 
-// Stable module-level poller — slow cadence, stops at terminal states.
-// Hoisted out of the component so its identity never changes between
-// renders (React Compiler does not memoize query-option closures).
+// Stable module-level poller — slow cadence, stops at terminal states and on
+// error (e.g. a deleted run that now 404s — otherwise it would poll forever).
+// Hoisted out of the component so its identity never changes between renders
+// (React Compiler does not memoize query-option closures).
 function runItemPollInterval(query: {
-  state: { data?: RunDetail };
+  state: { data?: RunDetail; status?: string };
 }): number | false {
+  if (query.state.status === "error") return false;
   const status = query.state.data?.status;
   if (!status) return 6000;
   return isTerminal(status) ? false : 5000;
@@ -311,6 +315,10 @@ function RunListItem({
   active: boolean;
   collapsed: boolean;
 }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [deleting, setDeleting] = useState(false);
+
   // Lightweight live status — polls slowly, stops at terminal states.
   const { data, isError } = useQuery({
     queryKey: ["run", entry.id],
@@ -318,6 +326,24 @@ function RunListItem({
     refetchInterval: runItemPollInterval,
     retry: (count, err) => (err as Error).message !== "not-found" && count < 1,
   });
+
+  async function handleDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    const ok = await deleteRunAction(entry.id);
+    if (!ok) {
+      setDeleting(false);
+      toast.error("Couldn't delete chat — try again.");
+      return;
+    }
+    // Drop it from local history and the query cache so it can't reappear
+    // from either source, then leave its page if we're on it.
+    removeRun(entry.id);
+    queryClient.removeQueries({ queryKey: ["run", entry.id] });
+    queryClient.invalidateQueries({ queryKey: ["runs"] });
+    toast.success("Chat deleted");
+    if (active) router.push("/studio");
+  }
 
   const status = data?.status;
   const dot = isError
@@ -358,10 +384,14 @@ function RunListItem({
           <DropdownMenuContent align="end" sideOffset={6} className="w-40">
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => removeRun(entry.id)}
+              disabled={deleting}
+              onSelect={(e) => {
+                e.preventDefault();
+                void handleDelete();
+              }}
             >
               <Trash2Icon className="size-4" />
-              Delete chat
+              {deleting ? "Deleting…" : "Delete chat"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

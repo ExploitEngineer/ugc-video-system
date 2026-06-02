@@ -75,6 +75,18 @@ async function mutateRun(
   }
 }
 
+/** Permanently delete a run + all its files/DB rows. Returns true on success. */
+export async function deleteRunAction(runId: string): Promise<boolean> {
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}`), { method: "DELETE" });
+    // 404 = the run is already gone; the goal (it no longer exists) is met, so
+    // treat it as success and let the client clear it from local history.
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 export async function confirmStepAction(
   runId: string,
 ): Promise<RunDetail | null> {

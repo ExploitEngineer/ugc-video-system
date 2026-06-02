@@ -16,8 +16,7 @@ export function BrandGlyph({ className }: { className?: string }) {
         className,
       )}
     >
-      A
-      {/* notch accent — a thin dark slot, the studio "cut". */}
+      A{/* notch accent — a thin dark slot, the studio "cut". */}
       <span className="bg-brand-foreground/70 absolute right-1 bottom-1 h-0.5 w-1.5 rounded-full" />
     </span>
   );
@@ -39,10 +38,7 @@ export function BrandMark({
 }) {
   const mark = (
     <span
-      className={cn(
-        "inline-flex items-center gap-2 select-none",
-        className,
-      )}
+      className={cn("inline-flex items-center gap-2 select-none", className)}
     >
       {showGlyph && <BrandGlyph />}
       <span className="text-display text-[1.15rem] leading-none font-bold tracking-tight">

@@ -24,9 +24,21 @@ const cabinet = localFont({
   variable: "--font-display",
   display: "swap",
   src: [
-    { path: "./fonts/CabinetGrotesk-Medium.woff2", weight: "500", style: "normal" },
-    { path: "./fonts/CabinetGrotesk-Bold.woff2", weight: "700", style: "normal" },
-    { path: "./fonts/CabinetGrotesk-Extrabold.woff2", weight: "800", style: "normal" },
+    {
+      path: "./fonts/CabinetGrotesk-Medium.woff2",
+      weight: "500",
+      style: "normal",
+    },
+    {
+      path: "./fonts/CabinetGrotesk-Bold.woff2",
+      weight: "700",
+      style: "normal",
+    },
+    {
+      path: "./fonts/CabinetGrotesk-Extrabold.woff2",
+      weight: "800",
+      style: "normal",
+    },
   ],
 });
 

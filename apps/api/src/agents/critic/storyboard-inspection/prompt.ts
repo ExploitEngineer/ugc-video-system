@@ -2,8 +2,9 @@
 //
 // The storyboard sheet is attached as a vision image; the LLM judges it against
 // the StoryBoard Generator's promises (four ordered panels, product/person
-// consistent with the reference sheets, minimal annotation, a coherent ~15s
-// arc) and returns a strict-JSON verdict. Issues are scoped per panel via
+// consistent with the reference sheets, CLEAN keyframes with zero baked-in
+// text/numbers/arrows, a coherent ~15s arc) and returns a strict-JSON verdict.
+// Issues are scoped per panel via
 // `region: "scene_N"`. Storyboard regen is always full (no localized path).
 
 import type { ChatMessage, ImageRef } from "../../../providers/openai/index.js";
@@ -41,9 +42,13 @@ export function buildStoryboardInspectionPrompt({
     "   colors and proportions.",
     "3. The four panels form one coherent arc (hook → product → benefit/use →",
     "   payoff) that reads as a single continuous ~15s ad in the requested style.",
-    "4. MINIMAL annotation only: a small scene-number badge, simple motion/camera",
-    "   arrows, and one short caption per panel. No dense notes, paragraphs,",
-    "   timecodes, extra labels, logos, or watermarks.",
+    "4. CLEAN KEYFRAMES — ZERO annotation. The panels must be pure photorealistic",
+    "   imagery with NO text of any kind: no scene numbers or number badges, no",
+    "   captions, labels, titles, subtitles or timecodes, no motion/camera arrows,",
+    "   no callouts, hand-drawn marks, logos or watermarks anywhere in or over the",
+    "   panels. The ONLY allowed non-photographic element is the thin plain",
+    "   separator between panels. Any baked-in text, number, caption or arrow is a",
+    "   `blocking` failure (it would leak into the video).",
     hasPerson
       ? "This ad features a person — they must appear and stay consistent."
       : "This ad has no person — do not penalize the absence of one.",

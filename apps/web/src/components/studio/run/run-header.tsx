@@ -1,5 +1,11 @@
 import type { RunDetail } from "@ugc/shared";
-import { ClapperboardIcon, GaugeIcon, ListChecksIcon } from "lucide-react";
+import {
+  ClapperboardIcon,
+  GaugeIcon,
+  ListChecksIcon,
+  SparklesIcon,
+  UserIcon,
+} from "lucide-react";
 
 import { STATUS_DOT, STATUS_LABEL } from "@/components/studio/run/run-meta";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +22,14 @@ export function RunHeader({ run }: { run: RunDetail }) {
         <Badge variant="brand">
           <ClapperboardIcon className="size-3" />
           {run.adStyle}
+        </Badge>
+        <Badge variant="secondary">
+          {run.adType === "ugc" ? (
+            <UserIcon className="size-3" />
+          ) : (
+            <SparklesIcon className="size-3" />
+          )}
+          {run.adType === "ugc" ? "UGC" : "Inspirational"}
         </Badge>
         <Badge variant="secondary">
           {run.mode === "automatic" ? (

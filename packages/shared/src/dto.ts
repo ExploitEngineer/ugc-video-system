@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import {
+  adTypeSchema,
   assetKindSchema,
   modeSchema,
   runStatusSchema,
@@ -49,6 +50,7 @@ export const runSchema = z.object({
   projectId: z.string(),
   prompt: z.string(),
   adStyle: z.string(),
+  adType: adTypeSchema,
   mode: modeSchema,
   criticEnabled: z.boolean(),
   status: runStatusSchema,
@@ -59,10 +61,26 @@ export const runSchema = z.object({
 });
 export type Run = z.infer<typeof runSchema>;
 
+/**
+ * One planned storyboard scene — the script for ~3-4s of the ad. `transcript`
+ * is the spoken line for the scene (UGC review line or voiceover narration).
+ */
+export const sceneSchema = z.object({
+  index: z.number(),
+  cameraAngle: z.string(),
+  actionMovement: z.string(),
+  sceneDescription: z.string(),
+  transcript: z.string(),
+  adStyle: z.string(),
+});
+export type Scene = z.infer<typeof sceneSchema>;
+
 /** Shape returned by `GET /runs/:id` — run + its artifacts + audit trail. */
 export const runDetailSchema = runSchema.extend({
   assets: z.array(assetSchema),
   stepEvents: z.array(stepEventSchema),
+  /** Storyboard scenes + transcripts, null until the storyboard step lands. */
+  scenes: z.array(sceneSchema).nullable(),
 });
 export type RunDetail = z.infer<typeof runDetailSchema>;
 

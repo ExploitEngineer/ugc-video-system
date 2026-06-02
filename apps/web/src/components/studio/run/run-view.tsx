@@ -20,8 +20,10 @@ import {
 import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { ConfirmBar } from "@/components/studio/run/confirm-bar";
+import { NowRunning } from "@/components/studio/run/now-running";
 import { RunHeader } from "@/components/studio/run/run-header";
 import { isTerminal } from "@/components/studio/run/run-meta";
+import { ScriptPanel } from "@/components/studio/run/script-panel";
 import { StepTimeline } from "@/components/studio/run/step-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,8 +40,16 @@ const POLL_MS = 1500;
 function runPollInterval(query: {
   state: { data?: RunDetail };
 }): number | false {
-  const status = query.state.data?.status;
+  const data = query.state.data;
+  const status = data?.status;
   if (!status) return POLL_MS;
+  // Keep polling if the run reports completed but the final video asset hasn't
+  // surfaced in this response yet — otherwise the clip would only appear on a
+  // manual refresh. Stops as soon as the asset lands.
+  if (status === "completed") {
+    const hasVideo = data?.assets.some((a) => a.kind === "final_video");
+    return hasVideo ? false : POLL_MS;
+  }
   if (isTerminal(status)) return false;
   if (status === "awaiting_confirmation") return false;
   return POLL_MS;
@@ -132,6 +142,8 @@ export function RunView({ runId }: { runId: string }) {
     <div className="flex flex-col gap-8">
       <RunHeader run={run} />
 
+      <NowRunning run={run} />
+
       {run.status === "completed" && finalVideo && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -169,6 +181,8 @@ export function RunView({ runId }: { runId: string }) {
           <StepTimeline run={run} />
         </CardContent>
       </Card>
+
+      <ScriptPanel run={run} />
 
       {run.mode === "confirm" && !isTerminal(run.status) && (
         <ConfirmBar

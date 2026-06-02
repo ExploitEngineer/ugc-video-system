@@ -46,6 +46,7 @@ async function main() {
   const ctx: SkillContext = {
     runId,
     adStyle,
+    adType: run.adType ?? "ugc",
     openai: createOpenAIProvider(),
     video: createVideoProvider(),
   };

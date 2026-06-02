@@ -41,6 +41,14 @@ export type AssetKind = z.infer<typeof assetKindSchema>;
 export const modeSchema = z.enum(["automatic", "confirm"]);
 export type Mode = z.infer<typeof modeSchema>;
 
+/**
+ * Ad treatment, inferred from the prompt by the Creative Direction Agent.
+ * `ugc` — a person gives a spoken review/testimonial of the product.
+ * `inspirational` — open-ended cinematic scene with voiceover narration.
+ */
+export const adTypeSchema = z.enum(["ugc", "inspirational"]);
+export type AdType = z.infer<typeof adTypeSchema>;
+
 /** Approval state of a generated artifact (sheets, video). */
 export const artifactStatusSchema = z.enum(["draft", "approved", "rejected"]);
 export type ArtifactStatus = z.infer<typeof artifactStatusSchema>;
