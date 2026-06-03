@@ -17,8 +17,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { createRunAction } from "@/app/studio/actions";
 import { Button } from "@/components/ui/button";
+import { createRun } from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -74,17 +74,19 @@ export function CreateRunForm({
     fd.set("criticEnabled", criticEnabled ? "true" : "false");
 
     startTransition(async () => {
-      const result = await createRunAction(fd);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const detail = await createRun(fd);
+        addRun({
+          id: detail.id,
+          prompt: prompt.trim(),
+          createdAt: detail.createdAt,
+        });
+        router.push(`/studio/${detail.id}`);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Could not start the run.",
+        );
       }
-      addRun({
-        id: result.runId,
-        prompt: prompt.trim(),
-        createdAt: new Date().toISOString(),
-      });
-      router.push(`/studio/${result.runId}`);
     });
   }
 
