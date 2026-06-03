@@ -2,8 +2,8 @@
 //
 // The storyboard sheet is attached as a vision image; the LLM judges it against
 // the StoryBoard Generator's promises (four ordered panels, product/person
-// consistent with the reference sheets, CLEAN keyframes with zero baked-in
-// text/numbers/arrows, a coherent ~15s arc) and returns a strict-JSON verdict.
+// consistent with the reference sheets, each panel LABELLED with its number
+// badge + caption, a coherent ~15s arc) and returns a strict-JSON verdict.
 // Issues are scoped per panel via
 // `region: "scene_N"`. Storyboard regen is always full (no localized path).
 
@@ -42,13 +42,16 @@ export function buildStoryboardInspectionPrompt({
     "   colors and proportions.",
     "3. The four panels form one coherent arc (hook → product → benefit/use →",
     "   payoff) that reads as a single continuous ~15s ad in the requested style.",
-    "4. CLEAN KEYFRAMES — ZERO annotation. The panels must be pure photorealistic",
-    "   imagery with NO text of any kind: no scene numbers or number badges, no",
-    "   captions, labels, titles, subtitles or timecodes, no motion/camera arrows,",
-    "   no callouts, hand-drawn marks, logos or watermarks anywhere in or over the",
-    "   panels. The ONLY allowed non-photographic element is the thin plain",
-    "   separator between panels. Any baked-in text, number, caption or arrow is a",
-    "   `blocking` failure (it would leak into the video).",
+    "4. LABELLED PANELS — each of the four panels MUST carry: (a) a legible",
+    "   scene-number badge — 01, 02, 03, 04 in reading order (top-left=01 …",
+    "   bottom-right=04), and (b) a legible one-line caption bar along its bottom",
+    "   describing that shot. A missing, illegible, wrong-number, or out-of-order",
+    "   badge/caption is a `major` (or `blocking` if it makes the sheet unusable",
+    "   as an ordered shot guide). The panel INTERIORS must otherwise stay pure",
+    "   photorealistic keyframes: aside from the number badge and its caption bar,",
+    "   there must be NO other text — no extra titles, subtitles, timecodes,",
+    "   callouts, hand-drawn marks, logos or watermarks — and NO motion/camera",
+    "   arrows anywhere. Stray extra text, garbled lettering or arrows are a defect.",
     hasPerson
       ? "This ad features a person — they must appear and stay consistent."
       : "This ad has no person — do not penalize the absence of one.",

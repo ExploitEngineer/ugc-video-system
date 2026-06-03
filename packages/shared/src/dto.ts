@@ -66,14 +66,21 @@ export type Run = z.infer<typeof runSchema>;
 /**
  * One planned storyboard scene — the script for ~3-4s of the ad. `transcript`
  * is the spoken line for the scene (UGC review line or voiceover narration).
+ * `panelCaption` is the brief label burned into the storyboard panel (a
+ * condensed form of `sceneDescription`); optional for rows created before
+ * labelled storyboards landed.
  */
 export const sceneSchema = z.object({
-  index: z.number(),
-  cameraAngle: z.string(),
-  actionMovement: z.string(),
-  sceneDescription: z.string(),
-  transcript: z.string(),
-  adStyle: z.string(),
+  // Field-level `.catch` keeps a single missing/malformed field (e.g. legacy
+  // rows with no `transcript`) from failing the whole `scenes` array and
+  // blanking the script panel. Fallbacks preserve the non-null wire contract.
+  index: z.number().catch(0),
+  cameraAngle: z.string().catch(""),
+  actionMovement: z.string().catch(""),
+  sceneDescription: z.string().catch(""),
+  panelCaption: z.string().optional(),
+  transcript: z.string().catch(""),
+  adStyle: z.string().catch(""),
 });
 export type Scene = z.infer<typeof sceneSchema>;
 

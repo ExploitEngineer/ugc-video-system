@@ -5,11 +5,12 @@
 // Seedance runs async: POST a generation task → poll the task id → video_url.
 // Native audio is requested via `generate_audio: true` (Seedance 2.0 feature).
 //
-// Generation is driven by the text prompt + the clean storyboard keyframe sheet
-// passed as a guidance image — via `referenceImages` (no person) or
+// Generation is driven by the text prompt + the labelled storyboard keyframe
+// sheet passed as a guidance image — via `referenceImages` (no person) or
 // `personReferences` (with a person, so it clears Seedance's face filter). The
-// caller sends a storyboard with no baked-in text/numbers/arrows, so nothing
-// bleeds into the clip.
+// sheet carries per-panel number badges + captions that guide the ordered shot
+// sequence; the caller's prompt instructs Seedance to keep those badges/captions
+// out of the rendered frame.
 
 import { env } from "../../config/index.js";
 import { createLogger } from "../../lib/log.js";
@@ -101,7 +102,7 @@ export function createBytePlusProvider(): VideoProvider {
     async submitVideo(input: SubmitVideoInput): Promise<VideoTask> {
       // content[] = text prompt, then (optional) clean first frame, then any
       // plain image refs, then the registered face asset(s). Callers pass the
-      // clean storyboard sheet here (as a plain ref or a face asset).
+      // labelled storyboard sheet here (as a plain ref or a face asset).
       const content: ContentPart[] = [{ type: "text", text: input.prompt }];
       if (input.firstFrame) {
         content.push(imagePart(input.firstFrame, "first_frame"));

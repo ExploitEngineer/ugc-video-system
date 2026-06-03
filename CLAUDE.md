@@ -8,7 +8,7 @@ AI ad-video generator: product image (+ optional person image) + text prompt →
 
 **`SPEC.md` = authoritative design + progress tracker.** Defines full architecture, data model, agent/skill design, F0–F8 build order. Read before any non-trivial work. Keep its `- [ ]` checklists and **Progress Log** updated as items land — that section source of truth for what done.
 
-**Subsystem docs:** `docs/` holds [architecture](docs/architecture.md), [agents-and-skills](docs/agents-and-skills.md), [api-reference](docs/api-reference.md), [worker-state-machine](docs/worker-state-machine.md); `apps/api/docs/` has DB schema, RLS, and BytePlus face-asset deep dives.
+**Subsystem docs:** `docs/` holds [architecture](docs/architecture.md), [agents-and-skills](docs/agents-and-skills.md), [api-reference](docs/api-reference.md), [worker-state-machine](docs/worker-state-machine.md); `apps/api/docs/` has the [end-to-end pipeline](apps/api/docs/pipeline.md) (image/video API payloads), DB schema, RLS, and BytePlus face-asset deep dives.
 
 **Current state:** F0–F7 are built and wired end to end — the agents (creative-direction / image / critic / video), provider adapters (OpenAI, BytePlus), the Drizzle/Supabase schema + migrations, the in-process worker, the `/runs` API, and the studio UI all exist. **F8 (auth / RLS policies) is NOT started** — RLS is enabled with no policies and the API is unauthenticated (see docs/architecture.md → Known pre-production gaps). Still verify specifics against the code; SPEC.md tracks per-feature status.
 
