@@ -31,6 +31,24 @@ function extFor(contentType: string): string {
   return EXT_BY_MIME[contentType] ?? "bin";
 }
 
+/** Upload retry tuning — mirrors the BytePlus provider's transient-failure policy. */
+const UPLOAD_MAX_ATTEMPTS = 3;
+const UPLOAD_BACKOFF_MS = 800;
+
+/**
+ * A bare undici/network failure (the `fetch failed` / connection-reset / timeout
+ * family) that never reached Supabase, so retrying is safe. A real error (missing
+ * bucket, bad key) does NOT match — we fail fast on those instead of retrying.
+ */
+const TRANSIENT_UPLOAD_ERROR =
+  /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timed? ?out/i;
+
+const isTransientUpload = (message: string): boolean =>
+  TRANSIENT_UPLOAD_ERROR.test(message);
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 export interface UploadAssetInput {
   runId: string;
   kind: AssetKind;
@@ -50,19 +68,29 @@ export async function uploadAsset({
   bytes,
   contentType,
 }: UploadAssetInput): Promise<UploadAssetResult> {
+  // The random UUID keeps `storagePath` stable across retries, so re-uploading
+  // after a transient failure can never collide with a prior attempt.
   const storagePath = `runs/${runId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
 
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, bytes, { contentType, upsert: false });
+  let lastMessage = "";
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(storagePath, bytes, { contentType, upsert: false });
 
-  if (error) {
-    throw internal(
-      `Storage upload failed (bucket "${BUCKET}" — does it exist?): ${error.message}`,
-    );
+    if (!error) return { storagePath, url: getPublicUrl(storagePath) };
+
+    lastMessage = error.message;
+    // Fail fast on real errors (missing bucket, bad key) — only retry network blips.
+    if (!isTransientUpload(error.message) || attempt === UPLOAD_MAX_ATTEMPTS) break;
+    await sleep(UPLOAD_BACKOFF_MS * attempt);
   }
 
-  return { storagePath, url: getPublicUrl(storagePath) };
+  throw internal(
+    isTransientUpload(lastMessage)
+      ? `Storage upload failed after ${UPLOAD_MAX_ATTEMPTS} attempts (network error): ${lastMessage}`
+      : `Storage upload failed (bucket "${BUCKET}" — does it exist?): ${lastMessage}`,
+  );
 }
 
 /** Stable public URL for an object in the public bucket. */
