@@ -36,20 +36,39 @@ export function buildVideoPrompt(input: {
 }): ChatMessage[] {
   const { adStyle, adType, userPrompt, scenes, durationSec, critique } = input;
 
-  const audioDirective =
-    adType === "ugc"
-      ? 'AUDIO — UGC review: a single on-screen person SPEAKS the transcript lines below in order, natural/conversational/authentic, lip-synced on camera as the primary audio with light realistic ambience. Quote each line verbatim in its time slice so the model speaks it.'
-      : 'AUDIO — inspirational ad: the transcript lines below are VOICEOVER NARRATION over the visuals (not lip-synced on screen), evocative tone, layered with fitting music/ambience. Quote each line verbatim in its time slice.';
+  const ugc = adType === "ugc";
+
+  const audioDirective = ugc
+    ? 'AUDIO — UGC review: a single on-screen person SPEAKS the transcript lines below in order, natural/conversational/authentic, lip-synced on camera as the primary audio with light realistic ambience and NO background/library music. Quote each line verbatim in its time slice so the model speaks it.'
+    : 'AUDIO — inspirational ad: the transcript lines below are VOICEOVER NARRATION over the visuals (not lip-synced on screen), evocative tone, layered with fitting music/ambience. Quote each line verbatim in its time slice.';
+
+  // Ad-type-conditional rendering aesthetic. UGC must read as authentic phone
+  // footage, NOT the glossy cinematic polish forced on every type before.
+  const globalLook = ugc
+    ? "Render as AUTHENTIC UGC: real UGC-creator footage shot on a handheld iPhone, natural / available light, a real everyday setting, slightly imperfect candid framing, a real everyday person talking directly to camera — NOT a glossy studio commercial."
+    : "Render as a polished, cinematic commercial: intentional lighting, rich color and depth, a full-frame cinematic live-action look.";
+
+  const qualityLook = ugc
+    ? "it must look like REAL phone footage — natural skin and hair with real imperfections, true-to-life available lighting, an authentic handheld feel; NOT studio-polished, NOT a glossy commercial, no heavy cinematic color grade"
+    : "4K UHD, rich detail, photorealistic real-camera cinematic live-action, real lifelike humans with natural skin/hair and true-to-life lighting";
+
+  // Product-realism negatives — shared, kills the box/unboxing/seam-morph artifacts.
+  const productNegatives =
+    'NO invented packaging, boxes, cartons, gift boxes, pouches or unboxing, NO "product box", NO duplicated copies of the product, NO opening / unfolding / transforming the product or any container, NO seam-morph or warping of the product — it stays ONE real solid item, worn or in real use';
+
+  const onScreenNegatives = ugc
+    ? "NO background or library music (only the spoken voice and light natural ambience), and NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame"
+    : "NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame";
 
   const system = [
     "You are a Seedance 2.0 multimodal video director and prompt engineer for an AI ad-video pipeline.",
-    `Author ONE engineered Seedance 2.0 video prompt for a ~${durationSec}s, fully photorealistic live-action commercial ad in the "${adStyle}" style.`,
+    `Author ONE engineered Seedance 2.0 video prompt for a ~${durationSec}s, fully photorealistic live-action ${ugc ? "UGC-style ad" : "commercial ad"} in the "${adStyle}" style.`,
     "A LABELLED storyboard sheet is attached separately as `@Image 1` — a 2×2 grid of FOUR numbered keyframe panels (badge 01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right), each with a bottom caption. It is the AUTHORITATIVE reference for product/person identity, framing and the ORDERED shot sequence: panel 01 is the keyframe for the first time slice, 02 the second, 03 the third, 04 the fourth — follow the panels in number order. Use each panel for identity, framing and composition of its slice, but the OUTPUT is ONE continuous live-action shot: do NOT render the grid, panels, separators, number badges, caption bars, caption text, arrows, subtitles or watermark text into the video — they are direction only.",
     "Cover ALL EIGHT core elements: subject (who/what), action (what happens), setting/environment (where), light & tone (atmosphere), camera movement (how shot), visual style, image quality, and anti-distortion constraints.",
     "Organize the prompt into THREE labelled segments, written inline as ONE continuous paragraph using the literal labels below — do NOT use any line breaks, newlines, bullet points or list formatting anywhere in the output string.",
-    "Segment 1 'Global setup:' — lock the subject (the product, and the on-screen presenter when present), the environment, the visual style, and the overall lighting/mood. Explicitly anchor identity to `@Image 1`; after any `@Image 1` reference immediately add a noun (e.g. `@Image 1 (the presenter)`, `@Image 1 (the product)`) — never attach a verb, number or location word directly to `@Image 1`.",
-    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE slice per storyboard panel in number order (panel 01 → first slice, 02 → second, 03 → third, 04 → fourth), written inline like '0-4s: …; 4-8s: …'. For EACH slice give its time range, the on-screen action (matching that panel's keyframe and caption), EXACTLY ONE camera movement (choose a single move — static, dolly in/out, pan, tilt, tracking, or push — NEVER combine moves in one slice), and the synchronized audio. ${audioDirective}`,
-    "Segment 3 'Quality & constraints:' — 4K UHD, rich detail, photorealistic real-camera live-action, real lifelike humans with natural skin/hair and true-to-life lighting. Mandatory anti-distortion fallback: faces remain stable and undistorted with clear, consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra/missing limbs, face jumping, or clipping through objects. State explicitly that NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text appear anywhere in the frame.",
+    `Segment 1 'Global setup:' — lock the subject (the product, and the on-screen presenter when present), the environment, the visual style, and the overall lighting/mood. ${globalLook} The product is shown WORN or IN REAL USE, never as packaging or a box. Explicitly anchor identity to \`@Image 1\`; after any \`@Image 1\` reference immediately add a noun (e.g. \`@Image 1 (the presenter)\`, \`@Image 1 (the product)\`) — never attach a verb, number or location word directly to \`@Image 1\`.`,
+    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE slice per storyboard panel in number order (panel 01 → first slice, 02 → second, 03 → third, 04 → fourth), written inline like '0-4s: …; 4-8s: …'. For EACH slice give its time range, the on-screen action (matching that panel's keyframe and caption, with the product worn or in real use), EXACTLY ONE camera movement (choose a single move — static, dolly in/out, pan, tilt, tracking, or push — NEVER combine moves in one slice), and the synchronized audio. ${audioDirective}`,
+    `Segment 3 'Quality & constraints:' — ${qualityLook}. Mandatory anti-distortion fallback: faces remain stable and undistorted with clear, consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra/missing limbs, face jumping, or clipping through objects. ${productNegatives}. State explicitly that ${onScreenNegatives}.`,
     "Frame for 16:9 widescreen (horizontal). Keep it filmable within the duration.",
     "CRITICAL OUTPUT RULE: return STRICT JSON only — a single object {\"videoPrompt\": \"…\"} whose value is ONE single-line string with NO raw line breaks. Escape nothing else; just keep it on one line.",
   ].join(" ");
@@ -102,9 +121,16 @@ export function buildDeterministicVideoPrompt(input: {
   durationSec: number;
 }): string {
   const { adStyle, adType, scenes, durationSec } = input;
+  const ugc = adType === "ugc";
   const count = scenes.length || 1;
   const step = durationSec / count;
-  const speak = adType === "ugc" ? 'the on-screen presenter says' : "voiceover says";
+  const speak = ugc ? "the on-screen presenter says" : "voiceover says";
+  const globalLook = ugc
+    ? "Render as authentic UGC: handheld iPhone footage, natural available light, a real everyday setting, slightly imperfect candid framing, a real person talking directly to camera — not a glossy studio commercial."
+    : "Render as a polished cinematic commercial: intentional lighting, rich color and depth, a full-frame cinematic live-action look.";
+  const quality = ugc
+    ? "looks like real phone footage with natural skin and hair and real imperfections, true-to-life available lighting and an authentic handheld feel, not studio-polished"
+    : "4K UHD, rich detail, photorealistic real-camera live-action with real lifelike humans, natural skin and hair and true-to-life lighting";
   const timeline = scenes
     .map((s, i) => {
       const a = Math.round(i * step);
@@ -119,9 +145,9 @@ export function buildDeterministicVideoPrompt(input: {
     })
     .join("; ");
   return (
-    `Global setup: @Image 1 (the labelled storyboard) is a 2×2 grid of four numbered keyframe panels (01–04) for the product and any on-screen presenter; render ONE continuous, fully photorealistic live-action commercial in the "${adStyle}" style that follows the panels in number order, keeping the identity, framing and composition of @Image 1 (the keyframes) but NEVER showing the grid, panels, number badges or caption text. ` +
+    `Global setup: @Image 1 (the labelled storyboard) is a 2×2 grid of four numbered keyframe panels (01–04) for the product and any on-screen presenter; render ONE continuous, fully photorealistic live-action ad in the "${adStyle}" style that follows the panels in number order, keeping the identity, framing and composition of @Image 1 (the keyframes) but NEVER showing the grid, panels, number badges or caption text. ${globalLook} The product is shown worn or in real use — never as packaging, a box or an unboxing. ` +
     `Timeline: ${timeline}. ` +
-    "Quality & constraints: 4K UHD, rich detail, photorealistic real-camera live-action with real lifelike humans, natural skin and hair and true-to-life lighting; faces stay stable and undistorted with consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra or missing limbs, face jumping, or clipping through objects; 16:9 widescreen; NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text anywhere in the frame."
+    `Quality & constraints: ${quality}; faces stay stable and undistorted with consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra or missing limbs, face jumping, or clipping through objects; ONE real solid product — no duplicated copies, no invented packaging or boxes, no opening or transforming the product or any container, no seam-morph; 16:9 widescreen; ${ugc ? "no background or library music (only the spoken voice and light natural ambience); " : ""}NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame.`
   );
 }
 
