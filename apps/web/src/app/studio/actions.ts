@@ -1,66 +1,14 @@
 "use server";
 
 // Run mutations as Next.js server actions. These run server-side (Node), so
-// they call the Hono API directly — no browser CORS. Create forwards the
-// multipart form to POST /runs and returns the new run id so the client can
-// record it in the sidebar history and navigate. Confirm/feedback/cancel POST
-// to the gating routes and return the fresh RunDetail to prime the query cache.
+// they call the Hono API directly — no browser CORS. Confirm/feedback/cancel
+// POST to the gating routes and return the fresh RunDetail to prime the query
+// cache. (Run CREATION is NOT here: the browser uploads the multipart form
+// straight to the API via `createRun` in lib/api.ts, to skip the Next Server
+// Action 1 MB body limit that rejects/crashes on real image uploads.)
 
-import { createRunInputSchema, type RunDetail } from "@ugc/shared";
+import type { RunDetail } from "@ugc/shared";
 import { apiUrl } from "@/lib/api";
-
-export type ActionResult =
-  | { ok: true; runId: string }
-  | { ok: false; error: string };
-
-function hasFile(value: FormDataEntryValue | null): value is File {
-  return value instanceof File && value.size > 0;
-}
-
-export async function createRunAction(
-  formData: FormData,
-): Promise<ActionResult> {
-  const parsed = createRunInputSchema.safeParse({
-    prompt: formData.get("prompt"),
-    mode: formData.get("mode"),
-    criticEnabled: formData.get("criticEnabled") !== "false",
-    hasPersonImage: hasFile(formData.get("personImage")),
-  });
-
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: parsed.error.issues[0]?.message ?? "Invalid input",
-    };
-  }
-  if (!hasFile(formData.get("productImage"))) {
-    return { ok: false, error: "A product image is required." };
-  }
-
-  try {
-    // Forward the FormData verbatim — fetch sets the multipart boundary, and
-    // the field names already match the api (productImage/personImage/…).
-    const res = await fetch(apiUrl("/runs"), {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      return { ok: false, error: body?.error ?? "Failed to start run." };
-    }
-    const detail = (await res.json()) as RunDetail;
-    return { ok: true, runId: detail.id };
-  } catch (err) {
-    // Server-side log (Next server stdout) — the user still sees a generic message.
-    console.error("[createRunAction] request to API failed:", err);
-    return {
-      ok: false,
-      error: "Could not reach the server. Is the API running?",
-    };
-  }
-}
 
 async function mutateRun(
   runId: string,

@@ -1,12 +1,31 @@
-// Server-side base URL for the Hono api. Server actions and route handlers run
-// in Node (not the browser), so they call apps/api directly — no CORS. Reuses
-// the public NEXT_PUBLIC_API_URL; falls back to the dev port.
+// Base URL for the Hono api. Server actions and route handlers run in Node (no
+// CORS); `createRun` below also calls it straight from the browser to skip the
+// Next Server Action 1 MB body limit on image uploads. Reuses the public
+// NEXT_PUBLIC_API_URL (must be browser-reachable in prod); falls back to dev.
 
 import type { Run, RunDetail } from "@ugc/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 export const apiUrl = (path: string) => `${API_URL}${path}`;
+
+/**
+ * Create a run by POSTing the multipart form straight to the API from the
+ * browser — NOT through a Next Server Action, whose 1 MB body cap rejects
+ * real product/person images (and crashes the Next server with a 413). The API
+ * validates the input and returns the new `RunDetail`. Throws a readable error
+ * on failure. Requires the API's `CORS_ORIGIN` to include the frontend origin.
+ */
+export async function createRun(formData: FormData): Promise<RunDetail> {
+  const res = await fetch(apiUrl("/runs"), { method: "POST", body: formData });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to start run.");
+  }
+  return res.json() as Promise<RunDetail>;
+}
 
 /**
  * Client-side run list through the Next proxy (`/api/runs`). Powers the studio
