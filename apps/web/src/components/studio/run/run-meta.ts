@@ -161,7 +161,21 @@ export function stepState(run: RunDetail, step: Step): StepState {
     run.currentStep === null
   ) {
     if (events.some((e) => e.status === "failed")) return "failed";
-    if (events.some((e) => e.status === "started")) return "active";
+    // Synchronize the START of the parallel reference phase: as soon as EITHER
+    // participating sheet has begun, show every participating sheet as
+    // "Generating". Otherwise the sheet whose `started` event lands in the
+    // earlier poll flips to active ~1 poll ahead of the other, which reads as a
+    // glitch (one spinning, one still pending). person_sheet only participates
+    // when it is actually generated; when a person image was uploaded the step
+    // is skipped, so it must not be pulled into the running pair.
+    const personUploaded = run.assets.some((a) => a.kind === "person_upload");
+    const participates = step === "product_sheet" || !personUploaded;
+    if (participates) {
+      const anyReferenceStarted = run.stepEvents.some(
+        (e) => REFERENCE_STEPS.includes(e.step) && e.status === "started",
+      );
+      if (anyReferenceStarted) return "active";
+    }
     // Not started yet — fall through to the generic pending handling.
   }
 
