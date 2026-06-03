@@ -57,8 +57,22 @@ export function onError(err: Error, c: Context) {
   if (err instanceof HTTPException) {
     return c.json({ error: err.message }, err.status);
   }
+  // Surface the ROOT cause. Drizzle wraps DB failures as `Error: Failed query: …`
+  // and hides the real PostgresError (the relation-missing / connection / auth
+  // reason + SQLSTATE) on `.cause` — without this the logs never say what broke.
+  const cause = err instanceof Error ? err.cause : undefined;
   log.error("unhandled error", {
     err: err instanceof Error ? (err.stack ?? err.message) : String(err),
+    cause:
+      cause instanceof Error
+        ? `${cause.message}${
+            (cause as { code?: string }).code
+              ? ` [${(cause as { code?: string }).code}]`
+              : ""
+          }`
+        : cause != null
+          ? String(cause)
+          : undefined,
   });
   return c.json({ error: "Internal server error" }, 500);
 }
