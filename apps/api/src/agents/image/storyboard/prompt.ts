@@ -2,11 +2,13 @@
 //
 // The skill REVIEWS the attached product sheet (+ person sheet if present)
 // together with the user's prompt, then authors (a) an ordered 4-scene script
-// — each scene carrying a spoken `transcript` line — and (b) the text-to-image
-// prompt for ONE composite storyboard sheet of FOUR clean keyframe panels with
-// NO baked-in text, numbers, captions, or arrows. The scene descriptions and
-// transcripts are metadata for the video step; the sheet image stays clean so
-// it can be fed to the video model without annotations leaking into the clip.
+// — each scene carrying a spoken `transcript` line and a brief `panelCaption`
+// (a condensed form of its `sceneDescription`) — and (b) the text-to-image
+// prompt for ONE composite storyboard sheet of FOUR keyframe panels, each
+// LABELLED like a real storyboard: a scene-number badge (01–04) plus the short
+// caption burned into the panel. The labelled sheet is fed straight to the
+// video model as the ordered shot guide; the detailed `sceneDescription` and
+// `transcript` ride in the video prompt as text.
 
 import type { AdType } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
@@ -26,6 +28,13 @@ export interface StoryboardScene {
   cameraAngle: string;
   actionMovement: string;
   sceneDescription: string;
+  /**
+   * Brief on-image label — a condensed form of `sceneDescription` (shot type +
+   * short action, ~6-12 words, e.g. "WIDE SHOT. A damaged robot turns on,
+   * surveying the forest."). Burned into the panel as its caption; describes the
+   * SAME moment as `sceneDescription`, just shortened to fit the label.
+   */
+  panelCaption: string;
   /**
    * Spoken line for the scene. UGC → a first-person review line the on-screen
    * person says. Inspirational → a voiceover narration line over the visuals.
@@ -94,8 +103,13 @@ export function buildStoryboardPrompt({
     "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
     "continuous ~15s arc. For each scene give: a `cameraAngle`, the",
     "`actionMovement` (what moves / how the camera moves), a vivid",
-    "`sceneDescription` (richer metadata for the video step), and the spoken",
-    "`transcript` line described above.",
+    "`sceneDescription` (richer metadata for the video step), the spoken",
+    "`transcript` line described above, and a `panelCaption` — a CONDENSED form",
+    "of that same `sceneDescription` for the on-image label: the shot type",
+    "followed by the brief action, ~6-12 words, e.g. \"WIDE SHOT. A damaged robot",
+    "turns on, surveying the forest.\". The `panelCaption` must describe the SAME",
+    "moment as `sceneDescription` — just shortened to fit the panel; never a",
+    "different action.",
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
@@ -119,23 +133,31 @@ export function buildStoryboardPrompt({
         ]
       : []),
     "",
-    "ABSOLUTELY NO ANNOTATIONS — the single most important rule for the image.",
-    "The panels must be PURE keyframe imagery, like a clean cinematic frame.",
-    "The image must contain NO scene numbers, NO number badges, NO captions, NO",
-    "labels, NO titles, NO subtitles, NO timecodes, NO motion or camera arrows,",
-    "NO callouts, NO hand-drawn marks, NO logos or watermarks — no text of any",
-    "kind drawn anywhere in or over the panels. The ONLY non-photographic element",
-    "allowed is the thin plain separator between panels. Convey motion through the",
-    "imagery itself (pose, blur, framing), never with arrows or words.",
+    "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
+    "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
+    "  reading order. Small, clean, legible.",
+    "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
+    "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
+    "  clean uppercase storyboard lettering — like the supplied example sheet.",
+    "- The badge and caption must be crisp and readable, never overlapping the",
+    "  subject's face or the product's markings.",
+    "Apart from the per-panel number badge and its caption bar, draw NO other",
+    "text: no titles, subtitles, timecodes, motion or camera ARROWS, callouts,",
+    "hand-drawn marks, logos or watermarks anywhere. Convey motion through the",
+    "imagery itself (pose, blur, framing), never with arrows. The panel interiors",
+    "stay pure photorealistic keyframes — the only graphics added are the number",
+    "badge and the caption bar.",
     "",
     `Honor the ad style ("${style}") in framing, pacing, and mood.`,
     "",
     "Respond with STRICT JSON only, no prose, matching:",
-    '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "transcript": string, "adStyle": string } ] }',
+    '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
     "`imagePrompt` MUST itself state the four-panel 2×2 layout with thin plain",
     `separator borders, the ${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution, the`,
-    "product/person fidelity rule, and the NO-ANNOTATION / no-text-of-any-kind /",
-    "no-arrows rule.",
+    "product/person fidelity rule, and the PANEL-LABEL rule: each panel carries",
+    "its number badge (01–04, in order) and a bottom caption bar reading that",
+    "scene's `panelCaption`, with NO other text and NO arrows. It MUST quote the",
+    "four `panelCaption` strings verbatim so the image model letters them exactly.",
     ...(hasPerson
       ? [
           "The `imagePrompt` MUST also explicitly instruct the image model to",
@@ -155,9 +177,10 @@ export function buildStoryboardPrompt({
     `Ad type: ${adType}`,
     `User prompt: ${userPrompt}`,
     "The reference sheets are attached in the image-generation step.",
-    "Review them, then produce the 4-scene script (with spoken transcripts) and",
-    "the composite storyboard-sheet plan — exactly 4 clean keyframe panels with",
-    "NO text, numbers, captions, or arrows anywhere in the image.",
+    "Review them, then produce the 4-scene script (with spoken transcripts and a",
+    "brief panelCaption per scene) and the composite storyboard-sheet plan —",
+    "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+    "its panelCaption bar, in order; no other text and no arrows.",
     ...(critique?.trim()
       ? [
           "",

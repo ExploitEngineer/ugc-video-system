@@ -11,10 +11,12 @@ import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
   /**
-   * The clean storyboard sheet (no baked-in text/numbers/arrows). It IS sent to
-   * the video provider as the sole guidance image — the product/person
-   * reference sheets are NOT sent; identity reaches the model through these
-   * keyframes plus the `scenes` text and `transcript`s.
+   * The LABELLED storyboard sheet — four numbered keyframe panels (01–04), each
+   * with a caption. It IS sent to the video provider as the sole guidance image
+   * and ordered shot sequence — the product/person reference sheets are NOT
+   * sent; identity + shot order reach the model through these numbered keyframes
+   * plus the `scenes` text and `transcript`s. The badges/captions are direction
+   * only and must not be rendered into the final clip (enforced via the prompt).
    */
   storyboardSheetRef: ImageRef;
   /**
@@ -40,11 +42,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /**
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
- * injected video provider) together with the CLEAN storyboard sheet as the sole
- * guidance image. The storyboard now carries no baked-in text/numbers/arrows,
- * so it is safe to send and grounds the model's framing; the product/person
- * reference sheets are NOT sent. Poll until ready, download, and persist
- * `assets` (final_video) + `videos`. Final output of the pipeline; no merge step.
+ * injected video provider) together with the LABELLED storyboard sheet as the
+ * sole guidance image. The sheet's four numbered panels (01–04) are the ordered
+ * shot sequence — the model follows them in order while rendering ONE clean
+ * continuous clip; the badges/captions are direction only and (per the prompt)
+ * must not appear in the output. The product/person reference sheets are NOT
+ * sent. Poll until ready, download, and persist `assets` (final_video) +
+ * `videos`. Final output of the pipeline; no merge step.
  */
 export async function videoBuilder(
   ctx: SkillContext,
@@ -96,11 +100,14 @@ export async function videoBuilder(
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
 
-    // 2. Submit to the video provider. The CLEAN storyboard sheet is the sole
-    // guidance image (no product/person sheets); the scenes + transcripts ride
-    // in the text prompt. When the ad has a person, route the storyboard
-    // through the face-asset path so Seedance's face filter accepts it.
-    const prompt = `@Image 1 is the attached storyboard keyframe image — the authoritative reference for product/person identity, framing and composition. Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Follow @Image 1 (the keyframes) for identity and framing, but DO NOT reproduce it as panels, a grid or a storyboard. This is a finished commercial ad: NO panel numbers, labels, hand-drawn arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles or watermark text may appear anywhere in the frame.\n\n${videoPrompt}`;
+    // 2. Submit to the video provider. The LABELLED storyboard sheet is the sole
+    // guidance image and ordered shot guide (no product/person sheets); the
+    // detailed scene descriptions + transcripts ride in the text prompt. The
+    // prompt tells the model to follow panels 01→04 in order yet keep the
+    // badges/captions/grid out of the rendered frame. When the ad has a person,
+    // route the storyboard through the face-asset path so Seedance's face filter
+    // accepts it.
+    const prompt = `@Image 1 is the attached LABELLED storyboard sheet — a 2×2 grid of four numbered keyframe panels (badge 01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right), each with a bottom caption. It is the authoritative reference for product/person identity, framing and the ORDERED shot sequence: panel 01 drives the first beat, 02 the second, 03 the third, 04 the fourth — follow the panels in number order. Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Use @Image 1 (the keyframes) for identity, framing and shot order, but DO NOT render it as panels, a grid or a storyboard. This is a finished commercial ad: the grid lines, borders, split-screen panels, number badges, caption bars, caption text, labels, hand-drawn arrows, callouts, subtitles or watermark text from the sheet must NOT appear anywhere in the frame — they are direction only.\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
     const task = await ctx.video.submitVideo({
       referenceImages: input.hasPerson ? [] : [storyboardUrl],

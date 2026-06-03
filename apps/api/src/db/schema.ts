@@ -218,7 +218,7 @@ export const storyboardSheets = pgTable(
     assetId: uuid("asset_id")
       .notNull()
       .references(() => assets.id, { onDelete: "cascade" }),
-    scenes: jsonb("scenes"), // [{ index, cameraAngle, actionMovement, sceneDescription, transcript, adStyle }]
+    scenes: jsonb("scenes"), // [{ index, cameraAngle, actionMovement, sceneDescription, panelCaption, transcript, adStyle }]
     promptUsed: text("prompt_used"),
     status: artifactStatusEnum("status").notNull().default("draft"),
   },
