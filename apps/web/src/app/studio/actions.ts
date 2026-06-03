@@ -3,9 +3,9 @@
 // Run mutations as Next.js server actions. These run server-side (Node), so
 // they call the Hono API directly — no browser CORS. Confirm/feedback/cancel
 // POST to the gating routes and return the fresh RunDetail to prime the query
-// cache. (Run CREATION is NOT here: the browser uploads the multipart form
-// straight to the API via `createRun` in lib/api.ts, to skip the Next Server
-// Action 1 MB body limit that rejects/crashes on real image uploads.)
+// cache. (Run CREATION is NOT here: it uploads the multipart form via
+// `createRun` in lib/api.ts → the /api/runs Route Handler, which streams it to
+// the API — Server Actions' 1 MB body cap would reject/crash on real images.)
 
 import type { RunDetail } from "@ugc/shared";
 import { apiUrl } from "@/lib/api";
