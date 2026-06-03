@@ -214,16 +214,18 @@ async function executeStep(
     case "video": {
       const storyboard = await latestStoryboardSheet(runId);
       if (!storyboard) throw new Error("no storyboard sheet for video");
-      // The video model receives ONLY the clean storyboard image + the scene
-      // descriptions and transcripts (text). The product/person reference
-      // sheets are NOT sent — they were inputs to the storyboard step. When the
-      // ad has a person, videoBuilder routes the storyboard through the
-      // face-asset path so Seedance's face filter accepts it.
-      const hasPerson = Boolean(await resolvePersonRef(runId, personUpload));
+      // The video model receives the clean storyboard image (shot order/layout)
+      // + the scene descriptions and transcripts (text). When the ad has a
+      // person, also pass the person's IDENTITY image — the uploaded face, or
+      // the generated person sheet — as the primary face reference so the
+      // rendered person matches it exactly; videoBuilder routes both through the
+      // face-asset path so Seedance's face filter accepts them.
+      const personRef = await resolvePersonRef(runId, personUpload);
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
-        hasPerson,
+        hasPerson: Boolean(personRef),
+        personFaceRef: personRef,
         scenes: (storyboard.scenes ?? []) as StoryboardScene[],
         userPrompt,
       });
