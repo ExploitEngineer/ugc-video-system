@@ -2,9 +2,18 @@ import { serve } from "@hono/node-server";
 import { startWorker } from "./agents/creative-direction/index.js";
 import { createApp } from "./app.js";
 import { env } from "./config/index.js";
+import { migrate } from "./db/migrate.js";
 import { createLogger } from "./lib/log.js";
 
 const log = createLogger("server");
+
+try {
+  await migrate();
+} catch (err) {
+  log.error("migrations failed, aborting startup", { err });
+  process.exit(1);
+}
+
 const app = createApp();
 
 const server = serve(
