@@ -42,6 +42,9 @@ COPY --from=builder /app /app
 ENV API_PORT=3001
 EXPOSE 3000
 
-# Start both; `wait -n` exits (→ container restart) if EITHER process dies, so a
-# crashed API never leaves a half-up container.
-CMD ["bash", "-c", "PORT=$API_PORT pnpm --filter api start & pnpm --filter web start & wait -n"]
+# Apply DB migrations FIRST (idempotent — Drizzle tracks applied ones), then
+# start both servers. A failed migration fails the deploy loudly instead of
+# booting into a schema-less DB where every query 500s. `wait -n` exits
+# (→ container restart) if EITHER server dies, so a crash never leaves a
+# half-up container.
+CMD ["bash", "-c", "pnpm --filter api db:migrate && (PORT=$API_PORT pnpm --filter api start & pnpm --filter web start & wait -n)"]
