@@ -30,13 +30,13 @@ One run advances through these steps (the orchestrator decides the order; see
 [worker-state-machine.md](./worker-state-machine.md)):
 
 ```
-interpret style (once)                     Creative Direction — LLM infers adStyle + adType
-   │
+interpret style + person brief (once)      Creative Direction — adStyle + adType, and a
+   │                                       product-derived person brief (vision over the upload)
    ▼
-product_sheet                              Image Agent — composite 4-view product sheet
-   │
-   ├─ person_sheet            (only if NO person image was uploaded)
-   │
+product_sheet  ∥  person_sheet             Image Agent — generated IN PARALLEL. person_sheet is
+   │            (person only if NO person  driven by the person-brief TEXT, not the product sheet
+   │             image was uploaded)        image, so it has no dependency on product_sheet.
+   ▼
 product_inspection            (only if criticEnabled)   Critic — vision check + ≤1 regen
    │
    ▼
@@ -56,8 +56,10 @@ Seedance 2.0 produces one final video with native audio.
 - **Agents as code, not a framework** (`apps/api/src/agents/*`). Each "skill" is a prompt module
   (`prompt.ts`) + a function (`index.ts`) of shape `(ctx: SkillContext, input) => SkillResult<T>`.
   - **Creative Direction** (`agents/creative-direction`): the orchestrator (run state machine),
-    the in-process worker (claim/drive/lock), and two small LLM skills — `interpret-style`
-    (prompt → `adStyle`/`adType`) and `interpret-feedback` (gate reply → approve/revise).
+    the in-process worker (claim/drive/lock), and three small LLM skills — `interpret-style`
+    (prompt → `adStyle`/`adType`), `person-brief` (vision over the uploaded product → a TEXT
+    person brief that drives the parallel person sheet), and `interpret-feedback` (gate reply
+    → approve/revise).
   - **Image** (`agents/image`): `product-sheet`, `person-image`, `storyboard` — OpenAI GPT Image.
   - **Critic** (`agents/critic`): `product-inspection`, `storyboard-inspection` — OpenAI vision +
     a generic inspect→regen `remediate` engine (run-level regen budget).
