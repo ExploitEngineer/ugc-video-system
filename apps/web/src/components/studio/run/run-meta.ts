@@ -11,6 +11,15 @@ export const STEP_ORDER: Step[] = [
   "video",
 ];
 
+/**
+ * The two reference sheets the backend generates IN PARALLEL as a single phase.
+ * The backend holds `runs.currentStep` at `null` for the whole phase and only
+ * advances once BOTH finish, so the UI presents them as one synchronized unit
+ * (both "Generating", then both "Passed") rather than letting the faster one
+ * (usually the product sheet) flip to "Passed" while the other is still running.
+ */
+const REFERENCE_STEPS: Step[] = ["product_sheet", "person_sheet"];
+
 export const STEP_LABEL: Record<Step, string> = {
   product_sheet: "Product reference sheet",
   person_sheet: "Person reference sheet",
@@ -94,13 +103,15 @@ export type StepState =
   | "skipped";
 
 /**
- * The step currently executing — the one with a `started` event but no
- * terminal (`passed`/`failed`) event yet. `currentStep` on the run is the LAST
- * COMPLETED step, so it can't tell us what's running; step events can.
- * Returns null when the run isn't actively working a step.
+ * The steps currently executing — each with a `started` event but no terminal
+ * (`passed`/`failed`) event yet. `currentStep` on the run is the LAST COMPLETED
+ * step, so it can't tell us what's running; step events can. Returns MULTIPLE
+ * steps when they run concurrently (the product + person reference sheets are
+ * generated in parallel). Empty when the run isn't actively working a step.
  */
-export function activeStep(run: RunDetail): Step | null {
-  if (run.status !== "running" && run.status !== "regenerating") return null;
+export function activeSteps(run: RunDetail): Step[] {
+  if (run.status !== "running" && run.status !== "regenerating") return [];
+  const active: Step[] = [];
   for (const step of STEP_ORDER) {
     const events = run.stepEvents.filter((e) => e.step === step);
     if (events.length === 0) continue;
@@ -108,9 +119,9 @@ export function activeStep(run: RunDetail): Step | null {
     const ended = events.some(
       (e) => e.status === "passed" || e.status === "failed",
     );
-    if (started && !ended) return step;
+    if (started && !ended) active.push(step);
   }
-  return null;
+  return active;
 }
 
 /** Resolve the display state of a single step from the run detail. */
@@ -138,10 +149,26 @@ export function stepState(run: RunDetail, step: Step): StepState {
     return "skipped";
   }
 
+  // Parallel reference phase: while it's in flight (the backend keeps
+  // `currentStep` null until BOTH the product and person sheets finish), every
+  // reference step that has started reads as "Generating" — so the pair stays
+  // synchronized instead of the faster sheet flipping to "Passed" early. Once
+  // the backend advances `currentStep`, the checkpoint logic below flips both
+  // to "done" together.
+  if (
+    REFERENCE_STEPS.includes(step) &&
+    run.status === "running" &&
+    run.currentStep === null
+  ) {
+    if (events.some((e) => e.status === "failed")) return "failed";
+    if (events.some((e) => e.status === "started")) return "active";
+    // Not started yet — fall through to the generic pending handling.
+  }
+
   // The genuinely in-flight step (derived from step events, not currentStep)
   // shows live — this is what makes the long-running video step read as
   // "Generating" instead of jumping straight to done.
-  if (step === activeStep(run)) {
+  if (activeSteps(run).includes(step)) {
     return run.status === "regenerating" ? "regenerating" : "active";
   }
 
@@ -151,7 +178,7 @@ export function stepState(run: RunDetail, step: Step): StepState {
     if (run.status === "awaiting_confirmation") return "awaiting";
     if (run.status === "regenerating") return "regenerating";
     // `currentStep` is the LAST COMPLETED step — never the in-flight one. The
-    // genuinely-running step is resolved above via activeStep() (step events).
+    // genuinely-running step is resolved above via activeSteps() (step events).
     // So while `running`, this checkpoint step is done; the next step only
     // reads as "Generating" once the backend writes ITS `started` event. This
     // is what stops a just-approved gate step (e.g. storyboard) from showing

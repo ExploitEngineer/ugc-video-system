@@ -26,13 +26,17 @@ Order is pure logic in `plan.ts` (`firstStep`, `nextStep`, `gateForNext`, `gateF
 `genStepForRevise`):
 
 ```
-product_sheet
-  → person_sheet            only if NO person image was uploaded
+product_sheet  ∥  person_sheet   generated in parallel (person only if NO person uploaded)
   → product_inspection      only if criticEnabled
   → storyboard
   → storyboard_inspection   only if criticEnabled
   → video                   → completed
 ```
+
+Note: `product_sheet` and `person_sheet` are issued concurrently from the same driver
+iteration (`currentStep === null`) via `runReferencePhase`; the run then checkpoints to
+`person_sheet` (or `product_sheet` when a person was uploaded) and the gate/advance logic
+proceeds unchanged. `firstStep` is retained in `plan.ts` for sequencing helpers.
 
 `runs.currentStep` tracks position; `step_events` is the append-only audit trail
 (`started`/`passed`/`failed`/`regenerated`) the UI timeline renders.

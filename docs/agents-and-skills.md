@@ -62,8 +62,9 @@ Seedance runs async: submit a task, then poll until `completed`/`failed` or time
 | --- | --- | --- | --- | --- |
 | **interpret-style** `creative-direction/interpret-style` | (pre-run) | user prompt | `chat` (LLM) → `{ adStyle, adType }` | sets `runs.adStyle`/`adType` (no asset) |
 | **interpret-feedback** `creative-direction/interpret-feedback` | (gate reply) | gate stage + user message | `chat` (LLM) → `{ intent: approve\|revise, target }` | routing decision (no asset) |
+| **person-brief** `creative-direction/person-brief` | (pre-run) | uploaded product image, prompt, `adStyle` | `chat` (vision) → `{ personBrief }` | sets `runs.personBrief` (no asset) |
 | **product-sheet** `image/product-sheet` | `product_sheet` | product upload, prompt, `adStyle` | `chat` → plan (`imagePrompt`+views); `generateImage` (edit from upload) | `assets(product_sheet)` + `product_reference_sheets` |
-| **person-image** `image/person-image` | `person_sheet` | product sheet ref, prompt | `chat` → plan; `generateImage` (refs: product sheet) | `assets(person_sheet)` + `person_reference_sheets` |
+| **person-image** `image/person-image` | `person_sheet` | **person brief (TEXT)**, prompt | `chat` → plan; `generateImage` (no refs — pure text-to-image) | `assets(person_sheet)` + `person_reference_sheets` |
 | **storyboard** `image/storyboard` | `storyboard` | product (+person) sheet refs, prompt, `adType` | `chat` → `{ imagePrompt, scenes[4] }`; `generateImage` (refs) | `assets(storyboard_sheet)` + `storyboard_sheets` (scenes) |
 | **product-inspection** `critic/product-inspection` | `product_inspection` | product sheet + original upload | `chat` (vision) → `InspectionVerdict` | approve/reject; ≤1 regen (localized or full) |
 | **storyboard-inspection** `critic/storyboard-inspection` | `storyboard_inspection` | storyboard sheet + scenes | `chat` (vision) → `InspectionVerdict` | approve/reject; ≤1 regen (full only) |
@@ -104,7 +105,7 @@ Diagnostic runners live in `apps/api/scripts/` and hit **live, paid** APIs — r
 never in CI. Each takes a real `<runId>` (created via `POST /runs` so a product upload exists):
 
 ```bash
-pnpm --filter api agents:verify <runId> ["ad style"]   # Image Agent: product → person → storyboard
+pnpm --filter api agents:verify <runId> ["ad style"]   # Image Agent: product ∥ person (parallel) → storyboard
 pnpm --filter api critic:verify <runId> ["ad style"]   # Critic: inspect latest sheets (needs agents:verify first)
 pnpm --filter api video:verify  <runId> ["ad style"]   # Video Builder: storyboard sheet → final video
 pnpm --filter api cda:verify    <runId>                # Orchestrator: drive one run to its next stop

@@ -3,14 +3,14 @@
 // ONLY invoked when no person image was uploaded — the CALLER decides that
 // (verification script now, F7 worker later); this skill never reads assets.
 //
-// (a) LLM invents a fitting person → image prompt + views + personDetails
-// (b) GPT Image 2 generates a composite person sheet, referencing the product
-//     sheet for color/style coherence
+// (a) LLM invents a fitting person → image prompt + views + personDetails,
+//     guided by a product-derived TEXT brief (never the product sheet image —
+//     that decoupling is what lets product + person sheets run in parallel)
+// (b) GPT Image 2 generates a composite person sheet (pure text-to-image)
 // (c) persist: storage → assets(person_sheet) → person_reference_sheets
 
 import { schema } from "../../../db/index.js";
 import { createLogger } from "../../../lib/log.js";
-import type { ImageRef } from "../../../providers/openai/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
@@ -19,8 +19,8 @@ import { buildPersonImagePrompt, type PersonImagePlan } from "./prompt.js";
 type PersonReferenceSheet = typeof schema.personReferenceSheets.$inferSelect;
 
 export interface PersonImageInput {
-  /** Product reference sheet (public URL) for color/style coherence. */
-  productSheetRef: ImageRef;
+  /** Product-derived brief (demographics/wardrobe/palette) — TEXT, not an image. */
+  personBrief: string;
   userPrompt: string;
   /** Step-by-step revision request from a rejected prior person sheet. */
   feedback?: string;
@@ -37,6 +37,7 @@ export async function generatePersonImage(
     buildPersonImagePrompt({
       adStyle: ctx.adStyle,
       userPrompt: input.userPrompt,
+      personBrief: input.personBrief,
       feedback: input.feedback,
     }),
   );
@@ -45,7 +46,6 @@ export async function generatePersonImage(
   log.debug("✓ plan ready — generating image");
   const { bytes, mime } = await ctx.openai.generateImage({
     prompt: plan.imagePrompt,
-    refs: [input.productSheetRef],
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
 

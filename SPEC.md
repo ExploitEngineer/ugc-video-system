@@ -63,7 +63,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 #### Skill detail
 
 - **Product Sheet Builder** — decides the ad framework/hook from the product **and** the user's requested style, builds the final image prompt, calls GPT Image 2 → **Product Reference Sheet** (front, three-quarter, side, rear).
-- **Generate Person Image** — **only** when no person image was uploaded. Defines the kind of person + how they fit the product/ad style, then generates the **Person Reference Sheet**.
+- **Generate Person Image** — **only** when no person image was uploaded. Runs **in parallel** with the Product Sheet Builder, driven by a product-derived **person brief** (TEXT) planned upstream from the uploaded product image — it never reads the product sheet image. Defines the kind of person + how they fit the product/ad style, then generates the **Person Reference Sheet**.
 - **StoryBoard Generator** — takes the product sheet (+ person sheet if present) → **Storyboard/Keyframe Sheet** of scenes, each with camera/angle, action/movement, scene description, consistent with the ad style.
 - **Product Sheet Inspection** — validates the product sheet; regenerates the whole sheet, or **only the localized part**, when the problem is local.
 - **StoryBoard Sheet Inspection** — validates the storyboard sheet; regenerates if problems.
@@ -73,14 +73,15 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 
 ```mermaid
 flowchart TD
-    A["Input: product image (+ optional person image)<br/>+ prompt (may include ad style) + mode"] --> CDA{{Creative Direction Agent<br/>orchestrates + propagates ad style}}
+    A["Input: product image (+ optional person image)<br/>+ prompt (may include ad style) + mode"] --> CDA{{Creative Direction Agent<br/>interpret ad style + plan person brief}}
     CDA --> B["Image Agent · Product Sheet Builder<br/>→ GPT Image 2"]
-    B --> PRS[(Product Reference Sheet)]
-    PRS --> C{Person image<br/>uploaded?}
-    C -- No --> D["Image Agent · Generate Person Image<br/>→ GPT Image 2"]
+    CDA --> C{Person image<br/>uploaded?}
+    C -- No --> D["Image Agent · Generate Person Image<br/>(person brief TEXT) → GPT Image 2"]
     D --> PERS[(Person Reference Sheet)]
+    B --> PRS[(Product Reference Sheet)]
     C -- Yes --> E
-    PERS --> E["Critic Agent · Product Sheet Inspection"]
+    PRS --> E["Critic Agent · Product Sheet Inspection"]
+    PERS --> E
     E -- issues --> B
     E -- ok --> F["Image Agent · StoryBoard Generator<br/>→ GPT Image 2"]
     F --> SBS[(Storyboard Sheet)]
@@ -326,6 +327,10 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 ---
 
 ## Progress Log
+
+### 2026-06-03
+
+- **Product & person reference sheets now generate in parallel.** Branch `feat/parallel-product-person-sheets`. Previously the pipeline was strictly sequential — `person_sheet` consumed the *generated* product sheet image (`refs:[productSheetRef]`) for color/style coherence, forcing it to wait for `product_sheet`. **Decoupled the two:** a new CDA planning skill `creative-direction/person-brief/{prompt,index.ts}` runs once in Phase 0 (vision over the **uploaded** product image + prompt + ad style) → a self-contained **person brief** (TEXT: demographics, wardrobe, palette), persisted to a new `runs.person_brief` column (migration `0006_common_puck.sql`). `generatePersonImage` input swapped `productSheetRef: ImageRef` → `personBrief: string`; its `generateImage` call drops `refs` (pure text-to-image), so the person sheet **never sees the product sheet image**. Orchestrator: Phase 0 plans + persists the brief; a new `runReferencePhase` fires `product_sheet` + (when no person uploaded) `person_sheet` concurrently via `Promise.allSettled` when `currentStep === null`, then checkpoints to `person_sheet`/`product_sheet` and falls through to the **unchanged** gate/advance block — so `plan.ts` sequencing, the `reference` gate, the `Step` enum, and the confirm/reject/feedback routes are all untouched. Confirm-mode behavior is unchanged: both sheets generate in parallel, then one pause at the `reference` gate; a revise still re-runs `person_sheet` alone (now genuinely independent of product). Storyboard still receives both sheets as image refs, so final-composite coherence is preserved. `verify-image.ts` updated to plan the brief then generate. `pnpm typecheck` + `pnpm --filter web lint` green; migration applied to local Postgres. **Not yet run live end-to-end.**
 
 ### 2026-06-01
 

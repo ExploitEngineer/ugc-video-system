@@ -16,6 +16,7 @@ import { createVideoProvider } from "../src/providers/index.js";
 import type { ImageRef } from "../src/providers/openai/index.js";
 import type { SkillContext } from "../src/agents/types.js";
 import { imageAgent } from "../src/agents/image/index.js";
+import { planPersonBrief } from "../src/agents/creative-direction/person-brief/index.js";
 
 async function main() {
   const runId = process.argv[2];
@@ -66,9 +67,19 @@ async function main() {
     console.log("\n▶ Person uploaded — skipping Generate Person Image.");
     personSheetRef = { source: personUpload.url, mime: personUpload.mime ?? undefined };
   } else {
+    console.log("\n▶ Plan Person Brief (vision over uploaded product)");
+    const { personBrief } = await planPersonBrief(ctx, {
+      userPrompt,
+      productUpload: {
+        source: productUpload.url,
+        mime: productUpload.mime ?? undefined,
+      },
+    });
+    console.log(`  brief: ${personBrief}`);
+
     console.log("\n▶ Generate Person Image");
     const person = await imageAgent.generatePersonImage(ctx, {
-      productSheetRef,
+      personBrief,
       userPrompt,
     });
     console.log(`  asset ${person.assetId}\n  ${person.assetUrl}`);

@@ -34,6 +34,7 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
+import { planPersonBrief } from "./person-brief/index.js";
 import {
   latestProductSheet,
   latestStoryboardSheet,
@@ -41,7 +42,6 @@ import {
   resolvePersonRef,
 } from "./inputs.js";
 import {
-  firstStep,
   gateForCurrentStep,
   gateForNext,
   genStepForRevise,
@@ -135,11 +135,13 @@ async function executeStep(
     }
 
     case "person_sheet": {
-      const product = await latestProductSheet(runId);
-      if (!product) throw new Error("no product sheet before person_sheet");
+      // No product-sheet dependency: the person sheet is driven by the upstream
+      // product-derived TEXT brief (runs.personBrief), so it can generate in
+      // parallel with the product sheet.
+      const personBrief = (await readRun(runId))?.personBrief ?? "";
       await writeStepEvent({ runId, step, status: "started" });
       const res = await imageAgent.generatePersonImage(ctx, {
-        productSheetRef: { source: product.assetUrl, mime: "image/png" },
+        personBrief,
         userPrompt,
         feedback,
       });
@@ -231,6 +233,30 @@ async function executeStep(
 }
 
 /**
+ * Reference phase — generate the product sheet and (when no person was
+ * uploaded) the person sheet CONCURRENTLY. The person sheet reads the upstream
+ * `runs.personBrief` text rather than the product sheet image, so the two have
+ * no ordering dependency. Each step writes its own started/passed events.
+ * Returns the first failing step (if any) so the caller can fail the run.
+ */
+async function runReferencePhase(
+  ctx: SkillContext,
+  personUploaded: boolean,
+): Promise<{ failedStep?: Step; err?: unknown }> {
+  const steps: Step[] = personUploaded
+    ? ["product_sheet"]
+    : ["product_sheet", "person_sheet"];
+  const results = await Promise.allSettled(
+    steps.map((s) => executeStep(ctx, s)),
+  );
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "rejected") return { failedStep: steps[i], err: r.reason };
+  }
+  return {};
+}
+
+/**
  * Drive a run to its next stopping point. Safe to call repeatedly and
  * concurrently is guarded by the worker (single-flight per runId).
  */
@@ -245,7 +271,10 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     tag,
   );
 
-  // Phase 0 — interpret the ad style once, when leaving `queued`.
+  // Phase 0 — interpret the ad style once, when leaving `queued`. Also plan the
+  // product-derived person brief here (vision over the UPLOADED product image)
+  // so the product and person sheets can generate in parallel afterwards — the
+  // person sheet reads only this TEXT brief, never the product sheet image.
   if (run.status === "queued") {
     const ctx = buildCtx(run);
     logRun(runId, "▶ interpreting ad style …", tag);
@@ -253,9 +282,20 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       const { adStyle, adType } = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
       });
+      // adStyle is needed by the person-brief prompt, so refresh ctx with it.
+      const briefCtx: SkillContext = { ...ctx, adStyle, adType };
+      const { productUpload } = await loadUploads(runId);
+      let personBrief: string | null = null;
+      if (productUpload) {
+        personBrief = (
+          await planPersonBrief(briefCtx, { userPrompt: run.prompt, productUpload })
+        ).personBrief;
+        logRun(runId, `person brief: "${personBrief}"`, tag);
+      }
       await setRun(runId, {
         adStyle,
         adType,
+        personBrief,
         status: "running",
         currentStep: null,
       });
@@ -343,23 +383,42 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       continue;
     }
 
-    // ── running: execute the next step ──
-    const step = run.currentStep
-      ? nextStep(run.currentStep, personUploaded, run.criticEnabled)
-      : firstStep();
-    if (!step) {
-      await setRun(runId, { status: "completed" });
-      return;
-    }
-
+    // ── running: execute the next step (or the parallel reference phase) ──
+    let step: Step | null;
     let outcome: CriticOutcome | undefined;
     const t0 = Date.now();
-    logRun(runId, `▶ ${step} …`, tag);
-    try {
-      ({ outcome } = await executeStep(ctx, step));
-    } catch (err) {
-      await failRun(runId, step, err);
-      return;
+
+    if (run.currentStep === null) {
+      // First generation: product + person sheets run CONCURRENTLY. `step` is
+      // the checkpoint the phase advances to — the person sheet when one is
+      // generated, else the product sheet — which the gate/advance block below
+      // treats exactly like a single completed reference step.
+      step = personUploaded ? "product_sheet" : "person_sheet";
+      logRun(
+        runId,
+        personUploaded
+          ? "▶ product_sheet …"
+          : "▶ product_sheet + person_sheet (parallel) …",
+        tag,
+      );
+      const { failedStep, err } = await runReferencePhase(ctx, personUploaded);
+      if (failedStep) {
+        await failRun(runId, failedStep, err);
+        return;
+      }
+    } else {
+      step = nextStep(run.currentStep, personUploaded, run.criticEnabled);
+      if (!step) {
+        await setRun(runId, { status: "completed" });
+        return;
+      }
+      logRun(runId, `▶ ${step} …`, tag);
+      try {
+        ({ outcome } = await executeStep(ctx, step));
+      } catch (err) {
+        await failRun(runId, step, err);
+        return;
+      }
     }
     logRun(
       runId,

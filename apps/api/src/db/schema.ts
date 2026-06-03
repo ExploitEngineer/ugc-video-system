@@ -96,6 +96,7 @@ export const runs = pgTable(
     prompt: text("prompt").notNull(), // raw user prompt
     adStyle: text("ad_style"), // interpreted style propagated to agents
     adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
+    personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
     mode: modeEnum("mode").notNull(),
     criticEnabled: boolean("critic_enabled").notNull().default(true),
     status: runStatusEnum("status").notNull().default("queued"),
