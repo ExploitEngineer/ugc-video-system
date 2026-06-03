@@ -64,13 +64,14 @@ export function buildStoryboardPrompt({
       ? [
           "AD TYPE — UGC (user-generated-content review):",
           "- The ad is a REAL PERSON giving an authentic, first-person review /",
-          "  testimonial of the product, talking to camera as if recommending it",
-          "  to a friend. The arc: hook → trying/showing the product → a concrete",
-          "  benefit or reaction → a closing recommendation.",
+          "  testimonial of the product, talking DIRECTLY TO CAMERA as if",
+          "  recommending it to a friend. The arc: hook → wearing / using the",
+          "  product → a concrete benefit or reaction → a closing recommendation.",
           "- Each scene's `transcript` is the natural, conversational line the",
-          "  on-screen person SPEAKS in that scene (first person, ~1 short",
-          "  sentence, sounds like real human speech — not ad copy). The four",
-          "  lines should flow as one continuous spoken review.",
+          "  on-screen person SPEAKS to camera in that scene (first person, ~1",
+          "  short sentence, real human speech — not ad copy), referencing the",
+          "  product as they WEAR or USE it. Keep lines short and split around the",
+          "  action beats; the four lines flow as one continuous spoken review.",
         ]
       : [
           "AD TYPE — Inspirational (open-ended cinematic):",
@@ -82,6 +83,45 @@ export function buildStoryboardPrompt({
           "  scene (evocative, ~1 short sentence), spoken over the visuals — it is",
           "  NOT necessarily lip-synced by anyone on screen. The four lines should",
           "  read as one cohesive voiceover.",
+        ];
+
+  // How the hero product must appear — shared across ad types. Kills the
+  // invented-packaging / unboxing / duplicated-product failure modes.
+  const presentationBlock = [
+    "PRODUCT PRESENTATION — how the product appears in EVERY panel that shows it:",
+    "- Show the product the way it is REALLY used. If it is wearable (jewelry,",
+    "  bracelet, watch, glasses, apparel, shoes, bag) it is WORN on the person's",
+    "  body; if it is handheld or used, it is shown IN ACTIVE USE. Avoid static",
+    "  product-on-a-pedestal unless the ad style explicitly calls for it.",
+    "- The product is ALWAYS the real, solid item from the product sheet. NEVER",
+    "  invent packaging — no boxes, cartons, gift boxes, blister packs, pouches or",
+    "  bags — and NEVER stage an unboxing or show the product as a print / photo /",
+    "  logo on a box, poster or screen. No \"product box\" anywhere.",
+    "- Show EXACTLY ONE instance of the product per panel; never duplicate it (e.g.",
+    "  worn AND held at once) unless that is a deliberate, natural beat.",
+    "- Do NOT open, unfold, split or transform the product or any container — keep",
+    "  it a single solid object with no seams that come apart.",
+    "- `panelCaption` and `sceneDescription` describe the product being WORN or USED",
+    '  (e.g. "CLOSE-UP. Slipping the bracelet onto her wrist."), NEVER a "product',
+    '  box", packaging or unboxing.',
+  ];
+
+  // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
+  // footage, not a glossy studio commercial (identity/fidelity is unaffected).
+  const keyframeLook =
+    adType === "ugc"
+      ? [
+          "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
+          "  a glossy studio commercial: natural / available light, a real everyday",
+          "  setting, candid handheld-style framing, the person relaxed and real",
+          "  (talking to camera where it fits). Keep product/person IDENTITY faithful",
+          "  to the reference sheets — only lighting, setting and framing read as real",
+          "  UGC, never plastic or over-polished.",
+        ]
+      : [
+          "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
+          "  intentional lighting, rich color and depth, a still lifted straight from a",
+          "  high-end commercial.",
         ];
 
   const system = [
@@ -98,6 +138,8 @@ export function buildStoryboardPrompt({
     "and what the user wants the ad to say.",
     "",
     ...typeBlock,
+    "",
+    ...presentationBlock,
     "",
     "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
     "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
@@ -117,8 +159,9 @@ export function buildStoryboardPrompt({
     "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
     "  with only thin, uniform plain separator borders between panels.",
     `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full 4K detail.`,
-    "- Each panel is a clean, photorealistic KEYFRAME for its scene — like a",
-    "  still frame lifted straight from the finished commercial.",
+    "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
+    "  frame lifted straight from the finished ad.",
+    ...keyframeLook,
     "- Keep the product (and the person, if present) faithfully consistent with",
     "  the attached reference sheets in EVERY panel — the SAME product with all",
     "  its real markings, text and logos intact, the same person, same colors,",
@@ -158,6 +201,12 @@ export function buildStoryboardPrompt({
     "its number badge (01–04, in order) and a bottom caption bar reading that",
     "scene's `panelCaption`, with NO other text and NO arrows. It MUST quote the",
     "four `panelCaption` strings verbatim so the image model letters them exactly.",
+    "`imagePrompt` MUST also carry the PRODUCT PRESENTATION rule (product worn / in",
+    "real use, the real solid item — NEVER a box, packaging or unboxing, never",
+    "duplicated, never opened or transformed) and the",
+    adType === "ugc"
+      ? "authentic UGC phone-captured look (natural light, real setting, candid framing)."
+      : "polished cinematic keyframe look.",
     ...(hasPerson
       ? [
           "The `imagePrompt` MUST also explicitly instruct the image model to",
