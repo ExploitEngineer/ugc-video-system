@@ -1,7 +1,8 @@
-// Base URL for the Hono api. Server actions and route handlers run in Node (no
-// CORS); `createRun` below also calls it straight from the browser to skip the
-// Next Server Action 1 MB body limit on image uploads. Reuses the public
-// NEXT_PUBLIC_API_URL (must be browser-reachable in prod); falls back to dev.
+// Base URL for the Hono api, used ONLY server-side (route handlers + server
+// actions run in Node — no CORS). The browser never calls the API directly; it
+// hits same-origin Next proxies under /api/runs. So NEXT_PUBLIC_API_URL is
+// optional, and the localhost:3001 fallback is correct for the co-located API
+// in the single-image deploy. (Override it only if the API is a separate host.)
 
 import type { Run, RunDetail } from "@ugc/shared";
 
@@ -10,14 +11,15 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 export const apiUrl = (path: string) => `${API_URL}${path}`;
 
 /**
- * Create a run by POSTing the multipart form straight to the API from the
- * browser — NOT through a Next Server Action, whose 1 MB body cap rejects
- * real product/person images (and crashes the Next server with a 413). The API
- * validates the input and returns the new `RunDetail`. Throws a readable error
- * on failure. Requires the API's `CORS_ORIGIN` to include the frontend origin.
+ * Create a run by POSTing the multipart form to the same-origin Next proxy
+ * (`/api/runs`), which streams it through to the API server-side. Going through
+ * a Route Handler (not a Server Action, whose 1 MB body cap rejects real
+ * product/person images) keeps the browser same-origin — no CORS, no Private
+ * Network Access prompt, no public API URL needed. Returns the new `RunDetail`;
+ * throws a readable error on failure.
  */
 export async function createRun(formData: FormData): Promise<RunDetail> {
-  const res = await fetch(apiUrl("/runs"), { method: "POST", body: formData });
+  const res = await fetch("/api/runs", { method: "POST", body: formData });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
