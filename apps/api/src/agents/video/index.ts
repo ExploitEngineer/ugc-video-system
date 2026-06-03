@@ -24,6 +24,14 @@ export interface VideoBuilderInput {
    * through the face-asset path so Seedance's real-human face filter accepts it.
    */
   hasPerson: boolean;
+  /**
+   * The person's IDENTITY image — the uploaded person photo (or the generated
+   * person sheet when nothing was uploaded). When present it is registered as
+   * the PRIMARY face reference so Seedance locks the on-screen person to this
+   * exact face; the storyboard is then a secondary layout/shot-order reference.
+   * Without it, identity comes only from the storyboard (which may have drifted).
+   */
+  personFaceRef?: ImageRef;
   /** Scene metadata (incl. transcripts) from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   userPrompt: string;
@@ -109,9 +117,19 @@ export async function videoBuilder(
     // accepts it.
     const prompt = `@Image 1 is the attached LABELLED storyboard sheet — a 2×2 grid of four numbered keyframe panels (badge 01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right), each with a bottom caption. It is the authoritative reference for product/person identity, framing and the ORDERED shot sequence: panel 01 drives the first beat, 02 the second, 03 the third, 04 the fourth — follow the panels in number order. Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Use @Image 1 (the keyframes) for identity, framing and shot order, but DO NOT render it as panels, a grid or a storyboard. This is a finished commercial ad: the grid lines, borders, split-screen panels, number badges, caption bars, caption text, labels, hand-drawn arrows, callouts, subtitles or watermark text from the sheet must NOT appear anywhere in the frame — they are direction only.\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
+    // When the ad has a person, send the person's IDENTITY image FIRST as the
+    // primary face reference (so the rendered person matches it exactly), then
+    // the storyboard for layout + shot order — both via the face-asset path so
+    // Seedance's real-human filter accepts them. Falls back to just the
+    // storyboard when no identity image is available (keeps prior behaviour).
+    const personReferences = input.hasPerson
+      ? [input.personFaceRef?.source, storyboardUrl].filter(
+          (u): u is string => Boolean(u),
+        )
+      : [];
     const task = await ctx.video.submitVideo({
       referenceImages: input.hasPerson ? [] : [storyboardUrl],
-      personReferences: input.hasPerson ? [storyboardUrl] : [],
+      personReferences,
       referenceTag: ctx.runId,
       prompt,
       durationSec,
