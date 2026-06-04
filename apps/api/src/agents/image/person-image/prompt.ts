@@ -1,20 +1,31 @@
 // Prompt module for the Generate Person Image skill.
 //
-// Runs ONLY when no person image was uploaded. Defines the kind of person
-// that fits the product/ad style and emits the image prompt for a composite
-// person reference sheet — multi-view, IMAGES ONLY (no text/labels baked into
-// the image) — plus structured view + person details metadata.
+// Three shapes:
+//  - buildPersonImagePrompt — INVENT a person (text-to-image) from the product
+//    brief, optionally as a deliberately DIFFERENT person on a "regenerate"
+//    revise. Returns chat messages that author a full from-scratch image prompt
+//    plus view/personDetails metadata.
+//  - buildPersonEditInstruction — a SHORT imperative instruction for an
+//    image-to-image EDIT of the prior sheet (a targeted revise). Short on
+//    purpose: a verbose from-scratch spec makes the edit model reproduce the
+//    input and ignore the change.
+//  - buildPersonSheetFromPhotoInstruction — a SHORT instruction to turn an
+//    UPLOADED person photo into the 2×2 reference sheet, preserving identity.
 
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
+import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface PersonImagePromptInput {
   adStyle: string;
   userPrompt: string;
   /** Product-derived brief (demographics/wardrobe/palette) — TEXT, not an image. */
   personBrief: string;
-  /** Step-by-step revision request — changes to apply to the previous sheet. */
-  feedback?: string;
+  /**
+   * A "regenerate"-scope revision directive — the user wants a DIFFERENT person.
+   * (Targeted "edit" revisions go through buildPersonEditInstruction instead.)
+   */
+  directive?: RevisionDirective;
 }
 
 /** Shape the LLM must return as strict JSON. */
@@ -33,15 +44,75 @@ export interface PersonImagePlan {
   };
 }
 
+/** Shared sheet rules, kept terse for the image-to-image instructions. */
+const SHEET_RULES =
+  "Output ONE single image: a clean 2×2 grid of FOUR full-body views of the " +
+  "SAME person — top-left front, top-right three-quarter, bottom-left side " +
+  "(profile), bottom-right back. A thin neutral separator between cells, a " +
+  "plain seamless neutral studio backdrop, soft even lighting, the person " +
+  "centered at the same scale in every view. Photorealistic — a real human " +
+  "photographed with a real camera (natural skin texture, lifelike face), NOT " +
+  "CGI/plastic/illustration. No text, labels, captions, numbers, arrows or " +
+  "watermarks anywhere.";
+
+/**
+ * SHORT edit instruction for an image-to-image revise of the attached prior
+ * person sheet. Applies only the requested changes and preserves everything else.
+ */
+export function buildPersonEditInstruction(directive: RevisionDirective): string {
+  const changes = directive.changes.length
+    ? directive.changes.map((c) => `- ${c}`).join("\n")
+    : "- (no specific change provided)";
+  const keep = directive.keep.length ? ` (${directive.keep.join("; ")})` : "";
+  return [
+    "Edit the attached person reference sheet (a 2×2 grid of four views of one",
+    "person). Apply ONLY these changes, consistently across ALL FOUR views:",
+    changes,
+    "",
+    `Keep the SAME person and everything else identical${keep}: face, hair, skin`,
+    "tone, body, age, pose, the 2×2 four-view layout, framing, the studio",
+    "backdrop and lighting. Keep it photorealistic with no text or labels. Do",
+    "NOT change anything that is not listed above.",
+  ].join("\n");
+}
+
+/**
+ * SHORT instruction to build the 2×2 reference sheet from an UPLOADED person
+ * photo, preserving that exact person's identity and wardrobe.
+ */
+export function buildPersonSheetFromPhotoInstruction(): string {
+  return [
+    "From the attached photo of a person, produce the reference sheet of THAT",
+    "EXACT person — identical face, hair, skin tone, build and the clothing they",
+    "are wearing. Do not invent a different person, swap their face, or restyle",
+    "their outfit; only the viewing angle changes per cell.",
+    "",
+    SHEET_RULES,
+  ].join("\n");
+}
+
+/** Render a "regenerate" directive (different person) as prompt instructions. */
+function regenerateBlock(d: RevisionDirective): string[] {
+  const bullets = (items: string[]) => items.map((i) => `  - ${i}`);
+  const lines = [
+    "",
+    "REVISION — the user rejected the previous person and wants a DIFFERENT one.",
+    "Produce a CLEARLY DIFFERENT person reflecting these requests; do not reuse",
+    "the prior look:",
+  ];
+  if (d.changes.length) lines.push("CHANGES:", ...bullets(d.changes));
+  if (d.rationale) lines.push(`WHY: ${d.rationale}`);
+  return lines;
+}
+
 export function buildPersonImagePrompt({
   adStyle,
   userPrompt,
   personBrief,
-  feedback,
+  directive,
 }: PersonImagePromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const brief = personBrief.trim();
-  const revision = feedback?.trim();
 
   const system = [
     "You are the Generate Person Image skill of an ad-video Image Agent.",
@@ -54,7 +125,7 @@ export function buildPersonImagePrompt({
     "- ONE single image, a clean 2×2 grid of exactly FOUR views of the SAME",
     "  person, in this order: top-left FRONT, top-right THREE-QUARTER,",
     "  bottom-left SIDE (profile), bottom-right BACK (rear).",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full 4K detail.`,
+    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
     "- A thin, uniform neutral separator line (a small gutter/border) divides the",
     "  four views so each reads as its own clean panel.",
     "- Plain seamless studio backdrop: one flat neutral color, identical in",
@@ -107,14 +178,7 @@ export function buildPersonImagePrompt({
     `Ad style: ${style}`,
     `User prompt: ${userPrompt}`,
     `Product-derived person brief: ${brief || "(none — infer from the ad style)"}`,
-    ...(revision
-      ? [
-          "",
-          "REVISION REQUEST — the user reviewed the previous person sheet and asked",
-          "for the following changes. Apply them precisely while keeping every sheet",
-          `rule above (four-view 2×2 layout, photorealism, images only):\n${revision}`,
-        ]
-      : []),
+    ...(directive ? regenerateBlock(directive) : []),
     "Produce the composite person reference sheet plan — exactly FOUR views in a",
     "2×2 grid with thin separators between them, images only, no added text or",
     "labels baked into the image.",

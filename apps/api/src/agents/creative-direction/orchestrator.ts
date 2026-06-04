@@ -11,9 +11,9 @@
 //   regenerating  → re-run the generation step owning the gated currentStep
 //   awaiting_confirmation / completed / failed → terminal for the driver
 //
-// This convention keeps the existing confirm/reject routes correct unchanged:
-// confirm flips awaiting_confirmation→running (driver advances via nextStep),
-// reject flips →regenerating (driver re-runs the stage of currentStep).
+// This convention keeps the single /feedback gate route correct: an approve
+// flips awaiting_confirmation→running (driver advances via nextStep), a revise
+// flips →regenerating (driver re-runs the stage of currentStep).
 
 import type { Step } from "@ugc/shared";
 import { eq } from "drizzle-orm";
@@ -35,6 +35,7 @@ import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
+import { planRevision, type RevisionDirective } from "./plan-revision/index.js";
 import {
   latestProductSheet,
   latestStoryboardSheet,
@@ -111,7 +112,7 @@ function buildCtx(run: RunRow): SkillContext {
 async function executeStep(
   ctx: SkillContext,
   step: Step,
-  feedback?: string,
+  directive?: RevisionDirective,
 ): Promise<{ outcome?: CriticOutcome }> {
   const runId = ctx.runId;
   const { productUpload, personUpload } = await loadUploads(runId);
@@ -139,11 +140,23 @@ async function executeStep(
       // product-derived TEXT brief (runs.personBrief), so it can generate in
       // parallel with the product sheet.
       const personBrief = (await readRun(runId))?.personBrief ?? "";
+      // Anchor on a base image (→ image-to-image) in two cases:
+      //   - revision "edit": the prior person sheet, so the same person is kept
+      //     and only the requested aspects change;
+      //   - first generation WITH an uploaded person: the uploaded photo, so the
+      //     sheet preserves that real person instead of inventing one.
+      // First generation with no upload has no base → invent from the brief.
+      const baseRef = directive
+        ? directive.scope === "edit"
+          ? await resolvePersonRef(runId, personUpload)
+          : undefined
+        : personUpload;
       await writeStepEvent({ runId, step, status: "started" });
       const res = await imageAgent.generatePersonImage(ctx, {
         personBrief,
         userPrompt,
-        feedback,
+        directive,
+        baseRef,
       });
       await writeStepEvent({
         runId,
@@ -180,7 +193,7 @@ async function executeStep(
         productSheetRef: { source: product.assetUrl, mime: "image/png" },
         personSheetRef,
         userPrompt,
-        critique: feedback,
+        directive,
       });
       await writeStepEvent({
         runId,
@@ -235,19 +248,19 @@ async function executeStep(
 }
 
 /**
- * Reference phase — generate the product sheet and (when no person was
- * uploaded) the person sheet CONCURRENTLY. The person sheet reads the upstream
- * `runs.personBrief` text rather than the product sheet image, so the two have
- * no ordering dependency. Each step writes its own started/passed events.
- * Returns the first failing step (if any) so the caller can fail the run.
+ * Reference phase — generate the product sheet and the person sheet
+ * CONCURRENTLY. The person sheet is built from the uploaded photo when one
+ * exists, else invented from the upstream `runs.personBrief` text; either way it
+ * has no dependency on the product sheet image. Each step writes its own
+ * started/passed events. Returns the first failing step (if any).
  */
 async function runReferencePhase(
   ctx: SkillContext,
-  personUploaded: boolean,
 ): Promise<{ failedStep?: Step; err?: unknown }> {
-  const steps: Step[] = personUploaded
-    ? ["product_sheet"]
-    : ["product_sheet", "person_sheet"];
+  // Both always run: the person sheet is built from the uploaded photo when one
+  // exists, else invented from the brief. The two have no ordering dependency,
+  // so they generate in parallel.
+  const steps: Step[] = ["product_sheet", "person_sheet"];
   const results = await Promise.allSettled(
     steps.map((s) => executeStep(ctx, s)),
   );
@@ -286,9 +299,12 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       });
       // adStyle is needed by the person-brief prompt, so refresh ctx with it.
       const briefCtx: SkillContext = { ...ctx, adStyle, adType };
-      const { productUpload } = await loadUploads(runId);
+      const { productUpload, personUpload } = await loadUploads(runId);
       let personBrief: string | null = null;
-      if (productUpload) {
+      // The brief describes an INVENTED person fitting the product — only useful
+      // when no person was uploaded. For an uploaded person we preserve the real
+      // person (the person sheet is built from their photo), so skip the brief.
+      if (productUpload && !personUpload) {
         personBrief = (
           await planPersonBrief(briefCtx, { userPrompt: run.prompt, productUpload })
         ).personBrief;
@@ -341,18 +357,64 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         return;
       }
       // Reference gate always re-runs person_sheet (product is hidden); the
-      // storyboard gate re-runs storyboard. Thread the stored feedback in.
+      // storyboard gate re-runs storyboard.
       const genStep = genStepForRevise(gate, "person");
-      const feedback = run.feedback ?? undefined;
+      const message = run.feedback?.trim() ?? "";
       const t0 = Date.now();
-      logRun(
-        runId,
-        `⟳ revise gate=${gate} genStep=${genStep} feedback=${feedback ? "yes" : "none"}`,
-        tag,
-      );
+
+      // Break the user's free-text feedback down into a concrete directive by
+      // INSPECTING the artifact they rejected against the product (vision). This
+      // is what turns vague feedback ("doesn't match the product") into specific
+      // changes the image agent can actually execute — instead of appending the
+      // raw text and regenerating a near-identical result.
+      let directive: RevisionDirective | undefined;
+      if (message) {
+        const productSheet = await latestProductSheet(runId);
+        const productRef = productSheet
+          ? ({ source: productSheet.assetUrl, mime: "image/png" } as ImageRef)
+          : undefined;
+        let currentArtifact: ImageRef | undefined;
+        if (gate === "storyboard") {
+          const sb = await latestStoryboardSheet(runId);
+          if (sb) currentArtifact = { source: sb.assetUrl, mime: "image/png" };
+        } else {
+          currentArtifact = await resolvePersonRef(runId, personUpload);
+        }
+        if (currentArtifact) {
+          directive = await planRevision(ctx.openai, {
+            stage: gate,
+            message,
+            adStyle: ctx.adStyle,
+            personBrief: run.personBrief ?? undefined,
+            currentArtifact,
+            productRef,
+          });
+          logRun(
+            runId,
+            `⟳ revise gate=${gate} scope=${directive.scope} changes=${directive.changes.length} keep=${directive.keep.length}`,
+            tag,
+          );
+          // Reference gate: persist the rewritten brief so the change lives in the
+          // dominant text (not a footnote) and stacks across repeated revises.
+          if (gate === "reference" && directive.revisedBrief) {
+            await setRun(runId, { personBrief: directive.revisedBrief });
+          }
+          // Record the directive for the audit trail (no `strategy` key → does
+          // not count against the Critic auto-regen budget).
+          await writeStepEvent({
+            runId,
+            step: genStep,
+            status: "regenerated",
+            payload: { directive, source: "user_feedback" },
+          });
+        }
+      }
+      if (!directive) {
+        logRun(runId, `⟳ revise gate=${gate} genStep=${genStep} (no directive)`, tag);
+      }
       logRun(runId, `▶ ${genStep} (revise) …`, tag);
       try {
-        await executeStep(ctx, genStep, feedback);
+        await executeStep(ctx, genStep, directive);
       } catch (err) {
         await failRun(runId, genStep, err);
         return;
@@ -391,19 +453,12 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     const t0 = Date.now();
 
     if (run.currentStep === null) {
-      // First generation: product + person sheets run CONCURRENTLY. `step` is
-      // the checkpoint the phase advances to — the person sheet when one is
-      // generated, else the product sheet — which the gate/advance block below
-      // treats exactly like a single completed reference step.
-      step = personUploaded ? "product_sheet" : "person_sheet";
-      logRun(
-        runId,
-        personUploaded
-          ? "▶ product_sheet …"
-          : "▶ product_sheet + person_sheet (parallel) …",
-        tag,
-      );
-      const { failedStep, err } = await runReferencePhase(ctx, personUploaded);
+      // First generation: product + person sheets run CONCURRENTLY. `person_sheet`
+      // is always the checkpoint the phase advances to — the gate/advance block
+      // below treats it exactly like a single completed reference step.
+      step = "person_sheet";
+      logRun(runId, "▶ product_sheet + person_sheet (parallel) …", tag);
+      const { failedStep, err } = await runReferencePhase(ctx);
       if (failedStep) {
         await failRun(runId, failedStep, err);
         return;

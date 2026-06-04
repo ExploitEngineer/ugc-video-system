@@ -96,6 +96,33 @@ export async function latestPersonSheetUrl(
 }
 
 /**
+ * Newest person sheet's metadata (views/personDetails) — carried forward when an
+ * edit revise regenerates the sheet, so the descriptive fields aren't lost.
+ */
+export async function latestPersonSheetMeta(runId: string): Promise<
+  | Pick<
+      typeof schema.personReferenceSheets.$inferSelect,
+      "views" | "personDetails"
+    >
+  | undefined
+> {
+  const [row] = await db
+    .select({
+      views: schema.personReferenceSheets.views,
+      personDetails: schema.personReferenceSheets.personDetails,
+    })
+    .from(schema.personReferenceSheets)
+    .innerJoin(
+      schema.assets,
+      eq(schema.personReferenceSheets.assetId, schema.assets.id),
+    )
+    .where(eq(schema.personReferenceSheets.runId, runId))
+    .orderBy(desc(schema.assets.createdAt))
+    .limit(1);
+  return row ?? undefined;
+}
+
+/**
  * Resolve the person reference for the storyboard steps: the latest generated
  * person sheet when one exists, else the uploaded image, else undefined.
  *

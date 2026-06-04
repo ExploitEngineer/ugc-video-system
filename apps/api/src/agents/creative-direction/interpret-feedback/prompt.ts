@@ -20,8 +20,6 @@ export interface InterpretFeedbackPromptInput {
 /** Shape the LLM must return as strict JSON. */
 export interface FeedbackPlan {
   intent: "approve" | "revise";
-  /** Reference gate only: which sheet to redo. Null/ignored at the storyboard gate. */
-  target: "product" | "person" | null;
 }
 
 export function buildInterpretFeedbackPrompt({
@@ -31,23 +29,20 @@ export function buildInterpretFeedbackPrompt({
   const stageBlock =
     stage === "reference"
       ? [
-          "The user is reviewing the REFERENCE SHEETS: a PRODUCT reference sheet",
-          "and a PERSON reference sheet, both shown together. Classify their reply:",
-          '- "approve": satisfied with both, wants to CONTINUE. Signals: "looks',
-          '  good", "perfect", "continue", "next", "fine", "yes".',
-          '- "revise": wants one of the sheets REGENERATED. Then set "target":',
-          '  - "product" when the change is about the product sheet (the product,',
-          "    its background, colors, angles, packaging).",
-          '  - "person" when the change is about the person sheet (the model/person,',
-          "    their face, age, look, wardrobe, pose).",
-          '  If revise but the target sheet is unclear, default target to "person".',
+          "The user is reviewing the PERSON reference sheet. (A product reference",
+          "sheet also exists but is HIDDEN from the user and must NEVER be changed —",
+          "ignore any remark about the product.) Classify their reply:",
+          '- "approve": satisfied / wants to CONTINUE, OR the message is only about',
+          "  the product (nothing to change on the person). Signals of approval:",
+          '  "looks good", "perfect", "continue", "next", "fine", "yes".',
+          '- "revise": the user wants the PERSON changed (their face, age, look,',
+          "  wardrobe, pose, styling).",
         ]
       : [
           "The user is reviewing the STORYBOARD. Classify their reply:",
           '- "approve": satisfied, wants to CONTINUE to the video. Signals: "looks',
           '  good", "perfect", "continue", "next", "fine", "yes".',
-          '- "revise": wants the storyboard REGENERATED (any change, fix, or',
-          '  dislike). Set "target" to null.',
+          '- "revise": wants the storyboard REGENERATED (any change, fix, or dislike).',
         ];
 
   return [
@@ -61,7 +56,7 @@ export function buildInterpretFeedbackPrompt({
         '  with praise ("nice, but make the person younger") — choose "revise".',
         '  Only choose "approve" when the message is purely approval.',
         "",
-        'Return STRICT JSON only: {"intent": "approve" | "revise", "target": "product" | "person" | null}',
+        'Return STRICT JSON only: {"intent": "approve" | "revise"}',
       ].join("\n"),
     },
     {

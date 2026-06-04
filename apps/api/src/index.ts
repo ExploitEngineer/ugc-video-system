@@ -10,7 +10,9 @@ const log = createLogger("server");
 try {
   await migrate();
 } catch (err) {
-  log.error("migrations failed, aborting startup", { err });
+  log.error("migrations failed, aborting startup", {
+    err: err instanceof Error ? err.message : String(err),
+  });
   process.exit(1);
 }
 

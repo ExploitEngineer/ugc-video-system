@@ -14,20 +14,23 @@ export function firstStep(): Step {
 
 /**
  * The step that follows `step`, or `null` when the pipeline is complete.
- * `personUploaded` skips the `person_sheet` generation step. `criticEnabled`
- * (off) drops both Critic inspection steps — and with them the confirm-mode
- * gates, so a critic-off run never pauses.
+ * `person_sheet` ALWAYS runs — when a person is uploaded it is built from that
+ * photo (identity-locked), otherwise it is invented from the product brief — so
+ * the storyboard always consumes a generated reference sheet, never the raw
+ * upload. `personUploaded` is retained for the caller's parallel-phase bookkeeping.
+ * `criticEnabled` (off) drops both Critic inspection steps — and with them the
+ * confirm-mode gates, so a critic-off run never pauses.
  */
 export function nextStep(
   step: Step,
-  personUploaded: boolean,
+  _personUploaded: boolean,
   criticEnabled: boolean,
 ): Step | null {
   // What follows the product image: inspection (critic on) or straight to storyboard.
   const afterProduct: Step = criticEnabled ? "product_inspection" : "storyboard";
   switch (step) {
     case "product_sheet":
-      return personUploaded ? afterProduct : "person_sheet";
+      return "person_sheet";
     case "person_sheet":
       return afterProduct;
     case "product_inspection":

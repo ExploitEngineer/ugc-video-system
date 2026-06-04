@@ -22,32 +22,20 @@ export interface InterpretFeedbackInput {
 
 export interface FeedbackVerdict {
   intent: "approve" | "revise";
-  /** Reference gate: "product" | "person". Storyboard gate: null. */
-  target: "product" | "person" | null;
 }
 
 export async function interpretFeedback(
   openai: OpenAIProvider,
   input: InterpretFeedbackInput,
 ): Promise<FeedbackVerdict> {
-  // Reference gate defaults to the person sheet when revising; storyboard gate
-  // has no per-sheet target.
-  const fallbackTarget = input.stage === "reference" ? "person" : null;
   try {
     const reply = await openai.chat(
       buildInterpretFeedbackPrompt({ stage: input.stage, message: input.message }),
     );
     const plan = parseJsonObject<FeedbackPlan>(reply);
-    if (plan.intent === "approve") return { intent: "approve", target: null };
-    const target =
-      input.stage === "reference"
-        ? plan.target === "product"
-          ? "product"
-          : "person"
-        : null;
-    return { intent: "revise", target };
+    return { intent: plan.intent === "approve" ? "approve" : "revise" };
   } catch {
     // Safer to regenerate than to advance a result the user may dislike.
-    return { intent: "revise", target: fallbackTarget };
+    return { intent: "revise" };
   }
 }

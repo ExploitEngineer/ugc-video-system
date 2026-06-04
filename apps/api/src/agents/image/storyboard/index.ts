@@ -8,6 +8,7 @@
 import { schema } from "../../../db/index.js";
 import { createLogger } from "../../../lib/log.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
+import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
@@ -22,6 +23,8 @@ export interface StoryboardInput {
   userPrompt: string;
   /** Critic feedback from a rejected prior attempt — steers a full regen (F5). */
   critique?: string;
+  /** Broken-down USER revision directive (confirm-mode storyboard gate). */
+  directive?: RevisionDirective;
 }
 
 export async function storyboardGenerator(
@@ -32,6 +35,7 @@ export async function storyboardGenerator(
   log.info("▶ planning storyboard", {
     hasPerson: Boolean(input.personSheetRef),
     critique: Boolean(input.critique),
+    revise: Boolean(input.directive),
   });
 
   const reply = await ctx.openai.chat(
@@ -41,6 +45,7 @@ export async function storyboardGenerator(
       userPrompt: input.userPrompt,
       hasPerson: Boolean(input.personSheetRef),
       critique: input.critique,
+      directive: input.directive,
     }),
   );
   const plan = parseJsonObject<StoryboardPlan>(reply);

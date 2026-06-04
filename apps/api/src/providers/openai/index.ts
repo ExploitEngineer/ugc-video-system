@@ -58,9 +58,24 @@ export interface OpenAIProvider {
 /** Lazily-constructed shared client (config already validated the key). */
 let client: OpenAI | null = null;
 function getClient(): OpenAI {
-  if (!client) client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  if (!client) {
+    client = new OpenAI({
+      apiKey: env.OPENAI_API_KEY,
+      // Image generation is slow and returns multi-MB bodies; give it room and
+      // let the SDK retry connection-level failures. (A post-200 truncated-body
+      // parse error is NOT retried by the SDK — generateImage handles that.)
+      timeout: 120_000,
+      maxRetries: 2,
+    });
+  }
   return client;
 }
+
+/** Image-gen attempts before giving up (covers truncated-body JSON failures). */
+const IMAGE_MAX_ATTEMPTS = 3;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Resolve an `ImageRef` to a base64 data URI. We fetch the bytes ourselves and
@@ -129,30 +144,58 @@ export function createOpenAIProvider(): OpenAIProvider {
     async generateImage(input) {
       const size = input.size ?? DEFAULT_IMAGE_SIZE;
       const mode = input.refs?.length ? "edit" : "generate";
-      const t0 = Date.now();
-      log.debug("image →", {
-        model: OPENAI_IMAGE_MODEL,
-        mode,
-        refs: input.refs?.length ?? 0,
-        size,
-      });
-      const result = input.refs?.length
-        ? await getClient().images.edit({
-            model: OPENAI_IMAGE_MODEL,
-            image: await Promise.all(input.refs.map(imageRefToFile)),
-            prompt: input.prompt,
-            size: size as never,
-          })
-        : await getClient().images.generate({
-            model: OPENAI_IMAGE_MODEL,
-            prompt: input.prompt,
-            size: size as never,
-          });
+      // Pre-fetch the reference files ONCE (not per attempt).
+      const refFiles = input.refs?.length
+        ? await Promise.all(input.refs.map(imageRefToFile))
+        : null;
 
-      const b64 = result.data?.[0]?.b64_json;
-      if (!b64) throw internal("OpenAI image response missing image data.");
-      log.debug("image ✓", { ms: Date.now() - t0, mode });
-      return { bytes: new Uint8Array(Buffer.from(b64, "base64")), mime: "image/png" };
+      // Retry transient failures: the model returns the PNG as a multi-MB base64
+      // body whose HTTP response occasionally truncates → the SDK's internal
+      // response.json() throws "Unterminated string in JSON" (not auto-retried,
+      // since the request reached 200). Also covers network drops / empty data.
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= IMAGE_MAX_ATTEMPTS; attempt++) {
+        const t0 = Date.now();
+        log.debug("image →", {
+          model: OPENAI_IMAGE_MODEL,
+          mode,
+          refs: input.refs?.length ?? 0,
+          size,
+          attempt,
+        });
+        try {
+          const result = refFiles
+            ? await getClient().images.edit({
+                model: OPENAI_IMAGE_MODEL,
+                image: refFiles,
+                prompt: input.prompt,
+                size: size as never,
+              })
+            : await getClient().images.generate({
+                model: OPENAI_IMAGE_MODEL,
+                prompt: input.prompt,
+                size: size as never,
+              });
+
+          const b64 = result.data?.[0]?.b64_json;
+          if (!b64) throw internal("OpenAI image response missing image data.");
+          log.debug("image ✓", { ms: Date.now() - t0, mode, attempt });
+          return {
+            bytes: new Uint8Array(Buffer.from(b64, "base64")),
+            mime: "image/png",
+          };
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          log.warn("image retry", { attempt, mode, ms: Date.now() - t0, err: msg });
+          if (attempt < IMAGE_MAX_ATTEMPTS) await sleep(attempt * 1000);
+        }
+      }
+      throw internal(
+        `OpenAI image generation failed after ${IMAGE_MAX_ATTEMPTS} attempts: ${
+          lastErr instanceof Error ? lastErr.message : String(lastErr)
+        }`,
+      );
     },
   };
 }

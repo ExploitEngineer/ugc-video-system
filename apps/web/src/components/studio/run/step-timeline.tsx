@@ -204,8 +204,11 @@ export function StepTimeline({ run }: { run: RunDetail }) {
         const state = stepState(run, step);
         const upNext = step === upNextStep && state === "pending";
         const assetKind = STEP_ASSET_KIND[step];
+        // Assets arrive oldest-first; a revise appends a NEW sheet of the same
+        // kind, so pick the LAST match (newest) — otherwise the gate keeps
+        // showing the pre-revise sheet.
         const asset = assetKind
-          ? run.assets.find((a) => a.kind === assetKind)
+          ? run.assets.findLast((a) => a.kind === assetKind)
           : undefined;
         const showAsset = asset && (state === "done" || state === "awaiting");
         const last = i === STEP_ORDER.length - 1;
