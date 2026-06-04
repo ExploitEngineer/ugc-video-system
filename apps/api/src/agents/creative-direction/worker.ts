@@ -43,6 +43,7 @@ async function tick(): Promise<void> {
     .select({ id: schema.runs.id })
     .from(schema.runs)
     .where(inArray(schema.runs.status, CLAIMABLE));
+  const claimableIds = new Set(rows.map((r) => r.id));
 
   for (const { id } of rows) {
     if (inFlight.has(id)) continue;
@@ -122,6 +123,13 @@ async function tick(): Promise<void> {
           );
         log.debug("released", { run: id });
       });
+  }
+
+  // Prune throttle entries for runs no longer claimable (completed / paused /
+  // failed, or persistently owned elsewhere) so `lockedLogAt` can't grow
+  // unbounded over the process lifetime. Bounds it to the live claimable set.
+  for (const key of lockedLogAt.keys()) {
+    if (!claimableIds.has(key)) lockedLogAt.delete(key);
   }
 }
 
