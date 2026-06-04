@@ -1,10 +1,9 @@
-// /runs routes — create, poll, artifacts, and confirm/reject/cancel gating.
+// /runs routes — create, poll, artifacts, and feedback/cancel gating.
 //
 // Responses always go through the mappers (lib/mappers.ts) so the frontend
-// only ever sees the @ugc/shared DTO shapes. No worker exists until F7, so
-// a created run sits at `queued`; confirm/reject are only legal from
-// `awaiting_confirmation` (→ 409 until F7 sets that status). Cancel works
-// from any non-terminal status.
+// only ever sees the @ugc/shared DTO shapes. The confirm-mode gate has a SINGLE
+// action: `POST /feedback` (free text; blank = continue), legal only from
+// `awaiting_confirmation`. Cancel works from any non-terminal status.
 
 import type { AssetKind } from "@ugc/shared";
 import { createRunInputSchema, feedbackInputSchema } from "@ugc/shared";
@@ -169,55 +168,12 @@ runs.get("/:id/artifacts", async (c) => {
   });
 });
 
-// ── POST /runs/:id/confirm — advance a gated run (confirm mode) ───────
-runs.post("/:id/confirm", async (c) => {
-  const id = c.req.param("id");
-  const run = await getRunOr404(id);
-  assertStatus(run, ["awaiting_confirmation"], "Run is not awaiting confirmation.");
-  log.info("confirm awaiting→running", { run: id, currentStep: run.currentStep });
-
-  await db.transaction(async (tx) => {
-    await tx.insert(schema.stepEvents).values({
-      runId: id,
-      step: run.currentStep ?? "product_sheet",
-      status: "passed",
-    });
-    await tx
-      .update(schema.runs)
-      .set({ status: "running", updatedAt: new Date() })
-      .where(eq(schema.runs.id, id));
-  });
-
-  return c.json(await loadRunDetail(id));
-});
-
-// ── POST /runs/:id/reject — regenerate a gated step (confirm mode) ────
-runs.post("/:id/reject", async (c) => {
-  const id = c.req.param("id");
-  const run = await getRunOr404(id);
-  assertStatus(run, ["awaiting_confirmation"], "Run is not awaiting confirmation.");
-  log.info("reject awaiting→regenerating", { run: id, currentStep: run.currentStep });
-
-  await db.transaction(async (tx) => {
-    await tx.insert(schema.stepEvents).values({
-      runId: id,
-      step: run.currentStep ?? "product_sheet",
-      status: "regenerated",
-    });
-    await tx
-      .update(schema.runs)
-      .set({ status: "regenerating", updatedAt: new Date() })
-      .where(eq(schema.runs.id, id));
-  });
-
-  return c.json(await loadRunDetail(id));
-});
-
-// ── POST /runs/:id/feedback — step-by-step free-text gate reply ───────
-// Classifies the user's reply: approve → advance (like /confirm); revise →
-// regenerate the gated artifact (like /reject) with the feedback threaded
-// into the agent prompt. The product sheet is hidden, so a reference-gate
-// revise always re-runs the person sheet.
+// ── POST /runs/:id/feedback — the SINGLE step-by-step gate action ─────
+// One free-text submit decides everything: a BLANK message means "continue"
+// (advance, no LLM call); a non-blank one is classified — approve → advance,
+// revise → regenerate the gated artifact with the feedback threaded into the
+// agent prompt. The product sheet is hidden, so a reference-gate revise always
+// re-runs the person sheet and never the product.
 runs.post("/:id/feedback", async (c) => {
   const id = c.req.param("id");
   const run = await getRunOr404(id);
@@ -230,18 +186,21 @@ runs.post("/:id/feedback", async (c) => {
       parsed.error.issues,
     );
   }
-  const { message } = parsed.data;
+  const message = parsed.data.message.trim();
 
   const step = run.currentStep ?? "product_sheet";
   const gate = gateForCurrentStep(step);
   if (!gate) throw badRequest("Run is not at a feedback gate.");
 
-  const verdict = await interpretFeedback(getOpenAI(), { stage: gate, message });
+  // Blank submit = continue. Skip the LLM entirely.
+  const intent: "approve" | "revise" = message
+    ? (await interpretFeedback(getOpenAI(), { stage: gate, message })).intent
+    : "approve";
   log.info("feedback", {
     run: id,
     gate,
-    verdict: verdict.intent,
-    next: verdict.intent === "approve" ? "running" : "regenerating",
+    intent,
+    next: intent === "approve" ? "running" : "regenerating",
     msg: message.slice(0, 60),
   });
 
@@ -249,12 +208,12 @@ runs.post("/:id/feedback", async (c) => {
     await tx.insert(schema.stepEvents).values({
       runId: id,
       step,
-      status: verdict.intent === "approve" ? "passed" : "regenerated",
+      status: intent === "approve" ? "passed" : "regenerated",
     });
     await tx
       .update(schema.runs)
       .set(
-        verdict.intent === "approve"
+        intent === "approve"
           ? { status: "running", feedback: null, updatedAt: new Date() }
           : { status: "regenerating", feedback: message, updatedAt: new Date() },
       )
