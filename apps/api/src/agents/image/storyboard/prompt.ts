@@ -13,6 +13,7 @@
 import type { AdType } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
+import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface StoryboardPromptInput {
   adStyle: string;
@@ -21,6 +22,12 @@ export interface StoryboardPromptInput {
   hasPerson: boolean;
   /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
   critique?: string;
+  /**
+   * Broken-down USER revision directive (confirm-mode storyboard gate). Takes
+   * precedence over `critique` when present — it is the structured form of the
+   * user's feedback rather than the Critic's free-text issues.
+   */
+  directive?: RevisionDirective;
 }
 
 export interface StoryboardScene {
@@ -49,12 +56,28 @@ export interface StoryboardPlan {
   scenes: StoryboardScene[];
 }
 
+/** Render the broken-down user revision directive as explicit instructions. */
+function directiveBlock(d: RevisionDirective): string[] {
+  const bullets = (items: string[]) => items.map((i) => `  - ${i}`);
+  const lines = [
+    "",
+    "USER REVISION — the user reviewed the previous storyboard and asked for the",
+    "following. Author a corrected `imagePrompt` (and script) that applies EXACTLY",
+    "these changes while keeping everything else faithful to the reference sheets:",
+  ];
+  if (d.changes.length) lines.push("CHANGES TO APPLY:", ...bullets(d.changes));
+  if (d.keep.length) lines.push("KEEP UNCHANGED:", ...bullets(d.keep));
+  if (d.rationale) lines.push(`WHY: ${d.rationale}`);
+  return lines;
+}
+
 export function buildStoryboardPrompt({
   adStyle,
   adType,
   userPrompt,
   hasPerson,
   critique,
+  directive,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
 
@@ -169,7 +192,7 @@ export function buildStoryboardPrompt({
     "- ONE single image, exactly FOUR equal-size panels in reading order — a",
     "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
     "  with only thin, uniform plain separator borders between panels.",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full 4K detail.`,
+    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
     "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
     "  frame lifted straight from the finished ad.",
     ...keyframeLook,
@@ -241,14 +264,16 @@ export function buildStoryboardPrompt({
     "brief panelCaption per scene) and the composite storyboard-sheet plan —",
     "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
     "its panelCaption bar, in order; no other text and no arrows.",
-    ...(critique?.trim()
-      ? [
-          "",
-          "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
-          "`imagePrompt` that fixes these issues while keeping everything else:",
-          critique.trim(),
-        ]
-      : []),
+    ...(directive
+      ? directiveBlock(directive)
+      : critique?.trim()
+        ? [
+            "",
+            "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
+            "`imagePrompt` that fixes these issues while keeping everything else:",
+            critique.trim(),
+          ]
+        : []),
   ].join("\n");
 
   return [

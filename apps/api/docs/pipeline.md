@@ -26,11 +26,14 @@ time, persisting before each transition so a crash/restart resumes cleanly.
 **Steps** (`packages/shared/src/enums.ts` → `stepSchema`):
 
 ```
-product_sheet → person_sheet? → product_inspection? → storyboard
+product_sheet → person_sheet → product_inspection? → storyboard
               → storyboard_inspection? → video
 ```
 
-- `person_sheet` runs only when a person is involved.
+- `person_sheet` ALWAYS runs: built from the uploaded person photo (identity-
+  locked image-to-image) when one was uploaded, else invented from the product-
+  derived brief. Either way the storyboard consumes the generated reference
+  sheet, never the raw upload.
 - `product_inspection` / `storyboard_inspection` run only when the critic is
   enabled (`runs.critic_enabled`).
 - Step order + gating: `creative-direction/plan.ts` (`nextStep`, `gateForNext`).
