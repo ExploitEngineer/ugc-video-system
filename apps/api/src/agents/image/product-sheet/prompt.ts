@@ -43,7 +43,7 @@ export function buildProductSheetPrompt({
     "",
     "THE SHEET (describe all of this inside `imagePrompt`):",
     "- ONE single image, a clean 2×2 grid of exactly FOUR cells.",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full 4K detail.`,
+    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
     "- Each cell shows the SAME product from a different angle, in this order:",
     "  top-left FRONT, top-right THREE-QUARTER, bottom-left SIDE (profile),",
     "  bottom-right REAR.",
