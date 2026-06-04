@@ -249,25 +249,46 @@ async function executeStep(
 
 /**
  * Reference phase — generate the product sheet and the person sheet
- * CONCURRENTLY. The person sheet is built from the uploaded photo when one
- * exists, else invented from the upstream `runs.personBrief` text; either way it
- * has no dependency on the product sheet image. Each step writes its own
- * started/passed events. Returns the first failing step (if any).
+ * CONCURRENTLY. The product sheet runs immediately; the person sheet is built
+ * from the uploaded photo when one exists, else invented from a product-derived
+ * TEXT brief planned HERE (vision over the uploaded product image). Planning the
+ * brief inside the person branch — instead of serially before the phase — keeps
+ * the product sheet, which needs neither, off the brief's critical path. Each
+ * step writes its own started/passed events. Returns the first failing step.
  */
 async function runReferencePhase(
   ctx: SkillContext,
+  tag?: string,
 ): Promise<{ failedStep?: Step; err?: unknown }> {
-  // Both always run: the person sheet is built from the uploaded photo when one
-  // exists, else invented from the brief. The two have no ordering dependency,
-  // so they generate in parallel.
-  const steps: Step[] = ["product_sheet", "person_sheet"];
-  const results = await Promise.allSettled(
-    steps.map((s) => executeStep(ctx, s)),
-  );
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === "rejected") return { failedStep: steps[i], err: r.reason };
-  }
+  const runId = ctx.runId;
+  const { productUpload, personUpload } = await loadUploads(runId);
+  const userPrompt = (await readRun(runId))?.prompt ?? "";
+
+  // Person branch: when inventing a person (a product but no uploaded person),
+  // plan + persist the brief FIRST, then generate the sheet — `executeStep`
+  // reads `runs.personBrief` back from the DB, so this ordering is required.
+  // With an uploaded person the brief is skipped (the sheet is built from the
+  // photo). The product branch runs alongside and never waits on the brief.
+  const personBranch = async (): Promise<void> => {
+    if (productUpload && !personUpload) {
+      const { personBrief } = await planPersonBrief(ctx, {
+        userPrompt,
+        productUpload,
+      });
+      await setRun(runId, { personBrief });
+      logRun(runId, `person brief: "${personBrief}"`, tag);
+    }
+    await executeStep(ctx, "person_sheet");
+  };
+
+  const [product, person] = await Promise.allSettled([
+    executeStep(ctx, "product_sheet"),
+    personBranch(),
+  ]);
+  if (product.status === "rejected")
+    return { failedStep: "product_sheet", err: product.reason };
+  if (person.status === "rejected")
+    return { failedStep: "person_sheet", err: person.reason };
   return {};
 }
 
@@ -286,10 +307,10 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     tag,
   );
 
-  // Phase 0 — interpret the ad style once, when leaving `queued`. Also plan the
-  // product-derived person brief here (vision over the UPLOADED product image)
-  // so the product and person sheets can generate in parallel afterwards — the
-  // person sheet reads only this TEXT brief, never the product sheet image.
+  // Phase 0 — interpret the ad style once, when leaving `queued`. The
+  // product-derived person brief is NOT planned here: it's deferred into the
+  // parallel reference phase (concurrent with the product sheet), so the product
+  // sheet — which needs neither the brief nor its vision call — starts at once.
   if (run.status === "queued") {
     const ctx = buildCtx(run);
     logRun(runId, "▶ interpreting ad style …", tag);
@@ -297,23 +318,9 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       const { adStyle, adType } = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
       });
-      // adStyle is needed by the person-brief prompt, so refresh ctx with it.
-      const briefCtx: SkillContext = { ...ctx, adStyle, adType };
-      const { productUpload, personUpload } = await loadUploads(runId);
-      let personBrief: string | null = null;
-      // The brief describes an INVENTED person fitting the product — only useful
-      // when no person was uploaded. For an uploaded person we preserve the real
-      // person (the person sheet is built from their photo), so skip the brief.
-      if (productUpload && !personUpload) {
-        personBrief = (
-          await planPersonBrief(briefCtx, { userPrompt: run.prompt, productUpload })
-        ).personBrief;
-        logRun(runId, `person brief: "${personBrief}"`, tag);
-      }
       await setRun(runId, {
         adStyle,
         adType,
-        personBrief,
         status: "running",
         currentStep: null,
       });
@@ -458,7 +465,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       // below treats it exactly like a single completed reference step.
       step = "person_sheet";
       logRun(runId, "▶ product_sheet + person_sheet (parallel) …", tag);
-      const { failedStep, err } = await runReferencePhase(ctx);
+      const { failedStep, err } = await runReferencePhase(ctx, tag);
       if (failedStep) {
         await failRun(runId, failedStep, err);
         return;

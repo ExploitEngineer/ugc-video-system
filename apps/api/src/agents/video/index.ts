@@ -90,7 +90,9 @@ export async function videoBuilder(
       try {
         const planRaw = await ctx.openai.chat(messages);
         videoPrompt =
-          parseJsonObject<{ videoPrompt?: string }>(planRaw).videoPrompt?.trim() ?? "";
+          parseJsonObject<{ videoPrompt?: string }>(
+            planRaw,
+          ).videoPrompt?.trim() ?? "";
       } catch (err) {
         log.warn("video prompt unparseable", {
           attempt,
@@ -123,8 +125,8 @@ export async function videoBuilder(
     // Seedance's real-human filter accepts them. Falls back to just the
     // storyboard when no identity image is available (keeps prior behaviour).
     const personReferences = input.hasPerson
-      ? [input.personFaceRef?.source, storyboardUrl].filter(
-          (u): u is string => Boolean(u),
+      ? [input.personFaceRef?.source, storyboardUrl].filter((u): u is string =>
+          Boolean(u),
         )
       : [];
     const task = await ctx.video.submitVideo({
