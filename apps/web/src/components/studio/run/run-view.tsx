@@ -12,11 +12,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
-import {
-  cancelRunAction,
-  confirmStepAction,
-  submitFeedbackAction,
-} from "@/app/studio/actions";
+import { cancelRunAction, submitFeedbackAction } from "@/app/studio/actions";
 import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { FeedbackBar } from "@/components/studio/run/feedback-bar";
@@ -38,7 +34,7 @@ import { addRun } from "@/lib/run-history";
 const POLL_MS = 1500;
 
 // Stable module-level poller — poll while active; stop at terminal states
-// and while awaiting the user's confirm/reject (a mutation resumes it by
+// and while awaiting the user's gate feedback (a mutation resumes it by
 // writing fresh data). Hoisted so its identity is stable across renders
 // (React Compiler does not memoize query-option closures).
 function runPollInterval(query: {
@@ -72,18 +68,17 @@ export function RunView({ runId }: { runId: string }) {
     queryKey,
     queryFn: () => fetchRun(runId),
     refetchInterval: runPollInterval,
-    retry: (count, err) => err.message !== "not-found" && count < 2,
+    // Retry up to 2× on ANY error — including a transient/stale 404 — so one bad
+    // poll doesn't instantly show "Chat not found"; a genuinely missing run still
+    // 404s on every attempt and surfaces after the retries.
+    retry: (count) => count < 2,
   });
 
   const mutation = useMutation({
-    mutationFn: (action: "confirm" | "cancel") => {
-      if (action === "confirm") return confirmStepAction(runId);
-      return cancelRunAction(runId);
-    },
-    onSuccess: (detail, action) => {
+    mutationFn: (_action: "cancel") => cancelRunAction(runId),
+    onSuccess: (detail) => {
       if (detail) queryClient.setQueryData(queryKey, detail);
-      if (action === "confirm") toast.success("Approved — continuing");
-      if (action === "cancel") toast.error("Run cancelled");
+      toast.error("Run cancelled");
     },
     onError: () => toast.error("Action failed — try again"),
   });
@@ -215,7 +210,6 @@ export function RunView({ runId }: { runId: string }) {
         <FeedbackBar
           run={run}
           pending={pending}
-          onApprove={() => mutation.mutate("confirm")}
           onSubmitFeedback={(message) => feedbackMutation.mutate(message)}
           onCancel={() => mutation.mutate("cancel")}
         />

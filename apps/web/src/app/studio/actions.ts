@@ -1,18 +1,18 @@
 "use server";
 
 // Run mutations as Next.js server actions. These run server-side (Node), so
-// they call the Hono API directly — no browser CORS. Confirm/feedback/cancel
-// POST to the gating routes and return the fresh RunDetail to prime the query
-// cache. (Run CREATION is NOT here: it uploads the multipart form via
-// `createRun` in lib/api.ts → the /api/runs Route Handler, which streams it to
-// the API — Server Actions' 1 MB body cap would reject/crash on real images.)
+// they call the Hono API directly — no browser CORS. Feedback/cancel POST to the
+// gating routes and return the fresh RunDetail to prime the query cache. (Run
+// CREATION is NOT here: it uploads the multipart form via `createRun` in
+// lib/api.ts → the /api/runs Route Handler, which streams it to the API —
+// Server Actions' 1 MB body cap would reject/crash on real images.)
 
 import type { RunDetail } from "@ugc/shared";
 import { apiUrl } from "@/lib/api";
 
 async function mutateRun(
   runId: string,
-  action: "confirm" | "cancel",
+  action: "cancel",
 ): Promise<RunDetail | null> {
   try {
     const res = await fetch(apiUrl(`/runs/${runId}/${action}`), {
@@ -39,13 +39,10 @@ export async function deleteRunAction(runId: string): Promise<boolean> {
   }
 }
 
-export async function confirmStepAction(
-  runId: string,
-): Promise<RunDetail | null> {
-  return mutateRun(runId, "confirm");
-}
-
-/** Submit free-text feedback at a step-by-step gate (approve or revise). */
+/**
+ * The single step-by-step gate action: submit free text (blank = continue). The
+ * API decides approve (advance) vs revise (regenerate the person/storyboard).
+ */
 export async function submitFeedbackAction(
   runId: string,
   message: string,
