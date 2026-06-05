@@ -2,7 +2,8 @@
 //
 // Two jobs: (1) coalesce DB-nullable columns into the DTO's required
 // fields (the frontend contract in @ugc/shared requires non-null
-// `adStyle`/`currentStep`/`url`/`mime`), and (2) make sure internal-only
+// `adStyle`/`url`/`mime`; `currentStep` stays nullable — the UI needs the
+// null), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
 import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
@@ -70,9 +71,14 @@ export function toRunDto(row: RunRow): Run {
     // Default to `ugc` until the interpret step fills it in.
     adType: row.adType ?? "ugc",
     mode: row.mode,
+    aspectRatio: row.aspectRatio,
     criticEnabled: row.criticEnabled,
     status: row.status,
-    currentStep: row.currentStep ?? "product_sheet",
+    // Pass `currentStep` through verbatim — null means "no step has completed
+    // yet" (fresh run) or "parallel reference phase in flight". Coalescing it to
+    // a step made a brand-new queued run report product_sheet as the last
+    // completed step, so the timeline showed it "passed" before it ever ran.
+    currentStep: row.currentStep,
     error: row.error ?? null,
     feedback: row.feedback ?? null,
     createdAt: row.createdAt.toISOString(),

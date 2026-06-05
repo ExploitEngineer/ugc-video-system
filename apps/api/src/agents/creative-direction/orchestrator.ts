@@ -99,6 +99,7 @@ function buildCtx(run: RunRow): SkillContext {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
     adType: run.adType ?? "ugc",
+    aspectRatio: run.aspectRatio,
     openai,
     video,
   };

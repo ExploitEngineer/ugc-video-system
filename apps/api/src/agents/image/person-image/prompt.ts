@@ -12,8 +12,9 @@
 //  - buildPersonSheetFromPhotoInstruction — a SHORT instruction to turn an
 //    UPLOADED person photo into the 2×2 reference sheet, preserving identity.
 
+import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
-import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
+import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface PersonImagePromptInput {
@@ -21,6 +22,8 @@ export interface PersonImagePromptInput {
   userPrompt: string;
   /** Product-derived brief (demographics/wardrobe/palette) — TEXT, not an image. */
   personBrief: string;
+  /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
+  aspectRatio: AspectRatio;
   /**
    * A "regenerate"-scope revision directive — the user wants a DIFFERENT person.
    * (Targeted "edit" revisions go through buildPersonEditInstruction instead.)
@@ -109,10 +112,12 @@ export function buildPersonImagePrompt({
   adStyle,
   userPrompt,
   personBrief,
+  aspectRatio,
   directive,
 }: PersonImagePromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const brief = personBrief.trim();
+  const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
 
   const system = [
     "You are the Generate Person Image skill of an ad-video Image Agent.",
@@ -125,7 +130,7 @@ export function buildPersonImagePrompt({
     "- ONE single image, a clean 2×2 grid of exactly FOUR views of the SAME",
     "  person, in this order: top-left FRONT, top-right THREE-QUARTER,",
     "  bottom-left SIDE (profile), bottom-right BACK (rear).",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
+    `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
     "- A thin, uniform neutral separator line (a small gutter/border) divides the",
     "  four views so each reads as its own clean panel.",
     "- Plain seamless studio backdrop: one flat neutral color, identical in",
@@ -170,7 +175,7 @@ export function buildPersonImagePrompt({
     "views, the PHOTOREALISTIC real-human look (real camera, natural skin texture,",
     "lifelike face — a real, relatable everyday person, no CGI/plastic/airbrushed",
     "or glossy-model look), the images-only / no-added-text rule, and the",
-    `${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution. \`views\` (all four) and`,
+    `${resolutionLabel} resolution. \`views\` (all four) and`,
     "`personDetails` are metadata (NOT drawn on the image).",
   ].join("\n");
 

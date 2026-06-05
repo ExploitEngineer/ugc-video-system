@@ -4,11 +4,15 @@
 // SDK/REST, so the provider is swappable. Seedance runs async: submit a task,
 // then poll until the video is ready.
 
+import type { AspectRatio } from "@ugc/shared";
+
 export interface SubmitVideoInput {
   /** Text prompt describing motion/ad style for the ~15s clip. */
   prompt: string;
   /** Target duration in seconds (~15). */
   durationSec?: number;
+  /** Output aspect ratio (Seedance `ratio` key). Defaults to 16:9 when omitted. */
+  aspectRatio?: AspectRatio;
   /**
    * Optional clean first-frame image (URL or data URI) for image-to-video.
    * Omit to drive generation purely from the reference sheets + prompt — this

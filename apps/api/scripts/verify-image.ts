@@ -48,6 +48,7 @@ async function main() {
     runId,
     adStyle,
     adType: run.adType ?? "ugc",
+    aspectRatio: run.aspectRatio,
     openai: createOpenAIProvider(),
     video: createVideoProvider(),
   };

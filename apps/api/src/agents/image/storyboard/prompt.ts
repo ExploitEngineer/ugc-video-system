@@ -10,9 +10,9 @@
 // video model as the ordered shot guide; the detailed `sceneDescription` and
 // `transcript` ride in the video prompt as text.
 
-import type { AdType } from "@ugc/shared";
+import type { AdType, AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
-import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
+import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface StoryboardPromptInput {
@@ -20,6 +20,8 @@ export interface StoryboardPromptInput {
   adType: AdType;
   userPrompt: string;
   hasPerson: boolean;
+  /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
+  aspectRatio: AspectRatio;
   /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
   critique?: string;
   /**
@@ -76,10 +78,12 @@ export function buildStoryboardPrompt({
   adType,
   userPrompt,
   hasPerson,
+  aspectRatio,
   critique,
   directive,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
+  const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
 
   // Ad-type-specific direction for the script + transcripts.
   const typeBlock =
@@ -192,7 +196,7 @@ export function buildStoryboardPrompt({
     "- ONE single image, exactly FOUR equal-size panels in reading order — a",
     "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
     "  with only thin, uniform plain separator borders between panels.",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
+    `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
     "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
     "  frame lifted straight from the finished ad.",
     ...keyframeLook,
@@ -230,7 +234,7 @@ export function buildStoryboardPrompt({
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
     "`imagePrompt` MUST itself state the four-panel 2×2 layout with thin plain",
-    `separator borders, the ${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution, the`,
+    `separator borders, the ${resolutionLabel} resolution, the`,
     "product/person fidelity rule, and the PANEL-LABEL rule: each panel carries",
     "its number badge (01–04, in order) and a bottom caption bar reading that",
     "scene's `panelCaption`, with NO other text and NO arrows. It MUST quote the",

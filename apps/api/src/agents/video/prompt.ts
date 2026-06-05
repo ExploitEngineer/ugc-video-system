@@ -1,6 +1,12 @@
-import type { AdType } from "@ugc/shared";
+import type { AdType, AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../providers/openai/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
+
+/** Per-ratio frame-orientation labels baked into the Seedance directive. */
+const FRAME_LABEL: Record<AspectRatio, { full: string; short: string }> = {
+  "16:9": { full: "16:9 widescreen (horizontal)", short: "16:9 widescreen" },
+  "9:16": { full: "9:16 vertical (portrait)", short: "9:16 vertical" },
+};
 
 /**
  * Build the Video Builder messages. The LLM turns the ordered storyboard scenes
@@ -32,9 +38,11 @@ export function buildVideoPrompt(input: {
   userPrompt: string;
   scenes: StoryboardScene[];
   durationSec: number;
+  aspectRatio: AspectRatio;
   critique?: string;
 }): ChatMessage[] {
-  const { adStyle, adType, userPrompt, scenes, durationSec, critique } = input;
+  const { adStyle, adType, userPrompt, scenes, durationSec, aspectRatio, critique } =
+    input;
 
   const ugc = adType === "ugc";
 
@@ -69,7 +77,7 @@ export function buildVideoPrompt(input: {
     `Segment 1 'Global setup:' — lock the subject (the product, and the on-screen presenter when present), the environment, the visual style, and the overall lighting/mood. ${globalLook} The product is shown WORN or IN REAL USE, never as packaging or a box. Explicitly anchor identity to \`@Image 1\`; after any \`@Image 1\` reference immediately add a noun (e.g. \`@Image 1 (the presenter)\`, \`@Image 1 (the product)\`) — never attach a verb, number or location word directly to \`@Image 1\`.`,
     `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE slice per storyboard panel in number order (panel 01 → first slice, 02 → second, 03 → third, 04 → fourth), written inline like '0-4s: …; 4-8s: …'. For EACH slice give its time range, the on-screen action (matching that panel's keyframe and caption, with the product worn or in real use), EXACTLY ONE camera movement (choose a single move — static, dolly in/out, pan, tilt, tracking, or push — NEVER combine moves in one slice), and the synchronized audio. ${audioDirective}`,
     `Segment 3 'Quality & constraints:' — ${qualityLook}. Mandatory anti-distortion fallback: faces remain stable and undistorted with clear, consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra/missing limbs, face jumping, or clipping through objects. ${productNegatives}. State explicitly that ${onScreenNegatives}.`,
-    "Frame for 16:9 widescreen (horizontal). Keep it filmable within the duration.",
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep it filmable within the duration.`,
     "CRITICAL OUTPUT RULE: return STRICT JSON only — a single object {\"videoPrompt\": \"…\"} whose value is ONE single-line string with NO raw line breaks. Escape nothing else; just keep it on one line.",
   ].join(" ");
 
@@ -120,8 +128,9 @@ export function buildDeterministicVideoPrompt(input: {
   adType: AdType;
   scenes: StoryboardScene[];
   durationSec: number;
+  aspectRatio: AspectRatio;
 }): string {
-  const { adStyle, adType, scenes, durationSec } = input;
+  const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
   const ugc = adType === "ugc";
   const count = scenes.length || 1;
   const step = durationSec / count;
@@ -148,7 +157,7 @@ export function buildDeterministicVideoPrompt(input: {
   return (
     `Global setup: @Image 1 (the labelled storyboard) is a 2×2 grid of four numbered keyframe panels (01–04) for the product and any on-screen presenter; render ONE continuous, fully photorealistic live-action ad in the "${adStyle}" style that follows the panels in number order, keeping the identity, framing and composition of @Image 1 (the keyframes) but NEVER showing the grid, panels, number badges or caption text. ${globalLook} The product is shown worn or in real use — never as packaging, a box or an unboxing. ` +
     `Timeline: ${timeline}. ` +
-    `Quality & constraints: ${quality}; faces stay stable and undistorted with consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra or missing limbs, face jumping, or clipping through objects; ONE real solid product — no duplicated copies, no invented packaging or boxes, no opening or transforming the product or any container, no seam-morph; 16:9 widescreen; ${ugc ? "no background or library music (only the spoken voice and light natural ambience); " : ""}NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame.`
+    `Quality & constraints: ${quality}; faces stay stable and undistorted with consistent facial features; product and person identity stay consistent for the whole shot; no warping, morphing, extra or missing limbs, face jumping, or clipping through objects; ONE real solid product — no duplicated copies, no invented packaging or boxes, no opening or transforming the product or any container, no seam-morph; ${FRAME_LABEL[aspectRatio].short}; ${ugc ? "no background or library music (only the spoken voice and light natural ambience); " : ""}NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame.`
   );
 }
 

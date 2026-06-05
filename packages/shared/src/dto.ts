@@ -7,6 +7,7 @@
 import { z } from "zod";
 import {
   adTypeSchema,
+  aspectRatioSchema,
   assetKindSchema,
   modeSchema,
   runStatusSchema,
@@ -52,9 +53,17 @@ export const runSchema = z.object({
   adStyle: z.string(),
   adType: adTypeSchema,
   mode: modeSchema,
+  aspectRatio: aspectRatioSchema,
   criticEnabled: z.boolean(),
   status: runStatusSchema,
-  currentStep: stepSchema,
+  /**
+   * The LAST COMPLETED step — `null` before the first step finishes (a fresh
+   * `queued` run) and throughout the parallel reference phase (the backend
+   * holds it null until BOTH reference sheets finish). The UI relies on this
+   * null to render "pending"/"generating" correctly instead of a premature
+   * "passed", so it must NOT be coalesced to a step in the mapper.
+   */
+  currentStep: stepSchema.nullable(),
   error: z.string().nullable(),
   /** Pending step-by-step feedback message, consumed by the next regen. */
   feedback: z.string().nullable(),
@@ -101,6 +110,7 @@ export type RunDetail = z.infer<typeof runDetailSchema>;
 export const createRunInputSchema = z.object({
   prompt: z.string().trim().min(1, "Prompt is required").max(2000),
   mode: modeSchema,
+  aspectRatio: aspectRatioSchema,
   criticEnabled: z.boolean(),
   hasPersonImage: z.boolean(),
 });

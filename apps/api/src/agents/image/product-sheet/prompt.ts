@@ -5,12 +5,15 @@
 // reference sheet — a clean 2×2 grid of four product views, IMAGES ONLY (no
 // text/labels baked into the image) — plus structured `views` metadata.
 
+import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
-import { DEFAULT_IMAGE_RESOLUTION_LABEL } from "../../../providers/openai/constants.js";
+import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
 
 export interface ProductSheetPromptInput {
   adStyle: string;
   userPrompt: string;
+  /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
+  aspectRatio: AspectRatio;
   /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
   critique?: string;
 }
@@ -30,9 +33,11 @@ export interface ProductSheetPlan {
 export function buildProductSheetPrompt({
   adStyle,
   userPrompt,
+  aspectRatio,
   critique,
 }: ProductSheetPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
+  const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
 
   const system = [
     "You are the Product Sheet Builder skill of an ad-video Image Agent.",
@@ -43,7 +48,7 @@ export function buildProductSheetPrompt({
     "",
     "THE SHEET (describe all of this inside `imagePrompt`):",
     "- ONE single image, a clean 2×2 grid of exactly FOUR cells.",
-    `- Output/canvas resolution: ${DEFAULT_IMAGE_RESOLUTION_LABEL}. Render at full detail.`,
+    `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
     "- Each cell shows the SAME product from a different angle, in this order:",
     "  top-left FRONT, top-right THREE-QUARTER, bottom-left SIDE (profile),",
     "  bottom-right REAR.",
@@ -95,7 +100,7 @@ export function buildProductSheetPrompt({
     "product-photography look (real camera, sharp macro detail, soft studio",
     "lighting, believable reflections — no CGI/illustrated look), the 2×2 layout",
     "with thin separators between cells, the no-added-text rule, and the",
-    `${DEFAULT_IMAGE_RESOLUTION_LABEL} resolution. Each \`views\` entry is a short`,
+    `${resolutionLabel} resolution. Each \`views\` entry is a short`,
     "note (metadata, NOT drawn on the image) on what that angle emphasizes.",
   ].join("\n");
 

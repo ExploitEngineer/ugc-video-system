@@ -60,6 +60,7 @@ runs.post("/", async (c) => {
   const parsed = createRunInputSchema.safeParse({
     prompt: body.prompt,
     mode: body.mode,
+    aspectRatio: body.aspectRatio,
     // FormData carries strings; default ON unless explicitly "false".
     criticEnabled: body.criticEnabled !== "false",
     hasPersonImage: personImage !== null,
@@ -70,7 +71,7 @@ runs.post("/", async (c) => {
       parsed.error.issues,
     );
   }
-  const { prompt, mode, criticEnabled } = parsed.data;
+  const { prompt, mode, aspectRatio, criticEnabled } = parsed.data;
 
   // `runs.projectId` is NOT NULL → auto-create a project to own this run.
   const [project] = await db
@@ -80,11 +81,27 @@ runs.post("/", async (c) => {
 
   const [run] = await db
     .insert(schema.runs)
-    .values({ projectId: project.id, prompt, mode, criticEnabled, status: "queued" })
+    .values({
+      projectId: project.id,
+      prompt,
+      mode,
+      aspectRatio,
+      criticEnabled,
+      status: "queued",
+      // Insert the run already LOCKED so the worker can't claim it yet. Without
+      // this, the worker (which polls for `queued` rows with a free/stale lock)
+      // races the upload below and claims the run before its `product_upload`
+      // asset is committed — product_sheet then throws "run has no
+      // product_upload asset" while the parallel person_sheet (no upload)
+      // succeeds. The lock is released once the uploads land; a route crash
+      // mid-upload is recovered by the worker's stale-lock reclaim (>3min).
+      lockedAt: new Date(),
+      lockedBy: "pending-upload",
+    })
     .returning();
 
-  // Upload images, then record them as `assets`. Uploads are external to
-  // the DB; on failure the queued run simply has no assets (recoverable).
+  // Upload images, then record them as `assets`, BEFORE releasing the lock so
+  // the worker only ever sees a run whose inputs already exist.
   const uploads: { kind: AssetKind; file: File }[] = [
     { kind: "product_upload", file: productImage as File },
   ];
@@ -107,13 +124,25 @@ runs.post("/", async (c) => {
       });
     }
   } catch (err) {
-    // Don't leave a queued run with no product_upload for the worker to claim.
+    // Upload failed → fail the run (clear the lock so nothing reclaims it).
     await db
       .update(schema.runs)
-      .set({ status: "failed", error: "Image upload failed.", updatedAt: new Date() })
+      .set({
+        status: "failed",
+        error: "Image upload failed.",
+        lockedAt: null,
+        lockedBy: null,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.runs.id, run.id));
     throw err;
   }
+
+  // Inputs are committed — release the creation hold so the worker can claim it.
+  await db
+    .update(schema.runs)
+    .set({ lockedAt: null, lockedBy: null, updatedAt: new Date() })
+    .where(eq(schema.runs.id, run.id));
 
   return c.json(await loadRunDetail(run.id), 201);
 });

@@ -64,7 +64,9 @@ function getClient(): OpenAI {
       // Image generation is slow and returns multi-MB bodies; give it room and
       // let the SDK retry connection-level failures. (A post-200 truncated-body
       // parse error is NOT retried by the SDK — generateImage handles that.)
-      timeout: 120_000,
+      // 240s: a complex full-body person sheet can legitimately run >120s, so a
+      // tight timeout forced a wasteful regen instead of letting it finish.
+      timeout: 240_000,
       maxRetries: 2,
     });
   }
@@ -72,7 +74,7 @@ function getClient(): OpenAI {
 }
 
 /** Image-gen attempts before giving up (covers truncated-body JSON failures). */
-const IMAGE_MAX_ATTEMPTS = 3;
+const IMAGE_MAX_ATTEMPTS = 5;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -188,7 +190,15 @@ export function createOpenAIProvider(): OpenAIProvider {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
           log.warn("image retry", { attempt, mode, ms: Date.now() - t0, err: msg });
-          if (attempt < IMAGE_MAX_ATTEMPTS) await sleep(attempt * 1000);
+          // Capped exponential backoff + jitter (~2s, 4s, 8s, 12s): give a
+          // truncating proxy / flaky connection time to clear, and keep the
+          // parallel product+person sheet retries from thundering in lockstep.
+          if (attempt < IMAGE_MAX_ATTEMPTS) {
+            await sleep(
+              Math.min(2000 * 2 ** (attempt - 1), 12_000) +
+                Math.floor(Math.random() * 600),
+            );
+          }
         }
       }
       throw internal(
