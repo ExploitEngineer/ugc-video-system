@@ -127,7 +127,9 @@ export function activeSteps(run: RunDetail): Step[] {
 /** Resolve the display state of a single step from the run detail. */
 export function stepState(run: RunDetail, step: Step): StepState {
   const idx = STEP_ORDER.indexOf(step);
-  const currentIdx = STEP_ORDER.indexOf(run.currentStep);
+  // `currentStep` is null before the first step completes (and during the
+  // parallel reference phase) → -1, so no step reads as "behind currentStep".
+  const currentIdx = run.currentStep ? STEP_ORDER.indexOf(run.currentStep) : -1;
   const events = run.stepEvents.filter((e) => e.step === step);
   const hasPassed = events.some((e) => e.status === "passed");
 

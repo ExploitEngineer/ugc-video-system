@@ -83,6 +83,7 @@ export async function videoBuilder(
       userPrompt: input.userPrompt,
       scenes: input.scenes,
       durationSec,
+      aspectRatio: ctx.aspectRatio,
       critique: input.critique,
     });
     let videoPrompt = "";
@@ -106,6 +107,7 @@ export async function videoBuilder(
         adType: ctx.adType,
         scenes: input.scenes,
         durationSec,
+        aspectRatio: ctx.aspectRatio,
       });
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
@@ -135,6 +137,7 @@ export async function videoBuilder(
       referenceTag: ctx.runId,
       prompt,
       durationSec,
+      aspectRatio: ctx.aspectRatio,
     });
 
     // 3. Poll until completed / failed / timeout.

@@ -17,6 +17,7 @@
 import type {
   AdType,
   ArtifactStatus,
+  AspectRatio,
   AssetKind,
   Mode,
   RunStatus,
@@ -24,6 +25,7 @@ import type {
 } from "@ugc/shared";
 import {
   adTypeSchema,
+  aspectRatioSchema,
   assetKindSchema,
   artifactStatusSchema,
   modeSchema,
@@ -64,6 +66,10 @@ export const modeEnum = pgEnum(
   "mode",
   modeSchema.options as [Mode, ...Mode[]],
 );
+export const aspectRatioEnum = pgEnum(
+  "aspect_ratio",
+  aspectRatioSchema.options as [AspectRatio, ...AspectRatio[]],
+);
 export const adTypeEnum = pgEnum(
   "ad_type",
   adTypeSchema.options as [AdType, ...AdType[]],
@@ -98,6 +104,7 @@ export const runs = pgTable(
     adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
     personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
     mode: modeEnum("mode").notNull(),
+    aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     criticEnabled: boolean("critic_enabled").notNull().default(true),
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),

@@ -137,7 +137,7 @@ export function createBytePlusProvider(): VideoProvider {
         content,
         duration: input.durationSec ?? DEFAULT_DURATION_SEC,
         resolution: DEFAULT_RESOLUTION,
-        ratio: DEFAULT_RATIO, // Seedance 2.0 key (16:9 widescreen)
+        ratio: input.aspectRatio ?? DEFAULT_RATIO, // Seedance 2.0 key (16:9 | 9:16)
         generate_audio: true, // native synchronized audio
         watermark: false,
       };
@@ -148,6 +148,7 @@ export function createBytePlusProvider(): VideoProvider {
         refs: input.referenceImages?.length ?? 0,
         personRefs: personRefs.length,
         durationSec: body.duration,
+        ratio: body.ratio,
       });
       const json = (await bytePlusFetch("/contents/generations/tasks", {
         method: "POST",

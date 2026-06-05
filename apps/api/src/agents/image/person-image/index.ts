@@ -15,6 +15,7 @@ import { latestPersonSheetMeta } from "../../creative-direction/inputs.js";
 import { createLogger } from "../../../lib/log.js";
 import { parseJsonObject } from "../../json.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
+import { IMAGE_SIZE_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
@@ -63,8 +64,9 @@ async function resolvePlan(
         imagePrompt: buildPersonEditInstruction(input.directive),
         views: (prior?.views as PersonImagePlan["views"] | undefined) ?? null,
         personDetails:
-          (prior?.personDetails as PersonImagePlan["personDetails"] | undefined) ??
-          null,
+          (prior?.personDetails as
+            | PersonImagePlan["personDetails"]
+            | undefined) ?? null,
       };
     }
     // Uploaded person, first generation — identity comes from the photo.
@@ -81,6 +83,7 @@ async function resolvePlan(
       adStyle: ctx.adStyle,
       userPrompt: input.userPrompt,
       personBrief: input.personBrief,
+      aspectRatio: ctx.aspectRatio,
       directive: input.directive,
     }),
   );
@@ -111,6 +114,7 @@ export async function generatePersonImage(
   const { bytes, mime } = await ctx.openai.generateImage({
     prompt: plan.imagePrompt,
     refs: input.baseRef ? [input.baseRef] : undefined,
+    size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
 

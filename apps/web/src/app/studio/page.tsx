@@ -14,7 +14,7 @@ export default function StudioPage() {
         aria-hidden
         className="bg-grid pointer-events-none absolute inset-0 opacity-60"
       />
-      <div className="relative w-full max-w-2xl">
+      <div className="relative w-full max-w-4xl">
         <StudioIntro />
       </div>
     </div>

@@ -8,6 +8,7 @@
 import { schema } from "../../../db/index.js";
 import { createLogger } from "../../../lib/log.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
+import { IMAGE_SIZE_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
@@ -44,6 +45,7 @@ export async function storyboardGenerator(
       adType: ctx.adType,
       userPrompt: input.userPrompt,
       hasPerson: Boolean(input.personSheetRef),
+      aspectRatio: ctx.aspectRatio,
       critique: input.critique,
       directive: input.directive,
     }),
@@ -62,6 +64,7 @@ export async function storyboardGenerator(
   const { bytes, mime } = await ctx.openai.generateImage({
     prompt: plan.imagePrompt,
     refs,
+    size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
 

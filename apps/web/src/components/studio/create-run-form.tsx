@@ -1,6 +1,6 @@
 "use client";
 
-import type { Mode } from "@ugc/shared";
+import type { AspectRatio, Mode } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -9,6 +9,8 @@ import {
   ImageIcon,
   ListChecksIcon,
   Loader2Icon,
+  RectangleHorizontalIcon,
+  RectangleVerticalIcon,
   ShieldCheckIcon,
   ShieldOffIcon,
   UserIcon,
@@ -38,6 +40,7 @@ export function CreateRunForm({
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<Mode>("automatic");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [criticEnabled, setCriticEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -71,6 +74,7 @@ export function CreateRunForm({
     if (personFile) fd.set("personImage", personFile);
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
+    fd.set("aspectRatio", aspectRatio);
     fd.set("criticEnabled", criticEnabled ? "true" : "false");
 
     startTransition(async () => {
@@ -117,7 +121,7 @@ export function CreateRunForm({
         />
 
         <div className="flex items-end justify-between gap-2 px-1">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1">
             <AttachButton
               label="Product"
               icon={ImageIcon}
@@ -134,11 +138,12 @@ export function CreateRunForm({
               onError={setError}
             />
             <ModeToggle value={mode} onChange={setMode} />
+            <AspectRatioToggle value={aspectRatio} onChange={setAspectRatio} />
             <CriticToggle value={criticEnabled} onChange={setCriticEnabled} />
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground hidden font-mono text-[11px] tabular-nums sm:inline">
+            <span className="text-muted-foreground hidden font-mono text-[11px] tabular-nums xl:inline">
               {prompt.length}/{MAX}
             </span>
             <Button
@@ -320,6 +325,65 @@ function ModeToggle({
             {selected && (
               <motion.span
                 layoutId="mode-pill"
+                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              />
+            )}
+            <opt.icon className="size-3.5" />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Compact segmented control for the output aspect ratio — landscape vs vertical. */
+function AspectRatioToggle({
+  value,
+  onChange,
+}: {
+  value: AspectRatio;
+  onChange: (r: AspectRatio) => void;
+}) {
+  const opts: Array<{
+    value: AspectRatio;
+    label: string;
+    title: string;
+    icon: typeof GaugeIcon;
+  }> = [
+    {
+      value: "16:9",
+      label: "16:9",
+      title: "Landscape — YouTube, web, TV",
+      icon: RectangleHorizontalIcon,
+    },
+    {
+      value: "9:16",
+      label: "9:16",
+      title: "Portrait — TikTok, Reels, Shorts",
+      icon: RectangleVerticalIcon,
+    },
+  ];
+  return (
+    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+      {opts.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={selected}
+            title={opt.title}
+            className={cn(
+              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {selected && (
+              <motion.span
+                layoutId="ratio-pill"
                 className="bg-accent absolute inset-0 -z-10 rounded-full"
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
               />
