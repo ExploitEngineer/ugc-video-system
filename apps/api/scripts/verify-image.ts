@@ -49,6 +49,7 @@ async function main() {
     adStyle,
     adType: run.adType ?? "ugc",
     productBrief: run.productBrief ?? "",
+    personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     openai: createOpenAIProvider(),
     video: createVideoProvider(),

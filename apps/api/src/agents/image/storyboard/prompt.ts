@@ -25,6 +25,12 @@ export interface StoryboardPromptInput {
    * (older runs / brief hiccup) — the prompt then falls back to image-only.
    */
   productBrief: string;
+  /**
+   * Product-derived person description (`runs.person_brief`) — demographics,
+   * wardrobe, palette. Used to tailor the spoken lines to who is on camera.
+   * Empty when a person was uploaded (no text brief) or there is no person.
+   */
+  personBrief: string;
   userPrompt: string;
   hasPerson: boolean;
   /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
@@ -84,6 +90,7 @@ export function buildStoryboardPrompt({
   adStyle,
   adType,
   productBrief,
+  personBrief,
   userPrompt,
   hasPerson,
   aspectRatio,
@@ -93,6 +100,7 @@ export function buildStoryboardPrompt({
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
+  const person = personBrief.trim();
 
   // TEXT identity anchor — pins what the product IS so a drifting reference
   // sheet can't make the storyboard render a different kind of item.
@@ -133,6 +141,31 @@ export function buildStoryboardPrompt({
           "  NOT necessarily lip-synced by anyone on screen. The four lines should",
           "  read as one cohesive voiceover.",
         ];
+
+  // Script grounding — forces the four spoken lines to be specific to THIS
+  // product, THIS person and THIS scene, and to never repeat. Kills the
+  // generic, interchangeable filler ("I love this", "you'll love it") that
+  // appears when the model has no concrete anchor.
+  const speaker = adType === "ugc" ? "the on-screen person" : "the voiceover";
+  const scriptGrounding = [
+    "SCRIPT GROUNDING — the four `transcript` lines MUST be concrete and specific:",
+    product
+      ? `- Talk about THIS product specifically — ${product} Name or clearly evoke it; never a generic "this" with no anchor. Do NOT invent a brand, price or feature that isn't supported by the product or the user's prompt.`
+      : "- Talk about THIS specific product (per the product sheet); never a generic, interchangeable line that would fit any product.",
+    "- Each line carries a DIFFERENT, scene-specific beat — a distinct concrete",
+    "  benefit, feature, use-moment or reaction tied to what that panel shows.",
+    "  Across the four lines: hook → product-in-use → a concrete benefit/reaction",
+    "  → a closing line. No two lines may repeat the same idea or phrasing.",
+    "- BANNED filler unless the user's prompt truly calls for it: empty hype with",
+    '  no specifics like "I love this", "you\'ll love it", "this is amazing",',
+    '  "game changer", "obsessed", "10/10", "must-have". Replace with a concrete,',
+    "  product-specific detail instead.",
+    hasPerson && person
+      ? `- The on-screen person is: ${person} Make the wording, vocabulary and tone fit THIS person naturally — ${speaker} should sound like a real individual, not a brand script.`
+      : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
+    "- The lines must match what the matching panel actually shows (the same",
+    "  action / setting), so the spoken script and the keyframes stay in sync.",
+  ];
 
   // How the hero product must appear — shared across ad types. Kills the
   // invented-packaging / unboxing / duplicated-product failure modes.
@@ -191,6 +224,8 @@ export function buildStoryboardPrompt({
     "",
     ...(product ? [...productAnchor, ""] : []),
     ...typeBlock,
+    "",
+    ...scriptGrounding,
     "",
     ...presentationBlock,
     "",

@@ -101,6 +101,7 @@ function buildCtx(run: RunRow): SkillContext {
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
     adType: run.adType ?? "ugc",
     productBrief: run.productBrief ?? "",
+    personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     openai,
     video,

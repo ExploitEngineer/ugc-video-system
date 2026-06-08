@@ -19,6 +19,9 @@ what reaches GPT Image 2 and Seedance 2.0.
 >    guide**. The labels are **direction only**: the final video must keep the
 >    grid / badges / caption text **out of the rendered frame**. (See §7.)
 
+> For a per-agent / per-skill **I/O table** (what image + prompt each skill takes
+> and what it returns), see [agents-and-skills-io.md](agents-and-skills-io.md).
+
 ---
 
 ## 1. Run state machine

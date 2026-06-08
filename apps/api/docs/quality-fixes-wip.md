@@ -16,8 +16,11 @@ fixes for product fidelity, scene scripts, and video realism.
   - [x] Storyboard critic: attach product + person sheets (Image 2/3) + brief;
     rubric flags wrong-kind product as blocking/global.
   - [x] Product critic: attach original upload (Image 2) + brief; same check.
-- [ ] **3. `fix/scene-script-tailoring`** — product/person-grounded,
+- [x] **3. `fix/scene-script-tailoring`** — product/person-grounded,
   non-repetitive transcripts.
+  - [x] `SkillContext.personBrief` wired (mirrors productBrief).
+  - [x] Storyboard prompt SCRIPT GROUNDING block: each line specific to THIS
+    product + person + scene beat; anti-repetition; banned hype filler.
 - [ ] **4. `fix/video-realism`** — 720p→1080p default + `BYTEPLUS_VIDEO_RESOLUTION`
   env; de-glamour UGC keyframes.
 - [ ] **5. `docs/io-contract-refresh`** — update IO doc / SPEC / pipeline; delete

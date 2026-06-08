@@ -22,6 +22,13 @@ export interface SkillContext {
    * silently drifting into a different item downstream (storyboard, critic).
    */
   productBrief: string;
+  /**
+   * Product-derived description of the on-camera person (demographics / wardrobe
+   * / palette) from `runs.person_brief`. Set when the person is INVENTED from the
+   * product; empty when a person photo was uploaded (identity then lives in the
+   * image only). Lets the storyboard tailor spoken lines to who is on camera.
+   */
+  personBrief: string;
   /** User-chosen output shape — sizes the image sheets and the final video. */
   aspectRatio: AspectRatio;
   openai: OpenAIProvider;
