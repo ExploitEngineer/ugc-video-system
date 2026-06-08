@@ -89,7 +89,7 @@ export async function videoBuilder(
     let videoPrompt = "";
     for (let attempt = 1; attempt <= 2 && !videoPrompt.trim(); attempt++) {
       try {
-        const planRaw = await ctx.openai.chat(messages);
+        const planRaw = await ctx.openai.chat(messages, { jsonMode: true });
         videoPrompt =
           parseJsonObject<{ videoPrompt?: string }>(
             planRaw,

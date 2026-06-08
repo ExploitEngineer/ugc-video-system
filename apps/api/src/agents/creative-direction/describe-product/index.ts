@@ -26,6 +26,7 @@ export async function describeProduct(
       adStyle: ctx.adStyle,
       productUpload: input.productUpload,
     }),
+    { jsonMode: true },
   );
   const plan = parseJsonObject<ProductBriefPlan>(reply);
   return { productBrief: plan.productBrief?.trim() ?? "" };

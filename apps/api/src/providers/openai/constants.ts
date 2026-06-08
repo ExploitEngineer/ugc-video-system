@@ -10,6 +10,13 @@ export const OPENAI_CHAT_MODEL = "gpt-4.1";
 export const OPENAI_IMAGE_MODEL = "gpt-image-2";
 
 /**
+ * Default output-token budget for `chat()`. The API's implicit default cap
+ * truncated the long storyboard `imagePrompt` mid-string (→ JSON parse failure),
+ * so every chat call gets a generous explicit ceiling; callers can override.
+ */
+export const DEFAULT_CHAT_MAX_TOKENS = 4096;
+
+/**
  * Composite-sheet pixel size per output aspect ratio. The sheets only GUIDE the
  * downstream video, so they are rendered at ~2K (≈2.36 MP) regardless of shape:
  * 4K made the base64 response ~12 MB and intermittently truncated

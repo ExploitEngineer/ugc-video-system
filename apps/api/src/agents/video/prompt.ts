@@ -62,7 +62,7 @@ export function buildVideoPrompt(input: {
 
   // Product-realism negatives — shared, kills the box/unboxing/seam-morph artifacts.
   const productNegatives =
-    'NO invented packaging, boxes, cartons, gift boxes, pouches or unboxing, NO "product box", NO duplicated copies of the product, NO opening / unfolding / transforming the product or any container, NO seam-morph or warping of the product — it stays ONE real solid item, worn or in real use';
+    'NO invented packaging, boxes, cartons, gift boxes, pouches or unboxing, NO "product box", NO duplicated copies of the product, NO opening / unfolding / transforming the product or any container, NO seam-morph or warping of the product — it stays ONE real solid item, worn or in real use; show ONLY the product and the presenter\'s own wardrobe from the reference sheets — NO invented extra accessories or props, and NO other item (especially one the SAME COLOR as the product, e.g. a matching wristband/band) on or near it that could read as part of the product';
 
   const onScreenNegatives = ugc
     ? "NO background or library music (only the spoken voice and light natural ambience), and NO panel numbers, labels, arrows, callouts, grid lines, borders, split-screen panels, captions, subtitles, logos or watermark text anywhere in the frame"

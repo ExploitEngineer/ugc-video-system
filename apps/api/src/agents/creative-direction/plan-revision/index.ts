@@ -87,6 +87,7 @@ export async function planRevision(
         currentArtifact: input.currentArtifact,
         productRef: input.productRef,
       }),
+      { jsonMode: true },
     );
     return normalize(parseJsonObject<Partial<RevisionDirective>>(reply), input);
   } catch {
