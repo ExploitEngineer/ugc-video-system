@@ -31,6 +31,10 @@ export interface StoryboardInspectionInput {
   scenes: StoryboardSheet["scenes"];
   userPrompt: string;
   hasPerson: boolean;
+  /** Ground-truth product reference sheet — attached so wrong-product is catchable. */
+  productSheetRef: ImageRef;
+  /** Ground-truth person reference sheet — attached when the ad has a person. */
+  personSheetRef?: ImageRef;
 }
 
 /** Single vision inspection → verdict. No side effects. */
@@ -45,6 +49,9 @@ export async function inspectStoryboard(
       scenes: input.scenes,
       hasPerson: input.hasPerson,
       sheetRef: input.sheetRef,
+      productSheetRef: input.productSheetRef,
+      personSheetRef: input.personSheetRef,
+      productBrief: ctx.productBrief,
     }),
   );
   return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
@@ -76,6 +83,8 @@ export async function inspectAndRemediateStoryboard(
         scenes: input.scenes,
         userPrompt: input.userPrompt,
         hasPerson,
+        productSheetRef: input.productSheetRef,
+        personSheetRef: input.personSheetRef,
       }),
     regenFull: async (critique) =>
       toSheetRef(

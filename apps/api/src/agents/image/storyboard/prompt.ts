@@ -18,6 +18,19 @@ import type { RevisionDirective } from "../../creative-direction/plan-revision/i
 export interface StoryboardPromptInput {
   adStyle: string;
   adType: AdType;
+  /**
+   * Factual product identity anchor (category / materials / colors / markings)
+   * from `runs.product_brief`. Pins what the product IS in TEXT so a drifting
+   * reference sheet can't silently swap it for a different item. May be empty
+   * (older runs / brief hiccup) — the prompt then falls back to image-only.
+   */
+  productBrief: string;
+  /**
+   * Product-derived person description (`runs.person_brief`) — demographics,
+   * wardrobe, palette. Used to tailor the spoken lines to who is on camera.
+   * Empty when a person was uploaded (no text brief) or there is no person.
+   */
+  personBrief: string;
   userPrompt: string;
   hasPerson: boolean;
   /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
@@ -76,6 +89,8 @@ function directiveBlock(d: RevisionDirective): string[] {
 export function buildStoryboardPrompt({
   adStyle,
   adType,
+  productBrief,
+  personBrief,
   userPrompt,
   hasPerson,
   aspectRatio,
@@ -84,6 +99,21 @@ export function buildStoryboardPrompt({
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
+  const product = productBrief.trim();
+  const person = personBrief.trim();
+
+  // TEXT identity anchor — pins what the product IS so a drifting reference
+  // sheet can't make the storyboard render a different kind of item.
+  const productAnchor = product
+    ? [
+        "THE PRODUCT IS (authoritative identity — this exact item, nothing else):",
+        product,
+        "Every panel MUST show THIS product — the same category, form, materials,",
+        "colors and markings described above AND shown in the product sheet. If the",
+        "product sheet ever looks ambiguous, this text wins: never substitute a",
+        "different kind of item. State this product by name in the `imagePrompt`.",
+      ]
+    : [];
 
   // Ad-type-specific direction for the script + transcripts.
   const typeBlock =
@@ -112,6 +142,31 @@ export function buildStoryboardPrompt({
           "  read as one cohesive voiceover.",
         ];
 
+  // Script grounding — forces the four spoken lines to be specific to THIS
+  // product, THIS person and THIS scene, and to never repeat. Kills the
+  // generic, interchangeable filler ("I love this", "you'll love it") that
+  // appears when the model has no concrete anchor.
+  const speaker = adType === "ugc" ? "the on-screen person" : "the voiceover";
+  const scriptGrounding = [
+    "SCRIPT GROUNDING — the four `transcript` lines MUST be concrete and specific:",
+    product
+      ? `- Talk about THIS product specifically — ${product} Name or clearly evoke it; never a generic "this" with no anchor. Do NOT invent a brand, price or feature that isn't supported by the product or the user's prompt.`
+      : "- Talk about THIS specific product (per the product sheet); never a generic, interchangeable line that would fit any product.",
+    "- Each line carries a DIFFERENT, scene-specific beat — a distinct concrete",
+    "  benefit, feature, use-moment or reaction tied to what that panel shows.",
+    "  Across the four lines: hook → product-in-use → a concrete benefit/reaction",
+    "  → a closing line. No two lines may repeat the same idea or phrasing.",
+    "- BANNED filler unless the user's prompt truly calls for it: empty hype with",
+    '  no specifics like "I love this", "you\'ll love it", "this is amazing",',
+    '  "game changer", "obsessed", "10/10", "must-have". Replace with a concrete,',
+    "  product-specific detail instead.",
+    hasPerson && person
+      ? `- The on-screen person is: ${person} Make the wording, vocabulary and tone fit THIS person naturally — ${speaker} should sound like a real individual, not a brand script.`
+      : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
+    "- The lines must match what the matching panel actually shows (the same",
+    "  action / setting), so the spoken script and the keyframes stay in sync.",
+  ];
+
   // How the hero product must appear — shared across ad types. Kills the
   // invented-packaging / unboxing / duplicated-product failure modes.
   const presentationBlock = [
@@ -129,10 +184,11 @@ export function buildStoryboardPrompt({
     "- Do NOT open, unfold, split or transform the product or any container — keep",
     "  it a single solid object with no seams that come apart.",
     "- Both the short `panelCaption` and the detailed `sceneDescription` show the",
-    "  product being WORN or USED — the panelCaption as a brief label (e.g.",
-    '  "CLOSE-UP. Slipping the bracelet onto her wrist.") and the sceneDescription',
-    '  expanding that same moment into full detail — NEVER a "product box",',
-    "  packaging or unboxing.",
+    "  product being WORN or USED — the panelCaption as a brief label (e.g. for a",
+    '  wearable item "CLOSE-UP. Putting on the product."; for a handheld item',
+    '  "CLOSE-UP. Using the product.") and the sceneDescription expanding that same',
+    '  moment into full detail — NEVER a "product box", packaging or unboxing. Use',
+    "  THIS product (per the identity above), never an example item.",
   ];
 
   // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
@@ -141,11 +197,14 @@ export function buildStoryboardPrompt({
     adType === "ugc"
       ? [
           "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-          "  a glossy studio commercial: natural / available light, a real everyday",
-          "  setting, candid handheld-style framing, the person relaxed and real",
-          "  (talking to camera where it fits). Keep product/person IDENTITY faithful",
-          "  to the reference sheets — only lighting, setting and framing read as real",
-          "  UGC, never plastic or over-polished.",
+          "  a glossy studio commercial: natural / available light from real windows",
+          "  or lamps, a real lived-in everyday setting with ordinary background",
+          "  detail, candid handheld-style framing, the person relaxed and real",
+          "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
+          "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
+          "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
+          "  sheets — only lighting, setting and framing read as real UGC, never",
+          "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
         ]
       : [
           "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
@@ -166,7 +225,10 @@ export function buildStoryboardPrompt({
     hasPerson ? "and the person (face, build, wardrobe, palette)," : "",
     "and what the user wants the ad to say.",
     "",
+    ...(product ? [...productAnchor, ""] : []),
     ...typeBlock,
+    "",
+    ...scriptGrounding,
     "",
     ...presentationBlock,
     "",
@@ -181,15 +243,16 @@ export function buildStoryboardPrompt({
     "  setting / environment, the lighting & mood, what the subject does, HOW the",
     "  product is worn / used and framed, and the camera framing / motion. Vivid",
     "  and specific; it is handed to the video model, so it MUST be clearly LONGER",
-    "  and more detailed than the panelCaption. e.g. \"Medium close-up in a sunlit",
-    "  bedroom, soft morning light from a window camera-left. She raises her wrist",
-    "  toward the lens and turns it slowly so the bracelet catches the light,",
-    "  smiling as she looks into the camera. Handheld phone with a gentle push-in.\"",
+    "  and more detailed than the panelCaption. e.g. (ILLUSTRATIVE STRUCTURE ONLY",
+    "  — substitute THIS product and a fitting action) \"Medium close-up in a real",
+    "  kitchen, natural daylight from a window camera-left. She holds the product up",
+    "  toward the lens and turns it slowly so its markings catch the light, smiling",
+    "  as she talks to camera. Handheld phone, slight natural sway.\"",
     "- `panelCaption` — a CONDENSED label for the on-image caption bar: the shot",
-    "  type followed by the brief action, ~6-12 words, e.g. \"CLOSE-UP. Turning her",
-    "  wrist so the bracelet catches the light.\". It describes the SAME moment as",
+    "  type followed by the brief action, ~6-12 words, e.g. \"CLOSE-UP. Turning the",
+    "  product so its markings catch the light.\". It describes the SAME moment as",
     "  `sceneDescription`, just shortened to fit the panel; never a different",
-    "  action.",
+    "  action. ALWAYS describe THIS product, never an example item from these notes.",
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",

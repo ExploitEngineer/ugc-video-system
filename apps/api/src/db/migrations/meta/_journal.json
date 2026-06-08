@@ -57,6 +57,13 @@
       "when": 1780673949452,
       "tag": "0007_chunky_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780928033814,
+      "tag": "0008_even_black_tarantula",
+      "breakpoints": true
     }
   ]
 }

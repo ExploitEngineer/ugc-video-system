@@ -53,11 +53,11 @@ export function buildVideoPrompt(input: {
   // Ad-type-conditional rendering aesthetic. UGC must read as authentic phone
   // footage, NOT the glossy cinematic polish forced on every type before.
   const globalLook = ugc
-    ? "Render as AUTHENTIC UGC: real UGC-creator footage shot on a handheld iPhone, natural / available light, a real everyday setting, slightly imperfect candid framing, a real everyday person talking directly to camera — NOT a glossy studio commercial."
+    ? "Render as AUTHENTIC UGC: real selfie-style creator footage shot handheld on a modern phone (front or back camera), natural / available light from real windows or lamps, a real lived-in everyday setting with ordinary background clutter, slightly imperfect candid framing with subtle handheld micro-shake and natural reframing, a real everyday person talking directly to camera — NOT a glossy studio commercial, NOT a model on a set."
     : "Render as a polished, cinematic commercial: intentional lighting, rich color and depth, a full-frame cinematic live-action look.";
 
   const qualityLook = ugc
-    ? "it must look like REAL phone footage — natural skin and hair with real imperfections, true-to-life available lighting, an authentic handheld feel; NOT studio-polished, NOT a glossy commercial, no heavy cinematic color grade"
+    ? "it must look like REAL, un-staged phone footage and be INDISTINGUISHABLE from a real person's video — true skin texture with visible pores, fine lines and minor blemishes (NOT smoothed, waxy, airbrushed or plastic), natural hair flyaways, real eyes with natural micro-expressions and blinking, true-to-life available lighting with natural shadows, a subtle phone-camera look (mild sensor grain, natural motion blur, realistic shallow-ish depth of field); authentic handheld feel; NOT studio-polished, NOT a glossy commercial, NO heavy cinematic color grade, NO uncanny/over-symmetric AI face, NO over-saturated HDR sheen"
     : "4K UHD, rich detail, photorealistic real-camera cinematic live-action, real lifelike humans with natural skin/hair and true-to-life lighting";
 
   // Product-realism negatives — shared, kills the box/unboxing/seam-morph artifacts.
@@ -136,10 +136,10 @@ export function buildDeterministicVideoPrompt(input: {
   const step = durationSec / count;
   const speak = ugc ? "the on-screen presenter says" : "voiceover says";
   const globalLook = ugc
-    ? "Render as authentic UGC: handheld iPhone footage, natural available light, a real everyday setting, slightly imperfect candid framing, a real person talking directly to camera — not a glossy studio commercial."
+    ? "Render as authentic UGC: handheld modern-phone footage with subtle natural shake, natural available light, a real lived-in everyday setting, slightly imperfect candid framing, a real person talking directly to camera — not a glossy studio commercial."
     : "Render as a polished cinematic commercial: intentional lighting, rich color and depth, a full-frame cinematic live-action look.";
   const quality = ugc
-    ? "looks like real phone footage with natural skin and hair and real imperfections, true-to-life available lighting and an authentic handheld feel, not studio-polished"
+    ? "looks like real, un-staged phone footage indistinguishable from a real person's video — true skin texture with visible pores and minor imperfections (not smoothed, waxy or airbrushed), natural hair flyaways, real micro-expressions, true-to-life available lighting, a subtle phone-camera look (mild grain, natural motion blur) and an authentic handheld feel; not studio-polished, no heavy color grade, no uncanny AI face"
     : "4K UHD, rich detail, photorealistic real-camera live-action with real lifelike humans, natural skin and hair and true-to-life lighting";
   const timeline = scenes
     .map((s, i) => {

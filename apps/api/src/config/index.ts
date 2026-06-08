@@ -23,6 +23,10 @@ const serverEnvSchema = z.object({
     .url()
     .default("https://ark.ap-southeast.bytepluses.com"),
   BYTEPLUS_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-260128"),
+  // Output resolution for Seedance. 1080p reads as real phone footage; 720p
+  // looks like downsampled AI video. Overridable per-deploy (e.g. "720p" to cut
+  // cost/time). Seedance 2.0 supports 480p | 720p | 1080p.
+  BYTEPLUS_VIDEO_RESOLUTION: z.string().default("1080p"),
   BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
 

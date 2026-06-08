@@ -37,6 +37,8 @@ export type {
 export type BytePlusProvider = VideoProvider;
 
 const DEFAULT_DURATION_SEC = 15;
+// Code fallback only — the real default comes from env.BYTEPLUS_VIDEO_RESOLUTION
+// (1080p). 720p here just guards against an empty/unset value at runtime.
 const DEFAULT_RESOLUTION = "720p";
 const DEFAULT_RATIO = "16:9";
 
@@ -132,11 +134,12 @@ export function createBytePlusProvider(): VideoProvider {
         }
       }
 
+      const resolution = env.BYTEPLUS_VIDEO_RESOLUTION || DEFAULT_RESOLUTION;
       const body = {
         model: env.BYTEPLUS_VIDEO_MODEL,
         content,
         duration: input.durationSec ?? DEFAULT_DURATION_SEC,
-        resolution: DEFAULT_RESOLUTION,
+        resolution,
         ratio: input.aspectRatio ?? DEFAULT_RATIO, // Seedance 2.0 key (16:9 | 9:16)
         generate_audio: true, // native synchronized audio
         watermark: false,
@@ -149,6 +152,7 @@ export function createBytePlusProvider(): VideoProvider {
         personRefs: personRefs.length,
         durationSec: body.duration,
         ratio: body.ratio,
+        resolution: body.resolution,
       });
       const json = (await bytePlusFetch("/contents/generations/tasks", {
         method: "POST",
