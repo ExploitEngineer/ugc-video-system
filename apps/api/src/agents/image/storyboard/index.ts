@@ -57,7 +57,9 @@ export async function storyboardGenerator(
   for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
     const reply = await ctx.openai.chat(messages, {
       jsonMode: true,
-      maxTokens: attempt === 1 ? 4096 : 6144,
+      // Richer caption/sceneDescription prose grows the `scenes` payload, so give
+      // headroom over the prior 4096/6144 to keep the JSON from truncating.
+      maxTokens: attempt === 1 ? 5120 : 8192,
     });
     try {
       plan = parseJsonObject<StoryboardPlan>(reply);
@@ -73,6 +75,21 @@ export async function storyboardGenerator(
   // Storyboard is fixed at 4 scenes — clamp in case the model overshoots.
   plan.scenes = plan.scenes.slice(0, 4);
 
+  // The planner tends to write the META-instruction ("quote each panelCaption
+  // exactly") into `imagePrompt` instead of the caption TEXT, so the image model
+  // never sees the captions and letters its own invented (first-person) lines.
+  // Append the real panelCaption strings so the authored shot-type captions are
+  // the ones rendered into the bottom bars.
+  const captionDirective = plan.scenes.some((s) => s.panelCaption?.trim())
+    ? `\n\nBOTTOM CAPTION BARS — letter EXACTLY these strings into each panel's bottom bar, one per panel, VERBATIM, uppercase, in order; do NOT paraphrase, shorten, translate, rewrite in first person, merge, or invent different wording:\n${plan.scenes
+        .map(
+          (s, i) =>
+            `Panel ${String(i + 1).padStart(2, "0")}: "${(s.panelCaption ?? "").trim()}"`,
+        )
+        .join("\n")}`
+    : "";
+  const imagePrompt = `${plan.imagePrompt}${captionDirective}`;
+
   const refs: ImageRef[] = [input.productSheetRef];
   if (input.personSheetRef) refs.push(input.personSheetRef);
 
@@ -81,7 +98,7 @@ export async function storyboardGenerator(
     refs: refs.length,
   });
   const { bytes, mime } = await ctx.openai.generateImage({
-    prompt: plan.imagePrompt,
+    prompt: imagePrompt,
     refs,
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
   });
@@ -99,7 +116,7 @@ export async function storyboardGenerator(
           runId: ctx.runId,
           assetId: newAssetId,
           scenes: plan.scenes,
-          promptUsed: plan.imagePrompt,
+          promptUsed: imagePrompt,
           status: "draft",
         })
         .returning();
@@ -108,5 +125,5 @@ export async function storyboardGenerator(
   });
 
   log.info("✓ storyboard persisted", { assetId, scenes: plan.scenes.length });
-  return { assetId, assetUrl, artifact, promptUsed: plan.imagePrompt };
+  return { assetId, assetUrl, artifact, promptUsed: imagePrompt };
 }

@@ -36,6 +36,7 @@ import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { describeProduct } from "./describe-product/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
+import { derivePersonBrief } from "./derive-person-brief/index.js";
 import { planRevision, type RevisionDirective } from "./plan-revision/index.js";
 import {
   latestProductSheet,
@@ -244,6 +245,9 @@ async function executeStep(
         hasPerson: Boolean(personRef),
         personFaceRef: personRef,
         scenes: (storyboard.scenes ?? []) as StoryboardScene[],
+        // Pin the presenter's identity in the video prompt. Empty for uploaded
+        // persons (no text brief) — the gender-locked scene text carries it then.
+        characterAnchor: ctx.personBrief,
         userPrompt,
       });
       return {};
@@ -275,12 +279,45 @@ async function runReferencePhase(
   // photo). The product branch runs alongside and never waits on the brief.
   const personBranch = async (): Promise<void> => {
     if (productUpload && !personUpload) {
+      // Invent the person from the product — the sheet skill READS this brief,
+      // so it must be persisted BEFORE the person_sheet step.
       const { personBrief } = await planPersonBrief(ctx, {
         userPrompt,
         productUpload,
       });
       await setRun(runId, { personBrief });
       logRun(runId, `person brief: "${personBrief}"`, tag);
+      await executeStep(ctx, "person_sheet");
+      return;
+    }
+    if (personUpload) {
+      // Uploaded person — the sheet is built straight from the photo and does
+      // NOT need the brief, so derive the gender/age/hair anchor CONCURRENTLY.
+      // It only has to land before the (much later) storyboard step, which reads
+      // runs.person_brief for its CHARACTER ANCHOR. Without this anchor a
+      // gendered product brief (e.g. a "men's" watch) flips an uploaded woman to
+      // a man. Best-effort: a vision hiccup must NOT fail the run — it falls back
+      // to the prior empty-brief behaviour.
+      const deriveBrief = (async () => {
+        try {
+          const { personBrief } = await derivePersonBrief(ctx, {
+            userPrompt,
+            personUpload,
+          });
+          if (personBrief) {
+            await setRun(runId, { personBrief });
+            logRun(runId, `person brief (from upload): "${personBrief}"`, tag);
+          }
+        } catch (err) {
+          logRunError(
+            runId,
+            `person brief (from upload) failed (continuing without anchor): ${err instanceof Error ? err.message : String(err)}`,
+            tag,
+          );
+        }
+      })();
+      await Promise.all([deriveBrief, executeStep(ctx, "person_sheet")]);
+      return;
     }
     await executeStep(ctx, "person_sheet");
   };

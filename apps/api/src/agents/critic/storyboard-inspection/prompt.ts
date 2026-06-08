@@ -74,7 +74,7 @@ export function buildStoryboardInspectionPrompt({
     "   product than the reference (e.g. a bracelet when the reference is a bottle)",
     "   is a `blocking`, `global` issue — say so explicitly in `problem`. The",
     hasPerson
-      ? "   person must likewise match Image 3 (same face, build, wardrobe, palette)."
+      ? "   person must likewise match Image 3. A PERSON-IDENTITY mismatch — a different apparent GENDER (e.g. a man on screen when the person sheet is a woman), or a different face, age, hair or build than Image 3 — is a `blocking`, `global` issue; say so explicitly in `problem`. The product's marketed gender (a 'men's' / 'women's' item) NEVER excuses a wrong-gender person."
       : "   ad has no person.",
     "   STRAY PROPS: flag (`major`) any invented accessory or prop on the person",
     "   that is NOT in the reference sheets — particularly a stray item the SAME",
@@ -92,6 +92,12 @@ export function buildStoryboardInspectionPrompt({
     "   there must be NO other text — no extra titles, subtitles, timecodes,",
     "   callouts, hand-drawn marks, logos or watermarks — and NO motion/camera",
     "   arrows anywhere. Stray extra text, garbled lettering or arrows are a defect.",
+    "5. PRODUCT-STATE & PHYSICAL PLAUSIBILITY — the four panels must obey real",
+    "   physical causality. If the product changes state in a panel (cap removed,",
+    "   lid opened, clasp fastened), every later panel keeps that state. Flag",
+    "   (`blocking`) any physically impossible moment — e.g. the person drinking",
+    "   from a bottle whose cap is still on, a removed part reappearing, or an item",
+    "   shown both open and closed — these reality breaks make the sheet unusable.",
     hasPerson
       ? "This ad features a person — they must appear and stay consistent."
       : "This ad has no person — do not penalize the absence of one.",

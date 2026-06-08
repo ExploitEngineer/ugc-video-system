@@ -52,7 +52,7 @@ export interface StoryboardScene {
   sceneDescription: string;
   /**
    * Brief on-image label — a condensed form of `sceneDescription` (shot type +
-   * short action, ~6-12 words, e.g. "WIDE SHOT. A damaged robot turns on,
+   * short action, ~8-14 words, e.g. "WIDE SHOT. A damaged robot turns on,
    * surveying the forest."). Burned into the panel as its caption; describes the
    * SAME moment as `sceneDescription`, just shortened to fit the label.
    */
@@ -115,6 +115,34 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
+  // CHARACTER ANCHOR — lock the on-screen person's apparent identity (gender,
+  // age, hair) and keep it 100% constant across all four scenes/captions/
+  // transcripts. For uploaded persons personBrief is empty, so this also tells
+  // the model to DERIVE the gender from the attached person sheet and lock it.
+  const characterAnchor = hasPerson
+    ? [
+        "CHARACTER ANCHOR (the on-screen person — lock this and keep it 100%",
+        "constant across ALL FOUR scenes, captions and transcripts):",
+        person
+          ? "- From the attached PERSON SHEET (authoritative), plus the person brief below, read and FIX the person's apparent"
+          : "- From the attached PERSON SHEET (authoritative) read and FIX the person's apparent",
+        "  GENDER PRESENTATION, approximate age range, hair (length / color /",
+        "  style), skin tone and build.",
+        ...(person ? [`- Person brief: ${person}`] : []),
+        "- Use the SAME person in every panel — the SAME apparent gender, face,",
+        "  hair, build and wardrobe. NEVER change the person's gender, age, face,",
+        "  hair or wardrobe between panels, and never introduce a different person.",
+        "- Use CONSISTENT, CORRECT pronouns matching that apparent gender in every",
+        "  `sceneDescription`, `panelCaption` and `transcript`: if the person reads",
+        "  female use she/her throughout, if male he/him — do not switch mid-script.",
+        "- The PRODUCT's marketed gender or category (e.g. a \"men's\" watch, a",
+        "  \"women's\" product) does NOT determine the wearer's gender — the",
+        "  on-screen person's gender comes ONLY from the person sheet / brief above;",
+        "  anyone can authentically present any product. NEVER let a gendered",
+        "  product brief flip the person's apparent gender.",
+      ]
+    : [];
+
   // Ad-type-specific direction for the script + transcripts.
   const typeBlock =
     adType === "ugc"
@@ -160,8 +188,8 @@ export function buildStoryboardPrompt({
     '  no specifics like "I love this", "you\'ll love it", "this is amazing",',
     '  "game changer", "obsessed", "10/10", "must-have". Replace with a concrete,',
     "  product-specific detail instead.",
-    hasPerson && person
-      ? `- The on-screen person is: ${person} Make the wording, vocabulary and tone fit THIS person naturally — ${speaker} should sound like a real individual, not a brand script.`
+    hasPerson
+      ? `- Fit the wording, vocabulary and tone to the on-screen person from the CHARACTER ANCHOR${person ? ` (${person})` : ""} — ${speaker} should sound like that real individual, with the correct gender, and never a brand script.`
       : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
     "- The lines must match what the matching panel actually shows (the same",
     "  action / setting), so the spoken script and the keyframes stay in sync.",
@@ -175,6 +203,12 @@ export function buildStoryboardPrompt({
     "  bracelet, watch, glasses, apparel, shoes, bag) it is WORN on the person's",
     "  body; if it is handheld or used, it is shown IN ACTIVE USE. Avoid static",
     "  product-on-a-pedestal unless the ad style explicitly calls for it.",
+    "- TRUE-TO-LIFE SCALE & PLACEMENT: render the product at its real-world size",
+    "  relative to the hand / body / face (a ring is finger-sized, glasses",
+    "  face-sized, a bottle hand-sized). NEVER oversize it to dominate the frame,",
+    "  NEVER shrink it to a speck. Place it ONLY where it would really be — worn on",
+    "  the correct body part, or held naturally in the hand — never floating,",
+    "  hovering detached, or somewhere it physically could not sit.",
     "- The product is ALWAYS the real, solid item from the product sheet. NEVER",
     "  invent packaging — no boxes, cartons, gift boxes, blister packs, pouches or",
     "  bags — and NEVER stage an unboxing or show the product as a print / photo /",
@@ -183,6 +217,13 @@ export function buildStoryboardPrompt({
     "  worn AND held at once) unless that is a deliberate, natural beat.",
     "- Do NOT open, unfold, split or transform the product or any container — keep",
     "  it a single solid object with no seams that come apart.",
+    "- PRODUCT-STATE CONTINUITY across the four panels: the product's physical",
+    "  state stays PHYSICALLY CONSISTENT and causal panel-to-panel. If a natural",
+    "  use-action changes it (a cap unscrewed to drink, a lid flipped open), every",
+    "  LATER panel reflects that state — it never silently reverts. NEVER show a",
+    "  physically impossible moment (e.g. drinking from a bottle whose cap is still",
+    "  on, or an item both open and closed at once). The four panels read as one",
+    "  real, physically plausible sequence in time.",
     "- Show ONLY the product and the person's own wardrobe from the reference",
     "  sheets. Do NOT invent extra accessories, props or objects, and do NOT place",
     "  any other item — especially one in the SAME COLOR as the product (e.g. a",
@@ -231,6 +272,7 @@ export function buildStoryboardPrompt({
     "and what the user wants the ad to say.",
     "",
     ...(product ? [...productAnchor, ""] : []),
+    ...(characterAnchor.length ? [...characterAnchor, ""] : []),
     ...typeBlock,
     "",
     ...scriptGrounding,
@@ -246,18 +288,32 @@ export function buildStoryboardPrompt({
     "- `sceneDescription` — the rich shot direction for the video step AND the",
     "  text shown to the user. 2-4 full sentences (~40-70 words) covering the",
     "  setting / environment, the lighting & mood, what the subject does, HOW the",
-    "  product is worn / used and framed, and the camera framing / motion. Vivid",
-    "  and specific; it is handed to the video model, so it MUST be clearly LONGER",
-    "  and more detailed than the panelCaption. e.g. (ILLUSTRATIVE STRUCTURE ONLY",
-    "  — substitute THIS product and a fitting action) \"Medium close-up in a real",
+    "  product is worn / used and framed, and the camera framing / motion. Write",
+    "  it FULL, vivid and concrete — the imagePrompt length limit below applies",
+    "  ONLY to `imagePrompt`, NEVER to `sceneDescription` or `panelCaption`; do not",
+    "  compress these. It is handed to the video model, so it MUST be clearly",
+    "  LONGER and more detailed than the panelCaption, and must match the panel,",
+    "  the real product (per the identity above) and the real person with correct,",
+    "  consistent pronouns (see CHARACTER ANCHOR below).",
+    "  e.g. (ILLUSTRATIVE STRUCTURE ONLY — substitute THIS product and a fitting",
+    "  action) \"Medium close-up in a real",
     "  kitchen, natural daylight from a window camera-left. She holds the product up",
     "  toward the lens and turns it slowly so its markings catch the light, smiling",
     "  as she talks to camera. Handheld phone, slight natural sway.\"",
-    "- `panelCaption` — a CONDENSED label for the on-image caption bar: the shot",
-    "  type followed by the brief action, ~6-12 words, e.g. \"CLOSE-UP. Turning the",
-    "  product so its markings catch the light.\". It describes the SAME moment as",
+    "- `panelCaption` — the on-image caption-bar label, in the MANDATORY format",
+    "  `<SHOT TYPE>. <concrete action that NAMES the product>`. The shot-type",
+    "  prefix is REQUIRED on every caption (WIDE SHOT / MEDIUM SHOT / MEDIUM",
+    "  CLOSE-UP / CLOSE-UP / EXTREME CLOSE-UP / OVER-THE-SHOULDER / POV), then a",
+    "  period, then a vivid action that names or unmistakably evokes THIS product",
+    "  (never a bare \"it\" / \"this\"). ~8-14 words. It describes the SAME moment as",
     "  `sceneDescription`, just shortened to fit the panel; never a different",
-    "  action. ALWAYS describe THIS product, never an example item from these notes.",
+    "  action, and never an example item from these notes. GOOD (structure only —",
+    "  substitute THIS product, do not copy the noun):",
+    '  "MEDIUM SHOT. Smiling as she holds up the [product] to camera.",',
+    '  "CLOSE-UP. Sliding the [product] onto her wrist by the window.",',
+    '  "MEDIUM CLOSE-UP. Talking to camera while wearing the [product].".',
+    "  REJECTED: \"Picks up the sunglasses.\" (no shot-type prefix) and \"Smiles and",
+    "  turns his head.\" (no product named) — never emit captions like these.",
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
@@ -274,11 +330,17 @@ export function buildStoryboardPrompt({
     "  materials and proportions. Do not restyle, garble, or invent product text.",
     ...(hasPerson
       ? [
-          "- PERSON: render the PERSON photorealistically in EVERY panel — a real,",
-          "  lifelike human with natural skin and a realistic face, recognizable",
-          "  and consistent with the person sheet (same face, hair, build,",
-          "  wardrobe and palette). The product, setting and lighting stay",
-          "  photorealistic and faithful to the references too.",
+          "- PERSON: the attached PERSON SHEET IMAGE is the AUTHORITATIVE source for",
+          "  the on-screen person's gender, face and identity in EVERY panel — if",
+          "  anything in this prompt's wording ever conflicts with the sheet, the",
+          "  SHEET WINS. Render that EXACT individual photorealistically: a real,",
+          "  lifelike human with natural skin and a realistic face, the SAME face,",
+          "  hair, build, wardrobe, palette, apparent gender and identity as the",
+          "  sheet in all four panels (per the CHARACTER ANCHOR) — same facial",
+          "  structure, features and proportions; do NOT beautify, restyle, age,",
+          "  swap gender, or render a lookalike or a different person. The product,",
+          "  setting and lighting stay photorealistic and faithful to the",
+          "  references too.",
         ]
       : []),
     "",
@@ -290,30 +352,37 @@ export function buildStoryboardPrompt({
     "  clean uppercase storyboard lettering — like the supplied example sheet.",
     "- The badge and caption must be crisp and readable, never overlapping the",
     "  subject's face or the product's markings.",
-    "Apart from the per-panel number badge and its caption bar, draw NO other",
-    "text: no titles, subtitles, timecodes, motion or camera ARROWS, callouts,",
-    "hand-drawn marks, logos or watermarks anywhere. Convey motion through the",
-    "imagery itself (pose, blur, framing), never with arrows. The panel interiors",
-    "stay pure photorealistic keyframes — the only graphics added are the number",
-    "badge and the caption bar.",
+    "Apart from the per-panel number badge and its caption bar, add NO other",
+    "graphics of ANY kind: no titles, subtitles, timecodes, motion or camera",
+    "ARROWS, callouts, hand-drawn marks, logos or watermarks, and NO stray boxes,",
+    "bars, rectangles, color blocks, framing brackets, vignettes or",
+    "panels-within-a-panel anywhere. Convey motion through the imagery itself",
+    "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
+    "uninterrupted photographs — the ONLY non-photographic marks on the whole",
+    "sheet are the four number badges and the four caption bars.",
     "",
     `Honor the ad style ("${style}") in framing, pacing, and mood.`,
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
-    "`imagePrompt` is ONE self-contained, dense paragraph (≤ ~180 words, no",
-    "repetition). It MUST cover, briefly: the 2×2 four-panel layout with thin",
+    "`imagePrompt` is ONE self-contained paragraph, roughly 150-200 words — long",
+    "enough to be specific, but NOT a rule restatement. It MUST cover: the 2×2",
+    "four-panel layout with thin",
     `plain separator borders at ${resolutionLabel}; each panel's number badge`,
-    "(01–04, in order) + a bottom caption bar quoting that scene's `panelCaption`",
-    "VERBATIM, with NO other text and NO arrows; the product worn / in real use as",
-    "the real solid item (never a box/packaging/unboxing, never duplicated); and",
+    "(01–04, in order) + a thin uppercase storyboard-style bottom caption bar",
+    "(the EXACT caption text is appended after your prompt automatically — so",
+    "describe the bar's STYLE and placement only; do NOT write the caption words",
+    'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
+    "other text and NO arrows; the product worn / in real use as",
+    "the real solid item at TRUE real-world scale and correctly placed (never",
+    "oversized, dominating or floating; never a box/packaging/unboxing, never",
+    "duplicated); and",
     adType === "ugc"
       ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
       : "the polished cinematic keyframe look.",
     hasPerson
-      ? "It MUST also state the person is rendered photorealistically (real, lifelike face and skin) in every panel, faithful to the person sheet."
+      ? "It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the four panels, faithful to the person sheet."
       : "",
-    "Be specific but concise — do NOT restate these rules more than once.",
     "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`",
     `to "${style}".`,
   ]

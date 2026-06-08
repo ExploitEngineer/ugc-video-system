@@ -36,10 +36,12 @@ export function buildPersonBriefPrompt({
     "plausible USER of this kind of product, the sort of human who naturally",
     "belongs in the same commercial as it.",
     "",
-    "Cover, concretely: demographics (age range, gender presentation, look),",
-    "wardrobe/styling (ordinary clothing), and a tasteful clothing color palette",
-    "in believable everyday colors. Keep it grounded in what the product actually",
-    "is and who would realistically use or be marketed it.",
+    "OPEN the brief by stating, in this order and explicitly: apparent GENDER",
+    'PRESENTATION (e.g. "a woman" / "a man"), an approximate AGE RANGE, and HAIR',
+    "(length, color, style). THEN add the rest of the look, wardrobe (ordinary",
+    "clothing) and a tasteful clothing color palette in believable everyday",
+    "colors. Keep it grounded in what the product actually is and who would",
+    "realistically use or be marketed it.",
     "",
     "DESCRIBE THE PERSON ONLY. Do NOT mention the product, a bottle, or ANY",
     "handheld item, prop, bag or accessory. Do NOT have them hold, wear or display",
@@ -52,7 +54,7 @@ export function buildPersonBriefPrompt({
     "demographics, wardrobe, and clothing colors explicitly.",
     "",
     "Return STRICT JSON only, no prose, matching:",
-    '{ "personBrief": "<one concise paragraph, ~40-70 words>" }',
+    '{ "personBrief": "<one concise paragraph, ~40-70 words, beginning with gender, age, hair>" }',
   ].join("\n");
 
   const user: ChatMessage = {
