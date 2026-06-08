@@ -11,8 +11,6 @@ import {
   Loader2Icon,
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
-  ShieldCheckIcon,
-  ShieldOffIcon,
   UserIcon,
   XIcon,
 } from "lucide-react";
@@ -41,7 +39,6 @@ export function CreateRunForm({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
-  const [criticEnabled, setCriticEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -75,7 +72,6 @@ export function CreateRunForm({
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
     fd.set("aspectRatio", aspectRatio);
-    fd.set("criticEnabled", criticEnabled ? "true" : "false");
 
     startTransition(async () => {
       try {
@@ -139,7 +135,6 @@ export function CreateRunForm({
             />
             <ModeToggle value={mode} onChange={setMode} />
             <AspectRatioToggle value={aspectRatio} onChange={setAspectRatio} />
-            <CriticToggle value={criticEnabled} onChange={setCriticEnabled} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -394,37 +389,5 @@ function AspectRatioToggle({
         );
       })}
     </div>
-  );
-}
-
-/** Single-pill toggle for the Critic agent — on = QA + gating, off = faster. */
-function CriticToggle({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  const Icon = value ? ShieldCheckIcon : ShieldOffIcon;
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      aria-pressed={value}
-      title={
-        value
-          ? "Critic agent ON — inspects each artifact and can fail the run (slower, higher quality). Click to turn off."
-          : "Critic agent OFF — skips all inspections, never fails on quality (faster). Click to turn on."
-      }
-      className={cn(
-        "relative inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-        value
-          ? "border-brand/40 bg-brand/10 text-brand"
-          : "border-border/60 bg-background/40 text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <Icon className="size-3.5" />
-      Critic {value ? "on" : "off"}
-    </button>
   );
 }

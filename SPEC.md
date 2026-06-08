@@ -308,7 +308,9 @@ Hono backend in `apps/api`: `app.ts` (CORS, `/health`, mounts `/runs`, error/not
 
 Image Agent + 3 skills under `apps/api/src/agents/image/`. Convention: each skill = `prompt.ts` + `index.ts` `(ctx, input) => SkillResult<T>`, OpenAI adapter injected via `SkillContext`. OpenAI provider (`providers/openai/index.ts`): `chat()` (vision-ready) + `generateImage()` (`images.generate` vs `images.edit` for ref→sheet); model ids in `providers/openai/constants.ts`. Skills: **Product Sheet Builder**, **Generate Person Image** (only when no person uploaded), **StoryBoard Generator**. All sheets = single composite images. Shared `agents/persist.ts` (upload → `assets` row → artifact row in one tx) and `agents/json.ts`. Ad style threaded opaque via `ctx`. Invoked standalone via `agents/image/verify.ts`. **Not yet run against live OpenAI image API.**
 
-## F5 — Critic Agent + skills — **Done (code; live verification pending)**
+## F5 — Critic Agent + skills — **Done (code) · PARKED (off by default, not in UI)**
+
+> **Parked 2026-06-09** (`chore/disable-critic-default`): the Critic is disabled by default and removed from the studio UI — code retained but dormant, gated by `runs.criticEnabled` (default `false`). Not a current focus; do not invest here until re-prioritized. See Progress Log.
 
 Critic Agent under `apps/api/src/agents/critic/`. Two skills, each a single-pass inspection + inspect-and-remediate wrapper: **Product Sheet Inspection** and **StoryBoard Sheet Inspection**; inspections attach the sheet as a vision image and parse a strict `InspectionVerdict`. Critic does NOT own `run.status` (F7's job) — returns `CriticVerdict { outcome, attempts, finalArtifact, lastVerdict }`. Plumbing: verdict types, `CRITIC_RETRY_CAP = 1`, `events.ts` `writeStepEvent` (first writer of `step_events`), draft→approved/rejected status, generic remediate engine, localized product-view regen. Retry cap = 1; inspections cover product + storyboard only; localized partial regen = product sheet only (storyboard always full regen). Full regen re-invokes the F4 producer steered by an additive `critique?` field. Invoked standalone via `agents/critic/verify.ts`. **Not yet run against live OpenAI vision.**
 
@@ -327,6 +329,10 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 ---
 
 ## Progress Log
+
+### 2026-06-09
+
+- **Critic Agent parked — off by default + removed from studio UI (`chore/disable-critic-default`).** The Critic (F5) isn't a current focus, so it's disabled by default **without** ripping out the code (kept dormant for an easy restore). **Backend:** `POST /runs` now defaults `criticEnabled` to **false** (enabled only on an explicit `"true"`, which the studio UI no longer sends); `runs.critic_enabled` column default flipped `true→false` (migration `0009_funny_stone_men.sql`, applied to local). `plan.ts` already collapses both inspection steps + their confirm-mode gates when `criticEnabled` is false (`nextStep`/`gateForNext`), so no state-machine change was needed — runs go `product_sheet → person_sheet → storyboard → video`. **Frontend (studio only):** removed the Critic toggle from the composer (`create-run-form.tsx` — pill, state, submit field, unused Shield icons) and dropped `product_inspection`/`storyboard_inspection` from the run-timeline `STEP_ORDER` (`run/run-meta.ts`) so they no longer render; both steps stay in the shared `Step` enum + `STEP_LABEL`/`STEP_AGENT` for restore, and the now-dead critic-skip branch in `stepState` was removed. **Landing-page copy left as-is** (per user). Critic code under `agents/critic/**` untouched. `pnpm typecheck` (all packages) + `pnpm --filter web lint` green; migration applied to local Postgres. **Pending: user's manual local test** before commit/PR.
 
 ### 2026-06-08
 

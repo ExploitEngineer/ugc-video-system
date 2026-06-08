@@ -12,6 +12,8 @@ AI ad-video generator: product image (+ optional person image) + text prompt →
 
 **Current state:** F0–F7 are built and wired end to end — the agents (creative-direction / image / critic / video), provider adapters (OpenAI, BytePlus), the Drizzle/Supabase schema + migrations, the in-process worker, the `/runs` API, and the studio UI all exist. **F8 (auth / RLS policies) is NOT started** — RLS is enabled with no policies and the API is unauthenticated (see docs/architecture.md → Known pre-production gaps). Still verify specifics against the code; SPEC.md tracks per-feature status.
 
+**Critic Agent (F5) is PARKED — do not work on it for now.** It's disabled by default and removed from the studio UI. The code under `apps/api/src/agents/critic/**` is retained but dormant: the whole inspection path is gated by `runs.criticEnabled` (now defaults `false`, and the create-run route only enables it for an explicit `"true"`, which the UI no longer sends). `nextStep`/`gateForNext` in `creative-direction/plan.ts` already collapse both inspection steps + their confirm-mode gates when it's off, so runs go product → person → storyboard → video. Re-enable is a default flip + re-adding the UI; until it's re-prioritized, skip Critic work.
+
 ## Commands
 
 Run from repo root (pnpm workspaces, Node >=20, pnpm >=11):
