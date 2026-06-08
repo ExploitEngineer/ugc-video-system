@@ -37,6 +37,7 @@ export async function productSheetBuilder(
       aspectRatio: ctx.aspectRatio,
       critique: input.critique,
     }),
+    { jsonMode: true },
   );
   const plan = parseJsonObject<ProductSheetPlan>(reply);
 

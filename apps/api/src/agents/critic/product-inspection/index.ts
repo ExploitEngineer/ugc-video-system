@@ -49,6 +49,7 @@ export async function inspectProductSheet(
       productUpload: input.productUpload,
       productBrief: ctx.productBrief,
     }),
+    { jsonMode: true },
   );
   return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
 }

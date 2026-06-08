@@ -14,6 +14,7 @@ import { env } from "../../config/index.js";
 import { internal } from "../../lib/errors.js";
 import { createLogger } from "../../lib/log.js";
 import {
+  DEFAULT_CHAT_MAX_TOKENS,
   DEFAULT_IMAGE_SIZE,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
@@ -48,9 +49,21 @@ export interface ChatMessage {
   images?: ImageRef[];
 }
 
+/** Per-call tuning for `chat()`. */
+export interface ChatOptions {
+  /** Output-token ceiling. Defaults to `DEFAULT_CHAT_MAX_TOKENS` (4096). */
+  maxTokens?: number;
+  /**
+   * Force `response_format: json_object` — the model must emit a single JSON
+   * object. Use for every strict-JSON skill; it also hardens against mid-string
+   * truncation. Safe only when the prompt asks for JSON (all our skills do).
+   */
+  jsonMode?: boolean;
+}
+
 export interface OpenAIProvider {
   /** LLM reasoning / prompt building (and vision when `images` present). */
-  chat(messages: ChatMessage[]): Promise<string>;
+  chat(messages: ChatMessage[], opts?: ChatOptions): Promise<string>;
   /** GPT Image 2 generation → composite reference/storyboard sheet. */
   generateImage(input: GenerateImageInput): Promise<GenerateImageResult>;
 }
@@ -130,15 +143,31 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
 
 export function createOpenAIProvider(): OpenAIProvider {
   return {
-    async chat(messages) {
+    async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
+      const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
       const t0 = Date.now();
-      log.debug("chat →", { model: OPENAI_CHAT_MODEL, msgs: sdkMessages.length });
+      log.debug("chat →", {
+        model: OPENAI_CHAT_MODEL,
+        msgs: sdkMessages.length,
+        maxTokens,
+        jsonMode: Boolean(opts?.jsonMode),
+      });
       const completion = await getClient().chat.completions.create({
         model: OPENAI_CHAT_MODEL,
         messages: sdkMessages,
+        max_completion_tokens: maxTokens,
+        ...(opts?.jsonMode
+          ? { response_format: { type: "json_object" as const } }
+          : {}),
       });
-      const content = completion.choices[0]?.message?.content ?? "";
+      const choice = completion.choices[0];
+      const content = choice?.message?.content ?? "";
+      // A truncated response (hit the token ceiling) yields invalid JSON
+      // downstream — surface it as a clear, actionable error here.
+      if (choice?.finish_reason === "length") {
+        log.warn("chat truncated at token ceiling", { maxTokens });
+      }
       log.debug("chat ✓", { ms: Date.now() - t0, chars: content.length });
       return content;
     },

@@ -53,6 +53,7 @@ export async function inspectStoryboard(
       personSheetRef: input.personSheetRef,
       productBrief: ctx.productBrief,
     }),
+    { jsonMode: true },
   );
   return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
 }

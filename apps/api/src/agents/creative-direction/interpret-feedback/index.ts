@@ -31,6 +31,7 @@ export async function interpretFeedback(
   try {
     const reply = await openai.chat(
       buildInterpretFeedbackPrompt({ stage: input.stage, message: input.message }),
+      { jsonMode: true },
     );
     const plan = parseJsonObject<FeedbackPlan>(reply);
     return { intent: plan.intent === "approve" ? "approve" : "revise" };

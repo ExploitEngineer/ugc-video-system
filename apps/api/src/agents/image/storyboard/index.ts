@@ -39,20 +39,37 @@ export async function storyboardGenerator(
     revise: Boolean(input.directive),
   });
 
-  const reply = await ctx.openai.chat(
-    buildStoryboardPrompt({
-      adStyle: ctx.adStyle,
-      adType: ctx.adType,
-      productBrief: ctx.productBrief,
-      personBrief: ctx.personBrief,
-      userPrompt: input.userPrompt,
-      hasPerson: Boolean(input.personSheetRef),
-      aspectRatio: ctx.aspectRatio,
-      critique: input.critique,
-      directive: input.directive,
-    }),
-  );
-  const plan = parseJsonObject<StoryboardPlan>(reply);
+  const messages = buildStoryboardPrompt({
+    adStyle: ctx.adStyle,
+    adType: ctx.adType,
+    productBrief: ctx.productBrief,
+    personBrief: ctx.personBrief,
+    userPrompt: input.userPrompt,
+    hasPerson: Boolean(input.personSheetRef),
+    aspectRatio: ctx.aspectRatio,
+    critique: input.critique,
+    directive: input.directive,
+  });
+  // The storyboard plan is the longest LLM output in the pipeline, so JSON mode
+  // + a generous token ceiling are essential (a truncated reply = invalid JSON).
+  // Retry ONCE with an even larger ceiling before surfacing a parse failure.
+  let plan: StoryboardPlan | undefined;
+  for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
+    const reply = await ctx.openai.chat(messages, {
+      jsonMode: true,
+      maxTokens: attempt === 1 ? 4096 : 6144,
+    });
+    try {
+      plan = parseJsonObject<StoryboardPlan>(reply);
+    } catch (err) {
+      log.warn("storyboard plan unparseable — retrying", {
+        attempt,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      if (attempt === 2) throw err;
+    }
+  }
+  if (!plan) throw new Error("storyboard plan missing after retries");
   // Storyboard is fixed at 4 scenes — clamp in case the model overshoots.
   plan.scenes = plan.scenes.slice(0, 4);
 

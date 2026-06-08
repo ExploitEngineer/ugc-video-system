@@ -86,6 +86,7 @@ async function resolvePlan(
       aspectRatio: ctx.aspectRatio,
       directive: input.directive,
     }),
+    { jsonMode: true },
   );
   const plan = parseJsonObject<PersonImagePlan>(reply);
   return {

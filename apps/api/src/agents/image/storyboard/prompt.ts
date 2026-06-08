@@ -296,26 +296,19 @@ export function buildStoryboardPrompt({
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
-    "`imagePrompt` MUST itself state the four-panel 2×2 layout with thin plain",
-    `separator borders, the ${resolutionLabel} resolution, the`,
-    "product/person fidelity rule, and the PANEL-LABEL rule: each panel carries",
-    "its number badge (01–04, in order) and a bottom caption bar reading that",
-    "scene's `panelCaption`, with NO other text and NO arrows. It MUST quote the",
-    "four `panelCaption` strings verbatim so the image model letters them exactly.",
-    "`imagePrompt` MUST also carry the PRODUCT PRESENTATION rule (product worn / in",
-    "real use, the real solid item — NEVER a box, packaging or unboxing, never",
-    "duplicated, never opened or transformed) and the",
+    "`imagePrompt` is ONE self-contained, dense paragraph (≤ ~180 words, no",
+    "repetition). It MUST cover, briefly: the 2×2 four-panel layout with thin",
+    `plain separator borders at ${resolutionLabel}; each panel's number badge`,
+    "(01–04, in order) + a bottom caption bar quoting that scene's `panelCaption`",
+    "VERBATIM, with NO other text and NO arrows; the product worn / in real use as",
+    "the real solid item (never a box/packaging/unboxing, never duplicated); and",
     adType === "ugc"
-      ? "authentic UGC phone-captured look (natural light, real setting, candid framing)."
-      : "polished cinematic keyframe look.",
-    ...(hasPerson
-      ? [
-          "The `imagePrompt` MUST also explicitly instruct the image model to",
-          "render the person photorealistically (a real, lifelike human with a",
-          "realistic face and skin) in every panel, faithful to the person sheet,",
-          "while keeping the product realistic and faithful to the product sheet.",
-        ]
-      : []),
+      ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
+      : "the polished cinematic keyframe look.",
+    hasPerson
+      ? "It MUST also state the person is rendered photorealistically (real, lifelike face and skin) in every panel, faithful to the person sheet."
+      : "",
+    "Be specific but concise — do NOT restate these rules more than once.",
     "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`",
     `to "${style}".`,
   ]

@@ -21,6 +21,7 @@ export async function interpretAdStyle(
 ): Promise<{ adStyle: string; adType: AdType }> {
   const reply = await ctx.openai.chat(
     buildInterpretStylePrompt({ userPrompt: input.userPrompt }),
+    { jsonMode: true },
   );
   const plan = parseJsonObject<AdStylePlan>(reply);
   const adStyle = plan.adStyle?.trim() || FALLBACK_AD_STYLE;

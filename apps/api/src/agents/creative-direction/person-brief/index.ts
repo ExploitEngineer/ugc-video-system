@@ -26,6 +26,7 @@ export async function planPersonBrief(
       adStyle: ctx.adStyle,
       productUpload: input.productUpload,
     }),
+    { jsonMode: true },
   );
   const plan = parseJsonObject<PersonBriefPlan>(reply);
   return { personBrief: plan.personBrief?.trim() ?? "" };
