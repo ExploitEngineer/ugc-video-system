@@ -64,6 +64,15 @@ function runItemPollInterval(query: {
   return isTerminal(status) ? false : 5000;
 }
 
+// A freshly created run can briefly 404 before its row is visible. Only treat an
+// entry as a prunable orphan once it's older than this grace window, so we never
+// delete a run mid-creation.
+const PRUNE_GRACE_MS = 60_000;
+function isStale(createdAt: string): boolean {
+  const t = Date.parse(createdAt);
+  return Number.isNaN(t) || Date.now() - t > PRUNE_GRACE_MS;
+}
+
 export function StudioSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -320,12 +329,25 @@ function RunListItem({
   const [deleting, setDeleting] = useState(false);
 
   // Lightweight live status — polls slowly, stops at terminal states.
-  const { data, isError } = useQuery({
+  const { data, isError, error } = useQuery({
     queryKey: ["run", entry.id],
     queryFn: () => fetchRun(entry.id),
     refetchInterval: runItemPollInterval,
     retry: (count, err) => (err as Error).message !== "not-found" && count < 1,
   });
+
+  // Auto-prune confirmed-missing orphans (404 on the per-id endpoint) so ghost
+  // chats drop out of the sidebar instead of lingering gray. Age guard avoids
+  // deleting a run that's still being created.
+  useEffect(() => {
+    if (
+      isError &&
+      (error as Error)?.message === "not-found" &&
+      isStale(entry.createdAt)
+    ) {
+      removeRun(entry.id);
+    }
+  }, [isError, error, entry.id, entry.createdAt]);
 
   async function handleDelete() {
     if (deleting) return;
