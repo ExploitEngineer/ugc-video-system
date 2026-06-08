@@ -21,8 +21,12 @@ fixes for product fidelity, scene scripts, and video realism.
   - [x] `SkillContext.personBrief` wired (mirrors productBrief).
   - [x] Storyboard prompt SCRIPT GROUNDING block: each line specific to THIS
     product + person + scene beat; anti-repetition; banned hype filler.
-- [ ] **4. `fix/video-realism`** — 720p→1080p default + `BYTEPLUS_VIDEO_RESOLUTION`
+- [x] **4. `fix/video-realism`** — 720p→1080p default + `BYTEPLUS_VIDEO_RESOLUTION`
   env; de-glamour UGC keyframes.
+  - [x] `BYTEPLUS_VIDEO_RESOLUTION` env (default 1080p) + provider reads it + logs.
+  - [x] `.env.example` documents the var.
+  - [x] Strengthened UGC realism (skin texture, phone-camera look, anti-AI-face)
+    in video prompt (LLM + deterministic) and storyboard UGC keyframe look.
 - [ ] **5. `docs/io-contract-refresh`** — update IO doc / SPEC / pipeline; delete
   this tracker.
 

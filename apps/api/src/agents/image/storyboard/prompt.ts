@@ -197,11 +197,14 @@ export function buildStoryboardPrompt({
     adType === "ugc"
       ? [
           "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-          "  a glossy studio commercial: natural / available light, a real everyday",
-          "  setting, candid handheld-style framing, the person relaxed and real",
-          "  (talking to camera where it fits). Keep product/person IDENTITY faithful",
-          "  to the reference sheets — only lighting, setting and framing read as real",
-          "  UGC, never plastic or over-polished.",
+          "  a glossy studio commercial: natural / available light from real windows",
+          "  or lamps, a real lived-in everyday setting with ordinary background",
+          "  detail, candid handheld-style framing, the person relaxed and real",
+          "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
+          "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
+          "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
+          "  sheets — only lighting, setting and framing read as real UGC, never",
+          "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
         ]
       : [
           "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
