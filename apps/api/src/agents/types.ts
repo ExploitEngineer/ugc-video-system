@@ -15,6 +15,13 @@ export interface SkillContext {
   adStyle: string;
   /** Ad treatment (ugc | inspirational), inferred from the prompt. */
   adType: AdType;
+  /**
+   * Factual product identity anchor (category / materials / colors / markings),
+   * planned once via vision over the upload and persisted to `runs.product_brief`.
+   * Empty string until the reference phase fills it. Keeps the product from
+   * silently drifting into a different item downstream (storyboard, critic).
+   */
+  productBrief: string;
   /** User-chosen output shape — sizes the image sheets and the final video. */
   aspectRatio: AspectRatio;
   openai: OpenAIProvider;

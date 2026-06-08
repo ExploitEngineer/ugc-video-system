@@ -18,6 +18,13 @@ import type { RevisionDirective } from "../../creative-direction/plan-revision/i
 export interface StoryboardPromptInput {
   adStyle: string;
   adType: AdType;
+  /**
+   * Factual product identity anchor (category / materials / colors / markings)
+   * from `runs.product_brief`. Pins what the product IS in TEXT so a drifting
+   * reference sheet can't silently swap it for a different item. May be empty
+   * (older runs / brief hiccup) — the prompt then falls back to image-only.
+   */
+  productBrief: string;
   userPrompt: string;
   hasPerson: boolean;
   /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
@@ -76,6 +83,7 @@ function directiveBlock(d: RevisionDirective): string[] {
 export function buildStoryboardPrompt({
   adStyle,
   adType,
+  productBrief,
   userPrompt,
   hasPerson,
   aspectRatio,
@@ -84,6 +92,20 @@ export function buildStoryboardPrompt({
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
+  const product = productBrief.trim();
+
+  // TEXT identity anchor — pins what the product IS so a drifting reference
+  // sheet can't make the storyboard render a different kind of item.
+  const productAnchor = product
+    ? [
+        "THE PRODUCT IS (authoritative identity — this exact item, nothing else):",
+        product,
+        "Every panel MUST show THIS product — the same category, form, materials,",
+        "colors and markings described above AND shown in the product sheet. If the",
+        "product sheet ever looks ambiguous, this text wins: never substitute a",
+        "different kind of item. State this product by name in the `imagePrompt`.",
+      ]
+    : [];
 
   // Ad-type-specific direction for the script + transcripts.
   const typeBlock =
@@ -129,10 +151,11 @@ export function buildStoryboardPrompt({
     "- Do NOT open, unfold, split or transform the product or any container — keep",
     "  it a single solid object with no seams that come apart.",
     "- Both the short `panelCaption` and the detailed `sceneDescription` show the",
-    "  product being WORN or USED — the panelCaption as a brief label (e.g.",
-    '  "CLOSE-UP. Slipping the bracelet onto her wrist.") and the sceneDescription',
-    '  expanding that same moment into full detail — NEVER a "product box",',
-    "  packaging or unboxing.",
+    "  product being WORN or USED — the panelCaption as a brief label (e.g. for a",
+    '  wearable item "CLOSE-UP. Putting on the product."; for a handheld item',
+    '  "CLOSE-UP. Using the product.") and the sceneDescription expanding that same',
+    '  moment into full detail — NEVER a "product box", packaging or unboxing. Use',
+    "  THIS product (per the identity above), never an example item.",
   ];
 
   // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
@@ -166,6 +189,7 @@ export function buildStoryboardPrompt({
     hasPerson ? "and the person (face, build, wardrobe, palette)," : "",
     "and what the user wants the ad to say.",
     "",
+    ...(product ? [...productAnchor, ""] : []),
     ...typeBlock,
     "",
     ...presentationBlock,
@@ -181,15 +205,16 @@ export function buildStoryboardPrompt({
     "  setting / environment, the lighting & mood, what the subject does, HOW the",
     "  product is worn / used and framed, and the camera framing / motion. Vivid",
     "  and specific; it is handed to the video model, so it MUST be clearly LONGER",
-    "  and more detailed than the panelCaption. e.g. \"Medium close-up in a sunlit",
-    "  bedroom, soft morning light from a window camera-left. She raises her wrist",
-    "  toward the lens and turns it slowly so the bracelet catches the light,",
-    "  smiling as she looks into the camera. Handheld phone with a gentle push-in.\"",
+    "  and more detailed than the panelCaption. e.g. (ILLUSTRATIVE STRUCTURE ONLY",
+    "  — substitute THIS product and a fitting action) \"Medium close-up in a real",
+    "  kitchen, natural daylight from a window camera-left. She holds the product up",
+    "  toward the lens and turns it slowly so its markings catch the light, smiling",
+    "  as she talks to camera. Handheld phone, slight natural sway.\"",
     "- `panelCaption` — a CONDENSED label for the on-image caption bar: the shot",
-    "  type followed by the brief action, ~6-12 words, e.g. \"CLOSE-UP. Turning her",
-    "  wrist so the bracelet catches the light.\". It describes the SAME moment as",
+    "  type followed by the brief action, ~6-12 words, e.g. \"CLOSE-UP. Turning the",
+    "  product so its markings catch the light.\". It describes the SAME moment as",
     "  `sceneDescription`, just shortened to fit the panel; never a different",
-    "  action.",
+    "  action. ALWAYS describe THIS product, never an example item from these notes.",
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",

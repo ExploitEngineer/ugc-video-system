@@ -103,6 +103,7 @@ export const runs = pgTable(
     adStyle: text("ad_style"), // interpreted style propagated to agents
     adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
     personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
+    productBrief: text("product_brief"), // factual product identity anchor (category/materials/colors/markings); threaded to storyboard + critic
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     criticEnabled: boolean("critic_enabled").notNull().default(true),

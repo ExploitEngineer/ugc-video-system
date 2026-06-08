@@ -43,6 +43,7 @@ export async function storyboardGenerator(
     buildStoryboardPrompt({
       adStyle: ctx.adStyle,
       adType: ctx.adType,
+      productBrief: ctx.productBrief,
       userPrompt: input.userPrompt,
       hasPerson: Boolean(input.personSheetRef),
       aspectRatio: ctx.aspectRatio,

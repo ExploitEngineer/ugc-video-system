@@ -34,6 +34,7 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
+import { describeProduct } from "./describe-product/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
 import { planRevision, type RevisionDirective } from "./plan-revision/index.js";
 import {
@@ -99,6 +100,7 @@ function buildCtx(run: RunRow): SkillContext {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
     adType: run.adType ?? "ugc",
+    productBrief: run.productBrief ?? "",
     aspectRatio: run.aspectRatio,
     openai,
     video,
@@ -282,9 +284,36 @@ async function runReferencePhase(
     await executeStep(ctx, "person_sheet");
   };
 
+  // Product-identity branch — vision over the upload → a factual product brief,
+  // persisted to runs.product_brief as the canonical TEXT anchor for downstream
+  // steps (storyboard, critic). Best-effort: a brief hiccup must NOT fail the
+  // run, so it's caught here — the pipeline simply falls back to image-only
+  // grounding (the prior behavior) when the brief is empty. Runs alongside the
+  // product sheet, off its critical path (the sheet doesn't read the brief).
+  const productBriefBranch = async (): Promise<void> => {
+    if (!productUpload) return;
+    try {
+      const { productBrief } = await describeProduct(ctx, {
+        userPrompt,
+        productUpload,
+      });
+      if (productBrief) {
+        await setRun(runId, { productBrief });
+        logRun(runId, `product brief: "${productBrief}"`, tag);
+      }
+    } catch (err) {
+      logRunError(
+        runId,
+        `product brief failed (continuing without anchor): ${err instanceof Error ? err.message : String(err)}`,
+        tag,
+      );
+    }
+  };
+
   const [product, person] = await Promise.allSettled([
     executeStep(ctx, "product_sheet"),
     personBranch(),
+    productBriefBranch(),
   ]);
   if (product.status === "rejected")
     return { failedStep: "product_sheet", err: product.reason };
