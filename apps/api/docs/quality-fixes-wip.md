@@ -11,8 +11,11 @@ fixes for product fidelity, scene scripts, and video realism.
   - [x] `SkillContext.productBrief` + `buildCtx` wiring.
   - [x] Orchestrator: compute + persist `productBrief` in the reference phase.
   - [x] Storyboard prompt: inject brief anchor, remove all "bracelet" examples.
-- [ ] **2. `fix/storyboard-critic-grounding`** — attach reference sheets + brief
+- [x] **2. `fix/storyboard-critic-grounding`** — attach reference sheets + brief
   to storyboard & product critics so wrong product is caught.
+  - [x] Storyboard critic: attach product + person sheets (Image 2/3) + brief;
+    rubric flags wrong-kind product as blocking/global.
+  - [x] Product critic: attach original upload (Image 2) + brief; same check.
 - [ ] **3. `fix/scene-script-tailoring`** — product/person-grounded,
   non-repetitive transcripts.
 - [ ] **4. `fix/video-realism`** — 720p→1080p default + `BYTEPLUS_VIDEO_RESOLUTION`

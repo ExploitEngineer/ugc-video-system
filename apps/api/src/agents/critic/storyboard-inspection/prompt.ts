@@ -15,8 +15,14 @@ export interface StoryboardInspectionPromptInput {
   /** Metadata hint from the artifact row (the planned scenes); the image is judged, not this. */
   scenes: unknown;
   hasPerson: boolean;
-  /** The storyboard sheet to inspect, attached as a vision image. */
+  /** The storyboard sheet to inspect, attached as a vision image (Image 1). */
   sheetRef: ImageRef;
+  /** Ground-truth product reference sheet, attached for identity comparison (Image 2). */
+  productSheetRef: ImageRef;
+  /** Ground-truth person reference sheet, attached when the ad has a person (Image 3). */
+  personSheetRef?: ImageRef;
+  /** Factual product identity anchor (text) from `runs.product_brief`. */
+  productBrief: string;
 }
 
 export function buildStoryboardInspectionPrompt({
@@ -25,21 +31,51 @@ export function buildStoryboardInspectionPrompt({
   scenes,
   hasPerson,
   sheetRef,
+  productSheetRef,
+  personSheetRef,
+  productBrief,
 }: StoryboardInspectionPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
+  const product = productBrief.trim();
+
+  // Image order matches the `images: [...]` array below — the model reads them
+  // in order, so it must be told which is which.
+  const imageLegend = [
+    "ATTACHED IMAGES (in order):",
+    "- Image 1 = the STORYBOARD SHEET to inspect (the 2×2 keyframe sheet).",
+    "- Image 2 = the PRODUCT reference sheet — the GROUND TRUTH for the product.",
+    personSheetRef
+      ? "- Image 3 = the PERSON reference sheet — the GROUND TRUTH for the person."
+      : "",
+  ].filter(Boolean);
 
   const system = [
     "You are the StoryBoard Sheet Inspection skill of an ad-video Critic Agent.",
-    "A storyboard/keyframe sheet for a single ~15-second ad is attached. Judge",
-    "whether it is fit to drive the video step, then return a strict-JSON",
+    "A storyboard/keyframe sheet for a single ~15-second ad is attached, together",
+    "with the product (and person) REFERENCE sheets it must match. Judge whether",
+    "the storyboard is fit to drive the video step, then return a strict-JSON",
     "verdict. Be strict but fair: only fail on real, visible defects.",
+    "",
+    ...imageLegend,
+    ...(product
+      ? [
+          "THE PRODUCT IS (authoritative identity — Image 1 must show THIS item):",
+          product,
+        ]
+      : []),
     "",
     "RUBRIC — the sheet must satisfy ALL of:",
     "1. Exactly FOUR equal panels in reading order (2×2: top-left=1,",
     "   top-right=2, bottom-left=3, bottom-right=4).",
-    "2. The product (and the person, if present) stays CONSISTENT with the",
-    "   reference sheets across every panel — same product, same person, same",
-    "   colors and proportions.",
+    "2. PRODUCT IDENTITY — compare Image 1's product against Image 2 (and the",
+    "   product text above). It must be the SAME product in EVERY panel: same",
+    "   category/kind of item, same form, materials, colors, proportions and",
+    "   on-product markings/text/logos. A storyboard showing a DIFFERENT kind of",
+    "   product than the reference (e.g. a bracelet when the reference is a bottle)",
+    "   is a `blocking`, `global` issue — say so explicitly in `problem`. The",
+    hasPerson
+      ? "   person must likewise match Image 3 (same face, build, wardrobe, palette)."
+      : "   ad has no person.",
     "3. The four panels form one coherent arc (hook → product → benefit/use →",
     "   payoff) that reads as a single continuous ~15s ad in the requested style.",
     "4. LABELLED PANELS — each of the four panels MUST carry: (a) a legible",
@@ -76,9 +112,15 @@ export function buildStoryboardInspectionPrompt({
       `Ad style: ${style}`,
       `User prompt: ${userPrompt}`,
       `Planned scenes (metadata): ${JSON.stringify(scenes ?? [])}`,
-      "The storyboard sheet to inspect is attached. Return the verdict.",
+      "Image 1 is the storyboard sheet to inspect; Image 2 is the product",
+      personSheetRef
+        ? "reference sheet; Image 3 is the person reference sheet. Return the verdict."
+        : "reference sheet. Return the verdict.",
     ].join("\n"),
-    images: [sheetRef],
+    // Order MUST match the legend above: storyboard, product sheet, [person sheet].
+    images: personSheetRef
+      ? [sheetRef, productSheetRef, personSheetRef]
+      : [sheetRef, productSheetRef],
   };
 
   return [{ role: "system", content: system }, user];

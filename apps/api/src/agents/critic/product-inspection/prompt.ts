@@ -13,8 +13,12 @@ export interface ProductInspectionPromptInput {
   userPrompt: string;
   /** Metadata hint from the artifact row (per-view notes); the image is judged, not this. */
   views: unknown;
-  /** The product sheet to inspect, attached as a vision image. */
+  /** The product sheet to inspect, attached as a vision image (Image 1). */
   sheetRef: ImageRef;
+  /** The ORIGINAL uploaded product photo — ground truth, attached as Image 2. */
+  productUpload: ImageRef;
+  /** Factual product identity anchor (text) from `runs.product_brief`. */
+  productBrief: string;
 }
 
 export function buildProductInspectionPrompt({
@@ -22,20 +26,34 @@ export function buildProductInspectionPrompt({
   userPrompt,
   views,
   sheetRef,
+  productUpload,
+  productBrief,
 }: ProductInspectionPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
+  const product = productBrief.trim();
 
   const system = [
     "You are the Product Sheet Inspection skill of an ad-video Critic Agent.",
-    "A product reference sheet is attached. Judge whether it is fit to drive the",
-    "rest of the pipeline, then return a strict-JSON verdict. Be strict but fair:",
-    "only fail on real, visible defects — not stylistic preference.",
+    "Two images are attached: Image 1 = the generated PRODUCT REFERENCE SHEET to",
+    "inspect; Image 2 = the ORIGINAL uploaded product photo (the GROUND TRUTH).",
+    "Judge whether the sheet faithfully reproduces the real product AND is fit to",
+    "drive the rest of the pipeline, then return a strict-JSON verdict. Be strict",
+    "but fair: only fail on real, visible defects — not stylistic preference.",
+    ...(product
+      ? [
+          "",
+          "THE PRODUCT IS (authoritative identity — Image 1 must show THIS item):",
+          product,
+        ]
+      : []),
     "",
     "RUBRIC — the sheet must satisfy ALL of:",
     "1. Exactly FOUR views in a clean 2×2 grid: top-left FRONT, top-right",
     "   THREE-QUARTER, bottom-left SIDE (profile), bottom-right REAR.",
-    "2. The SAME product in every cell — identical colors, materials, finish,",
-    "   surface details, on-product logos, and proportions. No redesign.",
+    "2. It must be the SAME product as Image 2 (the real upload) — same kind of",
+    "   item, colors, materials, finish, surface details, on-product logos/text",
+    "   and proportions — and identical across all four cells. A sheet showing a",
+    "   DIFFERENT product than the upload is a `blocking`, `global` issue.",
     "3. Plain seamless neutral backdrop, even shadowless studio lighting,",
     "   product centered with consistent scale and framing across cells.",
     "4. IMAGES ONLY — no baked-in text, labels, captions, view names, numbers,",
@@ -63,9 +81,11 @@ export function buildProductInspectionPrompt({
       `Ad style: ${style}`,
       `User prompt: ${userPrompt}`,
       `View notes (metadata): ${JSON.stringify(views ?? {})}`,
-      "The product reference sheet to inspect is attached. Return the verdict.",
+      "Image 1 is the generated product sheet to inspect; Image 2 is the original",
+      "uploaded product photo (ground truth). Return the verdict.",
     ].join("\n"),
-    images: [sheetRef],
+    // Order MUST match the legend above: generated sheet, then the real upload.
+    images: [sheetRef, productUpload],
   };
 
   return [{ role: "system", content: system }, user];

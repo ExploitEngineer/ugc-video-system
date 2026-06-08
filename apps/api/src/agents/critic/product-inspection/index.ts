@@ -31,6 +31,8 @@ export interface ProductInspectionInput {
   /** View notes from the artifact row (metadata hint for the rubric). */
   views: ProductReferenceSheet["views"];
   userPrompt: string;
+  /** The original uploaded product photo — ground truth for the identity check. */
+  productUpload: ImageRef;
 }
 
 /** Single vision inspection → verdict. No side effects. */
@@ -44,6 +46,8 @@ export async function inspectProductSheet(
       userPrompt: input.userPrompt,
       views: input.views,
       sheetRef: input.sheetRef,
+      productUpload: input.productUpload,
+      productBrief: ctx.productBrief,
     }),
   );
   return parseJsonObject<InspectionVerdict>(reply, inspectionVerdictSchema);
@@ -73,6 +77,7 @@ export async function inspectAndRemediateProductSheet(
         sheetRef: { source: sheetUrl, mime: "image/png" },
         views: input.views,
         userPrompt: input.userPrompt,
+        productUpload: input.productUpload,
       }),
     regenFull: async (critique) =>
       toSheetRef(
