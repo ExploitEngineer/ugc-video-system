@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
-import { addRun } from "@/lib/run-history";
+import { addRun, removeRun } from "@/lib/run-history";
 
 const POLL_MS = 1500;
 
@@ -38,8 +38,10 @@ const POLL_MS = 1500;
 // writing fresh data). Hoisted so its identity is stable across renders
 // (React Compiler does not memoize query-option closures).
 function runPollInterval(query: {
-  state: { data?: RunDetail };
+  state: { data?: RunDetail; status?: string };
 }): number | false {
+  // Missing/failed fetch (e.g. a 404'd run) — stop, don't hammer the endpoint.
+  if (query.state.status === "error") return false;
   const data = query.state.data;
   const status = data?.status;
   if (!status) return POLL_MS;
@@ -97,12 +99,16 @@ export function RunView({ runId }: { runId: string }) {
   });
 
   // Record this run in the sidebar history — covers both freshly-created runs
-  // and ones opened directly by URL. addRun is idempotent per id.
+  // and ones opened directly by URL. addRun is idempotent per id. If the run is
+  // confirmed missing (404), drop it from history so the ghost entry can't keep
+  // reappearing in the sidebar.
   useEffect(() => {
     if (run) {
       addRun({ id: run.id, prompt: run.prompt, createdAt: run.createdAt });
+    } else if (isError && (error as Error).message === "not-found") {
+      removeRun(runId);
     }
-  }, [run]);
+  }, [run, isError, error, runId]);
 
   if (isError && (error as Error).message === "not-found") {
     return (
