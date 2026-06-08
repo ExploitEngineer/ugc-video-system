@@ -64,6 +64,13 @@
       "when": 1780928033814,
       "tag": "0008_even_black_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780945424632,
+      "tag": "0009_funny_stone_men",
+      "breakpoints": true
     }
   ]
 }

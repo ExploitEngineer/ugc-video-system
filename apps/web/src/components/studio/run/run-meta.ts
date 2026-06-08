@@ -2,12 +2,14 @@
 
 import type { RunDetail, RunStatus, Step } from "@ugc/shared";
 
+// Critic inspection steps (product_inspection / storyboard_inspection) are
+// intentionally omitted — the Critic is parked (off by default), so they never
+// run and must not render in the timeline. They remain in the shared `Step`
+// enum (and so in STEP_LABEL/STEP_AGENT below) for when the Critic is restored.
 export const STEP_ORDER: Step[] = [
   "product_sheet",
   "person_sheet",
-  "product_inspection",
   "storyboard",
-  "storyboard_inspection",
   "video",
 ];
 
@@ -139,14 +141,6 @@ export function stepState(run: RunDetail, step: Step): StepState {
     step === "person_sheet" &&
     events.length === 0 &&
     currentIdx > STEP_ORDER.indexOf("person_sheet")
-  ) {
-    return "skipped";
-  }
-
-  // Critic inspections are dropped entirely when the critic is disabled.
-  if (
-    run.criticEnabled === false &&
-    (step === "product_inspection" || step === "storyboard_inspection")
   ) {
     return "skipped";
   }

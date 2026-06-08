@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ALTER COLUMN "critic_enabled" SET DEFAULT false;

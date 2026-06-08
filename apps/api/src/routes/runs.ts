@@ -61,8 +61,9 @@ runs.post("/", async (c) => {
     prompt: body.prompt,
     mode: body.mode,
     aspectRatio: body.aspectRatio,
-    // FormData carries strings; default ON unless explicitly "false".
-    criticEnabled: body.criticEnabled !== "false",
+    // FormData carries strings; Critic is parked (off by default) — enabled
+    // only if explicitly "true". The studio UI no longer sends this field.
+    criticEnabled: body.criticEnabled === "true",
     hasPersonImage: personImage !== null,
   });
   if (!parsed.success) {
