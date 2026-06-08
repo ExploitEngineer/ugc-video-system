@@ -76,6 +76,10 @@ export function buildStoryboardInspectionPrompt({
     hasPerson
       ? "   person must likewise match Image 3 (same face, build, wardrobe, palette)."
       : "   ad has no person.",
+    "   STRAY PROPS: flag (`major`) any invented accessory or prop on the person",
+    "   that is NOT in the reference sheets — particularly a stray item the SAME",
+    "   color as the product, on or near it, that reads as part of the product",
+    "   (e.g. a matching wristband next to a same-color bottle).",
     "3. The four panels form one coherent arc (hook → product → benefit/use →",
     "   payoff) that reads as a single continuous ~15s ad in the requested style.",
     "4. LABELLED PANELS — each of the four panels MUST carry: (a) a legible",
