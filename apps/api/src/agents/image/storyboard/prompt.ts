@@ -195,63 +195,62 @@ export function buildStoryboardPrompt({
   // generic, interchangeable filler ("I love this", "you'll love it") that
   // appears when the model has no concrete anchor.
   const speaker = adType === "ugc" ? "the on-screen person" : "the voiceover";
+  // Anchor the script in what THIS product actually does (from productUse) so two
+  // different products yield clearly different scripts — kills cross-ad sameness.
+  const benefitAnchor = hasUse
+    ? `Ground the lines in what THIS product actually does — a real person ${useVerb} it and ${functionSignal} — so the script is specific to this exact product (a bottle ad and a watch ad must sound nothing alike).`
+    : "Ground the lines in THIS product's actual, concrete benefit (per the product sheet) — never an interchangeable line that would fit any product.";
   const scriptGrounding = [
-    "SCRIPT GROUNDING — the four `transcript` lines MUST be concrete and specific:",
+    "SCRIPT GROUNDING — the four `transcript` lines MUST be concrete, specific and VARIED:",
     product
-      ? `- Talk about THIS product specifically — ${product} Name or clearly evoke it; never a generic "this" with no anchor. Do NOT invent a brand, price or feature that isn't supported by the product or the user's prompt.`
+      ? `- Talk about THIS product specifically — ${product} Name or clearly evoke it; never a generic "this" with no anchor. Do NOT invent a brand, price or feature unsupported by the product or the user's prompt.`
       : "- Talk about THIS specific product (per the product sheet); never a generic, interchangeable line that would fit any product.",
-    "- Each line carries a DIFFERENT, scene-specific beat — a distinct concrete",
-    "  benefit, feature, use-moment or reaction tied to what that panel shows.",
-    "  Across the four lines: hook → product-in-use → a concrete benefit/reaction",
-    "  → a closing line. No two lines may repeat the same idea or phrasing.",
-    "- BANNED filler unless the user's prompt truly calls for it: empty hype with",
-    '  no specifics like "I love this", "you\'ll love it", "this is amazing",',
-    '  "game changer", "obsessed", "10/10", "must-have". Replace with a concrete,',
-    "  product-specific detail instead.",
+    `- ${benefitAnchor}`,
+    "- Each line is a DIFFERENT beat that OPENS with a different word — a distinct",
+    "  concrete benefit, feature, use-moment or reaction tied to what that panel",
+    "  shows. Across the four: hook → product-in-use → a concrete benefit/reaction",
+    "  → a closing line. No two lines may share an idea, a phrase or an opener.",
     hasPerson
-      ? `- Fit the wording, vocabulary and tone to the on-screen person from the CHARACTER ANCHOR${person ? ` (${person})` : ""} — ${speaker} should sound like that real individual, with the correct gender, and never a brand script.`
+      ? `- Write the way THIS specific person speaks — their age, gender and energy from the CHARACTER ANCHOR${person ? ` (${person})` : ""}; a real individual, never a generic creator template or brand script.`
       : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
-    "- The lines must match what the matching panel actually shows (the same",
-    "  action / setting), so the spoken script and the keyframes stay in sync.",
+    "- BANNED — recycled UGC filler and template openers/closers (vary these every",
+    "  time; never default to them across ads): empty hype with no specifics",
+    '  ("I love this", "you\'ll love it", "this is amazing", "game changer",',
+    '  "obsessed", "10/10", "must-have"); stock openers ("okay so", "okay guys",',
+    '  "so I\'ve been using", "let me tell you", "honestly", "trust me", "guys");',
+    '  stock closers ("you need this", "run don\'t walk", "link in bio",',
+    '  "thank me later"). Replace each with a concrete, product-specific detail.',
+    "- The lines must match what the matching panel actually shows (same action /",
+    "  setting), so the spoken script and the keyframes stay in sync.",
   ];
 
   // How the hero product must appear — shared across ad types. Kills the
   // invented-packaging / unboxing / duplicated-product failure modes.
   const presentationBlock = [
     "PRODUCT PRESENTATION — how the product appears in EVERY panel that shows it:",
-    "- Show the product the way it is REALLY used. If it is wearable (jewelry,",
-    "  bracelet, watch, glasses, apparel, shoes, bag) it is WORN on the person's",
-    "  body; if it is handheld or used, it is shown IN ACTIVE USE. Avoid static",
-    "  product-on-a-pedestal unless the ad style explicitly calls for it.",
-    "- TRUE-TO-LIFE SCALE & PLACEMENT: render the product at its real-world size",
-    "  relative to the hand / body / face (a ring is finger-sized, glasses",
-    "  face-sized, a bottle hand-sized). NEVER oversize it to dominate the frame,",
-    "  NEVER shrink it to a speck. Place it ONLY where it would really be — worn on",
-    "  the correct body part, or held naturally in the hand — never floating,",
-    "  hovering detached, or somewhere it physically could not sit.",
-    "- The product is ALWAYS the real, solid item from the product sheet. NEVER",
-    "  invent packaging — no boxes, cartons, gift boxes, blister packs, pouches or",
-    "  bags — and NEVER stage an unboxing or show the product as a print / photo /",
-    '  logo on a box, poster or screen. No "product box" anywhere.',
-    "- Show EXACTLY ONE instance of the product per panel; never duplicate it (e.g.",
-    "  worn AND held at once) unless that is a deliberate, natural beat.",
-    "- Do NOT open, unfold, split or transform the product or any container — keep",
-    "  it a single solid object with no seams that come apart.",
-    "- PRODUCT-STATE CONTINUITY: keep the product's physical state causal and",
-    "  consistent across the four panels per the use-sequence in STEP 1.5 — a",
-    "  state-change (a cap unscrewed, a lid flipped) persists and never reverts,",
-    "  and no panel shows a physically impossible moment.",
+    "- Show the product the way it is REALLY used: if wearable (jewelry, bracelet,",
+    "  watch, glasses, apparel, shoes, bag) it is WORN on the body; if handheld it",
+    "  is in ACTIVE USE — not a static product-on-a-pedestal (unless the ad style",
+    "  calls for it).",
+    "- TRUE-TO-LIFE SCALE & PLACEMENT: render it at real-world size relative to the",
+    "  hand / body / face (a ring is finger-sized, glasses face-sized, a bottle",
+    "  hand-sized), placed exactly where it naturally sits — worn on the correct",
+    "  body part or held in the hand.",
+    "- Always the real, solid item from the product sheet — the bare product, the",
+    "  ONLY instance in the panel; not a box, packaging, blister pack, pouch or an",
+    "  unboxing, and not a print / photo / logo of it on a box, poster or screen.",
+    "- Operate it the REAL way: if its use needs opening (twist off a cap, flip a",
+    "  lid, unclasp a strap), SHOW that action as a natural beat; it stays the same",
+    "  single real item (not shattered or split into separate loose pieces).",
+    "- PRODUCT-STATE CONTINUITY: keep its physical state causal and consistent per",
+    "  the use-sequence in STEP 1.5 — a state-change (cap off, lid open) carries",
+    "  through to every later panel.",
     "- Show ONLY the product and the person's own wardrobe from the reference",
-    "  sheets. Do NOT invent extra accessories, props or objects, and do NOT place",
-    "  any other item — especially one in the SAME COLOR as the product (e.g. a",
-    "  matching wristband or band) — on or near it, where it could read as part of",
-    "  the product. Keep the product visually distinct and unmistakable.",
+    "  sheets — no invented accessories or extra objects near it, and nothing in the",
+    "  product's OWN color beside it, so the product stays distinct and unmistakable.",
     "- Both the short `panelCaption` and the detailed `sceneDescription` show the",
-    "  product being WORN or USED — the panelCaption as a brief label (e.g. for a",
-    '  wearable item "CLOSE-UP. Putting on the product."; for a handheld item',
-    '  "CLOSE-UP. Using the product.") and the sceneDescription expanding that same',
-    '  moment into full detail — NEVER a "product box", packaging or unboxing. Use',
-    "  THIS product (per the identity above), never an example item.",
+    "  product WORN or USED (the panelCaption a brief label, the sceneDescription",
+    "  expanding the same moment) — THIS product, never an example item.",
   ];
 
   // Causal use-sequence planning — the load-bearing fix for physically
@@ -269,7 +268,7 @@ export function buildStoryboardPrompt({
         "product itself; build the four panels around it, never contradict it):",
         hasPrep
           ? `- PREP first, in an EARLIER panel than the use: the person ${accessVerb} → ${changedState}.`
-          : "- This product needs NO prep to use — do NOT invent one (no cap, lid, clasp or cover to undo before use).",
+          : "- This product is used as-is — show it used directly, with no opening or unclasping step (it has no cap/lid/clasp to undo).",
         `- USE: the person ${useVerb} the product, and it visibly works — ${functionSignal}.`,
         ...(hasPrep
           ? [
@@ -287,13 +286,11 @@ export function buildStoryboardPrompt({
       ? "- Lay the four panels out as that causal sequence in time."
       : "- Work out how THIS product (per the identity above + the product sheet) is REALLY operated by a real person — what is touched, moved, opened, worn or pressed, and in what order — then lay the four panels out as that causal sequence in time.",
     "- Any prerequisite state-change (a cap unscrewed, a lid flipped, a clasp",
-    "  undone, a cover removed) MUST happen in an EARLIER panel than the action",
-    "  that needs it — never depict the use before its prep. Once the state",
-    "  changes it PERSISTS in every later panel and never silently reverts.",
+    "  undone, a cover removed) happens in an EARLIER panel than the action that",
+    "  needs it, and once changed it PERSISTS in every later panel.",
     "- In any panel where a use-action changes the product, NAME that state in",
-    '  BOTH the `sceneDescription` and the `panelCaption`. NEVER show a physically',
-    "  impossible moment (drinking through a closed cap, an item both open and",
-    "  closed at once).",
+    "  BOTH the `sceneDescription` and the `panelCaption`, and keep every panel a",
+    "  physically real moment consistent with the use-sequence above.",
   ];
 
   // Ad-type-conditional keyframe rendering. UGC must read as authentic phone

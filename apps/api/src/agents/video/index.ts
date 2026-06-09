@@ -129,7 +129,7 @@ export async function videoBuilder(
     // accepts it.
     // Keep this lead-in SHORT — Seedance follows tight prompts far better, and
     // the grid-suppression + shot order are also stated inside `videoPrompt`.
-    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its four panels 01→04 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot; do NOT show the grid, panel badges, caption bars or borders.\n\n${videoPrompt}`;
+    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its four panels 01→04 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges or caption bars).\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
     // When the ad has a person, send the person's IDENTITY image FIRST as the
     // primary face reference (so the rendered person matches it exactly), then

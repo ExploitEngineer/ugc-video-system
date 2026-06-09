@@ -78,10 +78,12 @@ export function buildVideoPrompt(input: {
       : "FIRST lock the on-screen presenter exactly as shown in `@Image 1 (the presenter)` — keep this exact person (same apparent gender, age, face and hair) for the entire shot. Then lock "
     : "Lock ";
 
-  const voice = VOICE[adType];
+  // Fit the voice to the on-screen person (age/gender/energy) and push it to
+  // sound like a real human, not a synthetic narrator — the gpt-4.1 author has
+  // the presenter identity from Segment 1, so it can choose a fitting voice.
   const audioDirective = ugc
-    ? `AUDIO — UGC: one on-screen person (${voice}, same voice throughout) SPEAKS the lines lip-synced, with light room ambience and no music. Quote each line VERBATIM in its slice as \`the presenter says: "<transcript>"\`; keep each line short (≤~10 words). The presenter speaks ONLY with the mouth free and facing camera — never while drinking, sipping or eating.`
-    : `AUDIO — inspirational: the lines are VOICEOVER (${voice}, same voice throughout), not lip-synced on screen; quote each verbatim in its slice and keep each short. A light fitting score/ambience is allowed.`;
+    ? `AUDIO — UGC: the on-screen person SPEAKS the lines lip-synced. Give them a voice that FITS their apparent age, gender and energy — a natural, real human voice with conversational pacing, natural intonation and light breaths, the SAME voice throughout; not a flat, robotic or synthetic AI-narrator voice. Quote each line VERBATIM in its slice as \`the presenter says: "<transcript>"\`; keep each line short (≤~10 words). Sip or handle the product and speak in SEPARATE beats, with the mouth visible while speaking. Light room ambience, no music.`
+    : `AUDIO — inspirational: the lines are VOICEOVER (not lip-synced on screen). Use a natural, real human narrator voice that fits the ad's tone, the SAME voice throughout; not robotic or synthetic. Quote each line verbatim in its slice and keep each short. A light fitting score/ambience is allowed.`;
 
   // LIGHT style re-anchor only — the look is inherited from the storyboard still
   // (@Image 1); re-describing the whole aesthetic bloats the prompt and Seedance
@@ -97,16 +99,17 @@ export function buildVideoPrompt(input: {
   // Shared realism floor — ONE concise positive clause (deduped; the bans now
   // live only in the single `avoidTail` below).
   const realismFloor =
-    "It must look indistinguishable from real footage on a real camera: true human anatomy and hands, natural motion and micro-expressions, real material physics and believable contact shadows.";
+    "It must look indistinguishable from real footage on a real camera: the on-screen person moves and emotes like a real human (natural micro-expressions, blinks, relaxed body language), with true anatomy and hands, natural motion and real material physics.";
 
-  // ONE consolidated, targeted negative tail — replaces the old realism +
-  // product + on-screen walls that repeated the same bans three times. Seedance
-  // follows a few specific negatives far better than paragraphs of them, and the
-  // shorter prompt keeps the positive signals (motion, causal order) from being
-  // diluted. Includes the product-specific impossible-state ban (cap-on drink).
+  // ONE tiny targeted tail — only stubborn artifacts + true model defaults.
+  // Per the research, naming specific failures/objects (a cap, packaging, "a
+  // second person", "drinking with the cap on") can SUMMON them in Seedance, so
+  // identity, product fidelity and causal correctness are carried POSITIVELY
+  // above (same single person/product; prep-then-use; state persists) — NOT as
+  // bans here. Keep this list to stubborn artifacts + defaults only.
   const avoidTail = ugc
-    ? "Avoid: plastic/waxy or over-smoothed skin and uncanny faces; identity drift or a second person; extra or missing fingers, warping or flicker; the product duplicating or becoming packaging; a removed cap/lid reappearing or the product used in an impossible state (e.g. drinking with the cap on); any on-screen text, grid, badges or watermark; background music."
-    : "Avoid: plastic/waxy or over-smoothed skin and uncanny faces; identity drift or a second person; extra or missing fingers, warping or flicker; the product duplicating or becoming packaging; a removed cap/lid reappearing or the product used in an impossible state; any on-screen text, grid, badges or watermark.";
+    ? "Avoid: extra or warped fingers, face morphing, on-screen text or captions, watermark, background music."
+    : "Avoid: extra or warped fingers, face morphing, on-screen text or captions, watermark.";
 
   const system = [
     "You are a Seedance 2.0 multimodal video director and prompt engineer for an AI ad-video pipeline.",
@@ -114,8 +117,8 @@ export function buildVideoPrompt(input: {
     "A LABELLED storyboard sheet is attached as `@Image 1` — a 2×2 grid of FOUR numbered keyframe panels (01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right). It is the AUTHORITATIVE reference for product/person identity, framing and the ORDERED shot sequence: panel N is the keyframe for time slice N — follow them in number order. Use each panel for identity/framing/composition, but the OUTPUT is ONE continuous live-action shot: never render the grid, panels, badges, caption bars/text or any boxes from the sheet into the video — they are direction only.",
     "Cover ALL EIGHT core elements: subject (who/what), action (what happens), setting/environment (where), light & tone (atmosphere), camera movement (how shot), visual style, image quality, and anti-distortion constraints.",
     "Organize the prompt into THREE labelled segments, written inline as ONE continuous paragraph using the literal labels below — do NOT use any line breaks, newlines, bullet points or list formatting anywhere in the output string.",
-    `Segment 1 'Global setup:' — ${presenterPin}the subject (the product${hasPresenter ? " and the on-screen presenter" : ""}), the environment, the visual style, and the overall lighting/mood. ${globalLook} The product is shown WORN or IN REAL USE at its true real-world scale, never oversized and never as packaging or a box. Explicitly anchor identity to \`@Image 1\`; after any \`@Image 1\` reference immediately add a noun (e.g. \`@Image 1 (the presenter)\`, \`@Image 1 (the product)\`) — never attach a verb, number or location word directly to \`@Image 1\`.`,
-    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE per panel in number order, inline like '0-4s: …; 4-8s: …'. For EACH slice: its time range, one concrete ACTION BEAT tied to that panel, EXACTLY ONE camera move (static, dolly, pan, tilt, tracking or push — never combined), and the audio. Say what the PRODUCT visibly DOES so it reads as genuinely working (its real motion — e.g. a cap twisted off and the level dropping), never a static prop. Any prep step (a cap off, a lid open) is its OWN earlier slice — never show the use before its prep, and the changed state PERSISTS in every later slice. ${audioDirective}`,
+    `Segment 1 'Global setup:' — ${presenterPin}the subject (the product${hasPresenter ? " and the on-screen presenter" : ""}), the environment, the visual style, and the overall lighting/mood. ${globalLook} The product is shown WORN or IN REAL USE at its true real-world scale, as the bare real item. Anchor identity to \`@Image 1\`; after any \`@Image 1\` reference immediately add a noun (e.g. \`@Image 1 (the presenter)\`, \`@Image 1 (the product)\`).`,
+    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE per panel in number order, inline like '0-4s: …; 4-8s: …'. For EACH slice: its time range, one concrete ACTION BEAT tied to that panel, EXACTLY ONE camera move (static, dolly, pan, tilt, tracking or push), and the audio. Say what the PRODUCT visibly DOES so it reads as genuinely working (its real motion — e.g. a cap twisted off and the level dropping). Any prep step (e.g. opening) goes in its OWN earlier slice, before the slice that uses it, and the changed state PERSISTS in every later slice. ${audioDirective}`,
     `Segment 3 'Quality & constraints:' — ${qualityLook}. ${realismFloor} Keep the SAME single person and the SAME product identity across all four beats. ${avoidTail}`,
     `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the prompt TIGHT — aim for roughly 70-100 words TOTAL (Seedance follows short, front-loaded prompts far better than long ones): lead each slice with subject + action + camera, lean on \`@Image 1\` for look/identity instead of re-describing it, and keep the single 'Avoid:' list short and at the very end. Do not pad or restate.`,
     'CRITICAL OUTPUT RULE: return STRICT JSON only — a single object {"videoPrompt": "…"} whose value is ONE single-line string with NO raw line breaks. Escape nothing else; just keep it on one line.',
@@ -181,7 +184,11 @@ export function buildDeterministicVideoPrompt(input: {
   const count = scenes.length || 1;
   const step = durationSec / count;
   const speak = ugc ? "the presenter says" : "voiceover says";
-  const voice = VOICE[adType];
+  // Fit the voice to the on-screen person when we have a brief; else the tunable
+  // default. Pushed to sound human (not synthetic) in the audio clause below.
+  const voice = anchor
+    ? `a natural, real human voice fitting ${anchor}`
+    : VOICE[adType];
   const globalLook = ugc
     ? "Render as authentic UGC: a real person filming themselves handheld on a modern phone, natural light, a lived-in everyday setting, candid framing with subtle shake — not a studio commercial."
     : "Render as a polished cinematic commercial: intentional lighting, rich color and depth.";
@@ -206,9 +213,9 @@ export function buildDeterministicVideoPrompt(input: {
     })
     .join("; ");
   return (
-    `Global setup: @Image 1 (the storyboard) is a 2×2 grid of four numbered panels (01–04); render ONE continuous, photorealistic live-action ad in the "${adStyle}" style that follows the panels in order, keeping their identity and framing but NEVER showing the grid, badges, captions or borders. ${presenterPin}${globalLook} The product is shown worn or in real use at true scale, never as packaging. ` +
-    `Timeline: ${timeline}. Show the product genuinely working (its real motion — e.g. a cap twisted off and the level dropping), never a static prop; any prep (a cap off, a lid open) comes in an EARLIER slice and the changed state persists. Audio: ${ugc ? `${voice}, lip-synced, light ambience, no music` : `${voice} voiceover, light score allowed`}; the presenter speaks only with a free mouth (never while drinking or eating). ` +
-    `Quality & constraints: ${quality}; indistinguishable from real footage — true anatomy, natural motion, real material physics. Keep the SAME person and product across all beats. ${FRAME_LABEL[aspectRatio].short}. Avoid: plastic/waxy skin or uncanny faces, identity drift or a second person, extra/missing fingers, warping or flicker; the product duplicating or becoming packaging; a removed cap reappearing or an impossible state (drinking with the cap on); any on-screen text, grid, badges or watermark${ugc ? "; background music" : ""}.`
+    `Global setup: @Image 1 (the storyboard) is a 2×2 grid of four numbered panels (01–04); render ONE continuous, photorealistic live-action ad in the "${adStyle}" style that follows the panels in order, keeping their identity and framing while showing only the clean live scene (no grid, badges or captions). ${presenterPin}${globalLook} The product is shown worn or in real use at true scale, as the bare real item. ` +
+    `Timeline: ${timeline}. Show the product genuinely working (its real motion — e.g. a cap twisted off and the level dropping); any prep (e.g. opening) comes in an EARLIER slice, before the slice that uses it, and the changed state persists. Audio: ${ugc ? `${voice}, lip-synced, light ambience, no music` : `${voice} voiceover, light score allowed`}; sip or handle the product and speak in separate beats, mouth visible while speaking. ` +
+    `Quality & constraints: ${quality}; the person moves and emotes like a real human (micro-expressions, blinks, relaxed body language); indistinguishable from real footage — true anatomy, natural motion, real material physics. Keep the SAME person and product across all beats. ${FRAME_LABEL[aspectRatio].short}. Avoid: extra or warped fingers, face morphing, on-screen text or captions, watermark${ugc ? ", background music" : ""}.`
   );
 }
 
