@@ -8,6 +8,27 @@ import type { AdType, AspectRatio } from "@ugc/shared";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
 
+/**
+ * How a product is REALLY operated, derived ONCE per product (vision over the
+ * upload, in `describeProduct`) and threaded into the storyboard STILL so its
+ * four keyframes bake the correct causal state machine — the video then inherits
+ * that state through the storyboard reference (`@Image 1`). Generic, no
+ * hard-coded product list. Items that need no prep (already-worn watch, shoe,
+ * sunglasses) leave `accessVerb`/`changedState`/`persistenceCue` empty.
+ */
+export interface ProductUse {
+  /** Enabling prep state-change, e.g. "twists off the cap". "" when none. */
+  accessVerb: string;
+  /** Persistent state after the prep, e.g. "cap off, set on the counter". "" when none. */
+  changedState: string;
+  /** Restatement that the changed state persists later, e.g. "cap still off beside her". "" when none. */
+  persistenceCue: string;
+  /** Visible functioning signal, e.g. "water level visibly drops as she drinks". */
+  functionSignal: string;
+  /** The actual use, e.g. "drinks from" / "checks the time on" / "wears". */
+  useVerb: string;
+}
+
 /** Everything a skill needs that isn't skill-specific. Built once per step. */
 export interface SkillContext {
   runId: string;
@@ -22,6 +43,14 @@ export interface SkillContext {
    * silently drifting into a different item downstream (storyboard, critic).
    */
   productBrief: string;
+  /**
+   * Causal use-sequence for the product (how it is operated, what state-change
+   * it needs, what it visibly does), derived once via vision and persisted to
+   * `runs.product_use`. Threaded into the storyboard STILL only — the video
+   * inherits the resulting keyframes. Optional: absent on older runs / vision
+   * hiccups, where the storyboard falls back to deriving the sequence itself.
+   */
+  productUse?: ProductUse;
   /**
    * Product-derived description of the on-camera person (demographics / wardrobe
    * / palette) from `runs.person_brief`. Set when the person is INVENTED from the

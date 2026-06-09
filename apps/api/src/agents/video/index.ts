@@ -127,7 +127,9 @@ export async function videoBuilder(
     // badges/captions/grid out of the rendered frame. When the ad has a person,
     // route the storyboard through the face-asset path so Seedance's face filter
     // accepts it.
-    const prompt = `@Image 1 is the attached LABELLED storyboard sheet — a 2×2 grid of four numbered keyframe panels (badge 01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right), each with a bottom caption. It is the authoritative reference for product/person identity, framing and the ORDERED shot sequence: panel 01 drives the first beat, 02 the second, 03 the third, 04 the fourth — follow the panels in number order. Render the FINAL VIDEO as ONE continuous, fully photorealistic live-action shot — real, lifelike humans with natural skin, realistic faces, real hair and true-to-life lighting, as if filmed with a real camera. Use @Image 1 (the keyframes) for identity, framing and shot order, but DO NOT render it as panels, a grid or a storyboard. This is a finished commercial ad: the grid lines, borders, split-screen panels, number badges, caption bars, caption text, labels, hand-drawn arrows, callouts, subtitles, watermark text, and any stray boxes, bars, rectangles or graphic blocks from the sheet must NOT appear anywhere in the frame — they are direction only. Keep strict physical continuity: every object holds a consistent identity, position and state across the whole shot, and the result of any action persists.\n\n${videoPrompt}`;
+    // Keep this lead-in SHORT — Seedance follows tight prompts far better, and
+    // the grid-suppression + shot order are also stated inside `videoPrompt`.
+    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its four panels 01→04 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot; do NOT show the grid, panel badges, caption bars or borders.\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
     // When the ad has a person, send the person's IDENTITY image FIRST as the
     // primary face reference (so the rendered person matches it exactly), then

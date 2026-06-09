@@ -8,7 +8,7 @@
 
 import { parseJsonObject } from "../../json.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
-import type { SkillContext } from "../../types.js";
+import type { ProductUse, SkillContext } from "../../types.js";
 import { buildProductBriefPrompt, type ProductBriefPlan } from "./prompt.js";
 
 export interface DescribeProductInput {
@@ -16,10 +16,21 @@ export interface DescribeProductInput {
   productUpload: ImageRef;
 }
 
+/** Coerce a possibly-partial LLM `productUse` into a complete, trimmed object. */
+function normalizeProductUse(raw: Partial<ProductUse> | undefined): ProductUse {
+  return {
+    accessVerb: raw?.accessVerb?.trim() ?? "",
+    changedState: raw?.changedState?.trim() ?? "",
+    persistenceCue: raw?.persistenceCue?.trim() ?? "",
+    functionSignal: raw?.functionSignal?.trim() ?? "",
+    useVerb: raw?.useVerb?.trim() ?? "",
+  };
+}
+
 export async function describeProduct(
   ctx: SkillContext,
   input: DescribeProductInput,
-): Promise<{ productBrief: string }> {
+): Promise<{ productBrief: string; productUse: ProductUse }> {
   const reply = await ctx.openai.chat(
     buildProductBriefPrompt({
       userPrompt: input.userPrompt,
@@ -29,5 +40,8 @@ export async function describeProduct(
     { jsonMode: true },
   );
   const plan = parseJsonObject<ProductBriefPlan>(reply);
-  return { productBrief: plan.productBrief?.trim() ?? "" };
+  return {
+    productBrief: plan.productBrief?.trim() ?? "",
+    productUse: normalizeProductUse(plan.productUse),
+  };
 }

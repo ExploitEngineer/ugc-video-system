@@ -104,6 +104,7 @@ export const runs = pgTable(
     adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
     personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
     productBrief: text("product_brief"), // factual product identity anchor (category/materials/colors/markings); threaded to storyboard + critic
+    productUse: jsonb("product_use"), // causal use-sequence {accessVerb,changedState,persistenceCue,functionSignal,useVerb}; baked into the storyboard still
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default

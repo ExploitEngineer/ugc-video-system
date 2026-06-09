@@ -102,6 +102,7 @@ function buildCtx(run: RunRow): SkillContext {
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
     adType: run.adType ?? "ugc",
     productBrief: run.productBrief ?? "",
+    productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     openai,
@@ -331,13 +332,23 @@ async function runReferencePhase(
   const productBriefBranch = async (): Promise<void> => {
     if (!productUpload) return;
     try {
-      const { productBrief } = await describeProduct(ctx, {
+      const { productBrief, productUse } = await describeProduct(ctx, {
         userPrompt,
         productUpload,
       });
-      if (productBrief) {
-        await setRun(runId, { productBrief });
-        logRun(runId, `product brief: "${productBrief}"`, tag);
+      // Persist both in one write. productUse rides into the storyboard still as
+      // the authoritative causal use-sequence; productBrief stays the identity
+      // anchor. Only write fields we actually got (keep prior values otherwise).
+      const fields: Partial<RunRow> = {};
+      if (productBrief) fields.productBrief = productBrief;
+      if (productUse?.useVerb) fields.productUse = productUse;
+      if (Object.keys(fields).length) {
+        await setRun(runId, fields);
+        logRun(
+          runId,
+          `product brief: "${productBrief}"${productUse?.useVerb ? ` · use: ${productUse.accessVerb ? `${productUse.accessVerb} → ` : ""}${productUse.useVerb} (${productUse.functionSignal})` : ""}`,
+          tag,
+        );
       }
     } catch (err) {
       logRunError(

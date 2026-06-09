@@ -13,6 +13,7 @@
 import type { AdType, AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
+import type { ProductUse } from "../../types.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface StoryboardPromptInput {
@@ -25,6 +26,13 @@ export interface StoryboardPromptInput {
    * (older runs / brief hiccup) — the prompt then falls back to image-only.
    */
   productBrief: string;
+  /**
+   * Causal use-sequence for THIS product (from `runs.product_use`). When
+   * present, it is the authoritative sequence the four panels are built around
+   * (prep → use + function, persisted). Absent (older runs / no-prep products /
+   * vision hiccup) → the planner derives the sequence itself, as before.
+   */
+  productUse?: ProductUse;
   /**
    * Product-derived person description (`runs.person_brief`) — demographics,
    * wardrobe, palette. Used to tailor the spoken lines to who is on camera.
@@ -90,6 +98,7 @@ export function buildStoryboardPrompt({
   adStyle,
   adType,
   productBrief,
+  productUse,
   personBrief,
   userPrompt,
   hasPerson,
@@ -101,6 +110,17 @@ export function buildStoryboardPrompt({
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
+
+  // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
+  // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
+  // for already-worn products so no fake prep step is invented).
+  const accessVerb = productUse?.accessVerb?.trim() ?? "";
+  const changedState = productUse?.changedState?.trim() ?? "";
+  const persistenceCue = productUse?.persistenceCue?.trim() ?? "";
+  const functionSignal = productUse?.functionSignal?.trim() ?? "";
+  const useVerb = productUse?.useVerb?.trim() ?? "";
+  const hasUse = Boolean(useVerb);
+  const hasPrep = Boolean(accessVerb);
 
   // TEXT identity anchor — pins what the product IS so a drifting reference
   // sheet can't make the storyboard render a different kind of item.
@@ -212,18 +232,15 @@ export function buildStoryboardPrompt({
     "- The product is ALWAYS the real, solid item from the product sheet. NEVER",
     "  invent packaging — no boxes, cartons, gift boxes, blister packs, pouches or",
     "  bags — and NEVER stage an unboxing or show the product as a print / photo /",
-    "  logo on a box, poster or screen. No \"product box\" anywhere.",
+    '  logo on a box, poster or screen. No "product box" anywhere.',
     "- Show EXACTLY ONE instance of the product per panel; never duplicate it (e.g.",
     "  worn AND held at once) unless that is a deliberate, natural beat.",
     "- Do NOT open, unfold, split or transform the product or any container — keep",
     "  it a single solid object with no seams that come apart.",
-    "- PRODUCT-STATE CONTINUITY across the four panels: the product's physical",
-    "  state stays PHYSICALLY CONSISTENT and causal panel-to-panel. If a natural",
-    "  use-action changes it (a cap unscrewed to drink, a lid flipped open), every",
-    "  LATER panel reflects that state — it never silently reverts. NEVER show a",
-    "  physically impossible moment (e.g. drinking from a bottle whose cap is still",
-    "  on, or an item both open and closed at once). The four panels read as one",
-    "  real, physically plausible sequence in time.",
+    "- PRODUCT-STATE CONTINUITY: keep the product's physical state causal and",
+    "  consistent across the four panels per the use-sequence in STEP 1.5 — a",
+    "  state-change (a cap unscrewed, a lid flipped) persists and never reverts,",
+    "  and no panel shows a physically impossible moment.",
     "- Show ONLY the product and the person's own wardrobe from the reference",
     "  sheets. Do NOT invent extra accessories, props or objects, and do NOT place",
     "  any other item — especially one in the SAME COLOR as the product (e.g. a",
@@ -235,6 +252,48 @@ export function buildStoryboardPrompt({
     '  "CLOSE-UP. Using the product.") and the sceneDescription expanding that same',
     '  moment into full detail — NEVER a "product box", packaging or unboxing. Use',
     "  THIS product (per the identity above), never an example item.",
+  ];
+
+  // Causal use-sequence planning — the load-bearing fix for physically
+  // impossible beats (e.g. "drinking with the cap on"). Forces the planner to
+  // work out how THIS product is really operated, then lay the four panels out
+  // as one causal sequence with persistent state. Derived per-product from the
+  // sheet + brief (no hard-coded list), so it generalises to any product.
+  // When a known use-sequence was derived for THIS product, state it as the
+  // authoritative spine the panels are built around; otherwise fall back to
+  // asking the planner to work it out. Either way the ordering + persistence
+  // rules below are the load-bearing fix for physically impossible beats.
+  const knownSequenceBlock = hasUse
+    ? [
+        "KNOWN USE-SEQUENCE FOR THIS PRODUCT (authoritative — derived from the",
+        "product itself; build the four panels around it, never contradict it):",
+        hasPrep
+          ? `- PREP first, in an EARLIER panel than the use: the person ${accessVerb} → ${changedState}.`
+          : "- This product needs NO prep to use — do NOT invent one (no cap, lid, clasp or cover to undo before use).",
+        `- USE: the person ${useVerb} the product, and it visibly works — ${functionSignal}.`,
+        ...(hasPrep
+          ? [
+              `- PERSIST: in EVERY panel after the prep, ${persistenceCue} — the changed state never reverts.`,
+            ]
+          : []),
+        "- NAME this product state in the matching `panelCaption` and `sceneDescription`.",
+        "",
+      ]
+    : [];
+  const useSequenceBlock = [
+    "STEP 1.5 — PLAN THE USE-SEQUENCE (do this BEFORE writing the scenes):",
+    ...knownSequenceBlock,
+    hasUse
+      ? "- Lay the four panels out as that causal sequence in time."
+      : "- Work out how THIS product (per the identity above + the product sheet) is REALLY operated by a real person — what is touched, moved, opened, worn or pressed, and in what order — then lay the four panels out as that causal sequence in time.",
+    "- Any prerequisite state-change (a cap unscrewed, a lid flipped, a clasp",
+    "  undone, a cover removed) MUST happen in an EARLIER panel than the action",
+    "  that needs it — never depict the use before its prep. Once the state",
+    "  changes it PERSISTS in every later panel and never silently reverts.",
+    "- In any panel where a use-action changes the product, NAME that state in",
+    '  BOTH the `sceneDescription` and the `panelCaption`. NEVER show a physically',
+    "  impossible moment (drinking through a closed cap, an item both open and",
+    "  closed at once).",
   ];
 
   // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
@@ -277,6 +336,8 @@ export function buildStoryboardPrompt({
     "",
     ...scriptGrounding,
     "",
+    ...useSequenceBlock,
+    "",
     ...presentationBlock,
     "",
     "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
@@ -285,35 +346,31 @@ export function buildStoryboardPrompt({
     "`actionMovement` (what moves / how the camera moves), a DETAILED",
     "`sceneDescription`, the spoken `transcript` line described above, and a short",
     "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
-    "- `sceneDescription` — the rich shot direction for the video step AND the",
-    "  text shown to the user. 2-4 full sentences (~40-70 words) covering the",
-    "  setting / environment, the lighting & mood, what the subject does, HOW the",
-    "  product is worn / used and framed, and the camera framing / motion. Write",
-    "  it FULL, vivid and concrete — the imagePrompt length limit below applies",
-    "  ONLY to `imagePrompt`, NEVER to `sceneDescription` or `panelCaption`; do not",
-    "  compress these. It is handed to the video model, so it MUST be clearly",
-    "  LONGER and more detailed than the panelCaption, and must match the panel,",
-    "  the real product (per the identity above) and the real person with correct,",
-    "  consistent pronouns (see CHARACTER ANCHOR below).",
-    "  e.g. (ILLUSTRATIVE STRUCTURE ONLY — substitute THIS product and a fitting",
-    "  action) \"Medium close-up in a real",
-    "  kitchen, natural daylight from a window camera-left. She holds the product up",
-    "  toward the lens and turns it slowly so its markings catch the light, smiling",
-    "  as she talks to camera. Handheld phone, slight natural sway.\"",
+    "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
+    "  setting, the key action, and what the PRODUCT visibly DOES to show it is",
+    "  genuinely working (substitute THIS product's real motion — a watch's hand",
+    "  sweeping; a cap twisted off and the liquid level dropping; a shoe flexing).",
+    "  Keep it LEAN — no padding, no second/extra clauses; richer than the",
+    "  panelCaption but close to it in spirit. It feeds the video step, which does",
+    "  BETTER with short, focused direction than long paragraphs — do NOT write a",
+    "  paragraph. Match the panel, the real product (per the identity above) and",
+    "  the real person with correct, consistent pronouns (see CHARACTER ANCHOR).",
+    '  e.g. (STRUCTURE ONLY — substitute THIS product) "Medium close-up in a sunlit',
+    '  kitchen; she sips from the bottle, cap off in her other hand, water level dropping."',
     "- `panelCaption` — the on-image caption-bar label, in the MANDATORY format",
     "  `<SHOT TYPE>. <concrete action that NAMES the product>`. The shot-type",
     "  prefix is REQUIRED on every caption (WIDE SHOT / MEDIUM SHOT / MEDIUM",
     "  CLOSE-UP / CLOSE-UP / EXTREME CLOSE-UP / OVER-THE-SHOULDER / POV), then a",
     "  period, then a vivid action that names or unmistakably evokes THIS product",
-    "  (never a bare \"it\" / \"this\"). ~8-14 words. It describes the SAME moment as",
+    '  (never a bare "it" / "this"). ~8-14 words. It describes the SAME moment as',
     "  `sceneDescription`, just shortened to fit the panel; never a different",
     "  action, and never an example item from these notes. GOOD (structure only —",
     "  substitute THIS product, do not copy the noun):",
     '  "MEDIUM SHOT. Smiling as she holds up the [product] to camera.",',
     '  "CLOSE-UP. Sliding the [product] onto her wrist by the window.",',
     '  "MEDIUM CLOSE-UP. Talking to camera while wearing the [product].".',
-    "  REJECTED: \"Picks up the sunglasses.\" (no shot-type prefix) and \"Smiles and",
-    "  turns his head.\" (no product named) — never emit captions like these.",
+    '  REJECTED: "Picks up the sunglasses." (no shot-type prefix) and "Smiles and',
+    '  turns his head." (no product named) — never emit captions like these.',
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
@@ -376,7 +433,11 @@ export function buildStoryboardPrompt({
     "other text and NO arrows; the product worn / in real use as",
     "the real solid item at TRUE real-world scale and correctly placed (never",
     "oversized, dominating or floating; never a box/packaging/unboxing, never",
-    "duplicated); and",
+    "duplicated); each panel showing the product in its CORRECT causal state from",
+    hasUse
+      ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
+      : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
+    "and",
     adType === "ugc"
       ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
       : "the polished cinematic keyframe look.",
