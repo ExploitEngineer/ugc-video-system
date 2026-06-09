@@ -11,7 +11,7 @@ import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
   /**
-   * The LABELLED storyboard sheet — four numbered keyframe panels (01–04), each
+   * The LABELLED storyboard sheet — three numbered keyframe panels (01–03), each
    * with a caption. It IS sent to the video provider as the sole guidance image
    * and ordered shot sequence — the product/person reference sheets are NOT
    * sent; identity + shot order reach the model through these numbered keyframes
@@ -57,7 +57,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
  * injected video provider) together with the LABELLED storyboard sheet as the
- * sole guidance image. The sheet's four numbered panels (01–04) are the ordered
+ * sole guidance image. The sheet's three numbered panels (01–03) are the ordered
  * shot sequence — the model follows them in order while rendering ONE clean
  * continuous clip; the badges/captions are direction only and (per the prompt)
  * must not appear in the output. The product/person reference sheets are NOT
@@ -129,7 +129,7 @@ export async function videoBuilder(
     // accepts it.
     // Keep this lead-in SHORT — Seedance follows tight prompts far better, and
     // the grid-suppression + shot order are also stated inside `videoPrompt`.
-    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its four panels 01→04 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges or caption bars).\n\n${videoPrompt}`;
+    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its three panels 01→03 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges or caption bars).\n\n${videoPrompt}`;
     const storyboardUrl = input.storyboardSheetRef.source;
     // When the ad has a person, send the person's IDENTITY image FIRST as the
     // primary face reference (so the rendered person matches it exactly), then

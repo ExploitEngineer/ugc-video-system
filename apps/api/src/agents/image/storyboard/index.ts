@@ -73,8 +73,8 @@ export async function storyboardGenerator(
     }
   }
   if (!plan) throw new Error("storyboard plan missing after retries");
-  // Storyboard is fixed at 4 scenes — clamp in case the model overshoots.
-  plan.scenes = plan.scenes.slice(0, 4);
+  // Storyboard is fixed at 3 scenes — clamp in case the model overshoots.
+  plan.scenes = plan.scenes.slice(0, 3);
 
   // The planner tends to write the META-instruction ("quote each panelCaption
   // exactly") into `imagePrompt` instead of the caption TEXT, so the image model

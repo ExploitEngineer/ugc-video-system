@@ -1,11 +1,11 @@
 // Prompt module for the StoryBoard Generator skill.
 //
 // The skill REVIEWS the attached product sheet (+ person sheet if present)
-// together with the user's prompt, then authors (a) an ordered 4-scene script
+// together with the user's prompt, then authors (a) an ordered 3-scene script
 // — each scene carrying a spoken `transcript` line and a brief `panelCaption`
 // (a condensed form of its `sceneDescription`) — and (b) the text-to-image
-// prompt for ONE composite storyboard sheet of FOUR keyframe panels, each
-// LABELLED like a real storyboard: a scene-number badge (01–04) plus the short
+// prompt for ONE composite storyboard sheet of THREE keyframe panels, each
+// LABELLED like a real storyboard: a scene-number badge (01–03) plus the short
 // caption burned into the panel. The labelled sheet is fed straight to the
 // video model as the ordered shot guide; the detailed `sceneDescription` and
 // `transcript` ride in the video prompt as text.
@@ -28,7 +28,7 @@ export interface StoryboardPromptInput {
   productBrief: string;
   /**
    * Causal use-sequence for THIS product (from `runs.product_use`). When
-   * present, it is the authoritative sequence the four panels are built around
+   * present, it is the authoritative sequence the three panels are built around
    * (prep → use + function, persisted). Absent (older runs / no-prep products /
    * vision hiccup) → the planner derives the sequence itself, as before.
    */
@@ -111,6 +111,14 @@ export function buildStoryboardPrompt({
   const product = productBrief.trim();
   const person = personBrief.trim();
 
+  // Orientation-conditional 3-panel layout. 3 panels can't tile the fixed 2K
+  // sheet as evenly as a 2×2; lay them as a single strip along the sheet's LONG
+  // axis so each panel stays as close to a usable keyframe shape as possible.
+  const portrait = aspectRatio === "9:16";
+  const panelLayout = portrait
+    ? "a single vertical column of exactly THREE equal-size panels, stacked top→bottom (top=1, middle=2, bottom=3)"
+    : "a single horizontal row of exactly THREE equal-size panels, left→right (left=1, middle=2, right=3)";
+
   // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
   // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
   // for already-worn products so no fake prep step is invented).
@@ -136,13 +144,13 @@ export function buildStoryboardPrompt({
     : [];
 
   // CHARACTER ANCHOR — lock the on-screen person's apparent identity (gender,
-  // age, hair) and keep it 100% constant across all four scenes/captions/
+  // age, hair) and keep it 100% constant across all three scenes/captions/
   // transcripts. For uploaded persons personBrief is empty, so this also tells
   // the model to DERIVE the gender from the attached person sheet and lock it.
   const characterAnchor = hasPerson
     ? [
         "CHARACTER ANCHOR (the on-screen person — lock this and keep it 100%",
-        "constant across ALL FOUR scenes, captions and transcripts):",
+        "constant across ALL THREE scenes, captions and transcripts):",
         person
           ? "- From the attached PERSON SHEET (authoritative), plus the person brief below, read and FIX the person's apparent"
           : "- From the attached PERSON SHEET (authoritative) read and FIX the person's apparent",
@@ -170,27 +178,29 @@ export function buildStoryboardPrompt({
           "AD TYPE — UGC (user-generated-content review):",
           "- The ad is a REAL PERSON giving an authentic, first-person review /",
           "  testimonial of the product, talking DIRECTLY TO CAMERA as if",
-          "  recommending it to a friend. The arc: hook → wearing / using the",
-          "  product → a concrete benefit or reaction → a closing recommendation.",
+          "  recommending it to a friend. The arc across the three panels: an opening",
+          "  setup → actually using the product → a RESULT beat (use complete, the",
+          "  payoff shown) that resolves and ends it.",
           "- Each scene's `transcript` is the natural, conversational line the",
           "  on-screen person SPEAKS to camera in that scene (first person, ~1",
           "  short sentence, real human speech — not ad copy), referencing the",
           "  product as they WEAR or USE it. Keep lines short and split around the",
-          "  action beats; the four lines flow as one continuous spoken review.",
+          "  action beats; the three lines flow as one continuous spoken review.",
         ]
       : [
           "AD TYPE — Inspirational (open-ended cinematic):",
           "- The ad is an evocative, cinematic scene that follows whatever the",
           "  user describes (mood, journey, lifestyle, story), with the product",
-          "  woven in naturally. The arc builds an emotional through-line over",
-          "  the ~15s.",
+          "  woven in naturally. The arc builds an emotional through-line that",
+          "  lands a clear closing resolution/payoff over the ~15s — the final panel",
+          "  settles the story on a conclusive last moment, never freezing mid-action.",
           "- Each scene's `transcript` is a VOICEOVER NARRATION line for that",
           "  scene (evocative, ~1 short sentence), spoken over the visuals — it is",
-          "  NOT necessarily lip-synced by anyone on screen. The four lines should",
+          "  NOT necessarily lip-synced by anyone on screen. The three lines should",
           "  read as one cohesive voiceover.",
         ];
 
-  // Script grounding — forces the four spoken lines to be specific to THIS
+  // Script grounding — forces the three spoken lines to be specific to THIS
   // product, THIS person and THIS scene, and to never repeat. Kills the
   // generic, interchangeable filler ("I love this", "you'll love it") that
   // appears when the model has no concrete anchor.
@@ -201,15 +211,16 @@ export function buildStoryboardPrompt({
     ? `Ground the lines in what THIS product actually does — a real person ${useVerb} it and ${functionSignal} — so the script is specific to this exact product (a bottle ad and a watch ad must sound nothing alike).`
     : "Ground the lines in THIS product's actual, concrete benefit (per the product sheet) — never an interchangeable line that would fit any product.";
   const scriptGrounding = [
-    "SCRIPT GROUNDING — the four `transcript` lines MUST be concrete, specific and VARIED:",
+    "SCRIPT GROUNDING — the three `transcript` lines MUST be concrete, specific and VARIED:",
     product
       ? `- Talk about THIS product specifically — ${product} Name or clearly evoke it; never a generic "this" with no anchor. Do NOT invent a brand, price or feature unsupported by the product or the user's prompt.`
       : "- Talk about THIS specific product (per the product sheet); never a generic, interchangeable line that would fit any product.",
     `- ${benefitAnchor}`,
     "- Each line is a DIFFERENT beat that OPENS with a different word — a distinct",
     "  concrete benefit, feature, use-moment or reaction tied to what that panel",
-    "  shows. Across the four: hook → product-in-use → a concrete benefit/reaction",
-    "  → a closing line. No two lines may share an idea, a phrase or an opener.",
+    "  shows. Across the three: an opening hook → using it → a closing line on the",
+    "  RESULT/payoff (reaction to the finished benefit) that resolves and ENDS it.",
+    "  No two lines may share an idea, a phrase or an opener.",
     hasPerson
       ? `- Write the way THIS specific person speaks — their age, gender and energy from the CHARACTER ANCHOR${person ? ` (${person})` : ""}; a real individual, never a generic creator template or brand script.`
       : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
@@ -234,8 +245,8 @@ export function buildStoryboardPrompt({
     "  calls for it).",
     "- TRUE-TO-LIFE SCALE & PLACEMENT: render it at real-world size relative to the",
     "  hand / body / face (a ring is finger-sized, glasses face-sized, a bottle",
-    "  hand-sized), placed exactly where it naturally sits — worn on the correct",
-    "  body part or held in the hand.",
+    "  hand-sized), placed exactly where it naturally sits, in its natural real-world",
+    "  orientation and resting position — worn on the correct body part or held in the hand.",
     "- Always the real, solid item from the product sheet — the bare product, the",
     "  ONLY instance in the panel; not a box, packaging, blister pack, pouch or an",
     "  unboxing, and not a print / photo / logo of it on a box, poster or screen.",
@@ -255,7 +266,7 @@ export function buildStoryboardPrompt({
 
   // Causal use-sequence planning — the load-bearing fix for physically
   // impossible beats (e.g. "drinking with the cap on"). Forces the planner to
-  // work out how THIS product is really operated, then lay the four panels out
+  // work out how THIS product is really operated, then lay the three panels out
   // as one causal sequence with persistent state. Derived per-product from the
   // sheet + brief (no hard-coded list), so it generalises to any product.
   // When a known use-sequence was derived for THIS product, state it as the
@@ -265,11 +276,12 @@ export function buildStoryboardPrompt({
   const knownSequenceBlock = hasUse
     ? [
         "KNOWN USE-SEQUENCE FOR THIS PRODUCT (authoritative — derived from the",
-        "product itself; build the four panels around it, never contradict it):",
+        "product itself; build the three panels around it, never contradict it):",
         hasPrep
-          ? `- PREP first, in an EARLIER panel than the use: the person ${accessVerb} → ${changedState}.`
+          ? `- PREP, folded into the opening (panel 1) or the very start of the use — NOT its own separate panel: the person ${accessVerb} → ${changedState}.`
           : "- This product is used as-is — show it used directly, with no opening or unclasping step (it has no cap/lid/clasp to undo).",
-        `- USE: the person ${useVerb} the product, and it visibly works — ${functionSignal}.`,
+        `- USE (the core, middle panel): the person ${useVerb} the product, and it visibly works — ${functionSignal}.`,
+        "- RESULT (the final panel): the use is COMPLETE — show the settled aftermath/payoff (the benefit now realized, e.g. refreshed clean skin, a satisfied look), the person pleased and NO LONGER mid-use; the ad resolves here.",
         ...(hasPrep
           ? [
               `- PERSIST: in EVERY panel after the prep, ${persistenceCue} — the changed state never reverts.`,
@@ -283,11 +295,24 @@ export function buildStoryboardPrompt({
     "STEP 1.5 — PLAN THE USE-SEQUENCE (do this BEFORE writing the scenes):",
     ...knownSequenceBlock,
     hasUse
-      ? "- Lay the four panels out as that causal sequence in time."
-      : "- Work out how THIS product (per the identity above + the product sheet) is REALLY operated by a real person — what is touched, moved, opened, worn or pressed, and in what order — then lay the four panels out as that causal sequence in time.",
+      ? "- Lay the three panels out as a causal SETUP → USE → RESULT arc in time (not three use-steps)."
+      : "- Work out how THIS product (per the identity above + the product sheet) is REALLY operated by a real person — what is touched, moved, opened, worn or pressed, and in what order — then lay the three panels out as a causal SETUP → USE → RESULT arc in time (not three use-steps).",
     "- Any prerequisite state-change (a cap unscrewed, a lid flipped, a clasp",
     "  undone, a cover removed) happens in an EARLIER panel than the action that",
     "  needs it, and once changed it PERSISTS in every later panel.",
+    "- Give each of the three panels a DISTINCT role — do NOT let the use-steps",
+    "  spill across all three and leave no ending:",
+    "  - PANEL 1 — STARTING scene: establish the person + product in the setting",
+    "    (the lead-in / 'before'). If the product needs a prep step (uncap, flip,",
+    "    unclasp), fold it in HERE or into the very start of panel 2 — prep NEVER",
+    "    gets its own whole panel.",
+    "  - PANEL 2 — PRODUCT USAGE (core): the product ACTIVELY in use with its",
+    "    visible working signal — the single main use moment.",
+    "  - PANEL 3 — ENDING scene (RESULT): the use is COMPLETE and the person is NO",
+    "    LONGER mid-application — show the visible result/payoff (the benefit now",
+    "    realized: e.g. clean refreshed skin, a satisfied refreshed look), the",
+    "    person settled and pleased, the product at rest in frame; the ad RESOLVES",
+    "    and ENDS here. This panel is NOT another applying/using step.",
     "- In any panel where a use-action changes the product, NAME that state in",
     "  BOTH the `sceneDescription` and the `panelCaption`, and keep every panel a",
     "  physically real moment consistent with the use-sequence above.",
@@ -337,8 +362,8 @@ export function buildStoryboardPrompt({
     "",
     ...presentationBlock,
     "",
-    "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
-    "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
+    "STEP 2 — SCRIPT. Produce exactly THREE scenes, no more, no less. `index` runs",
+    "1, 2, 3 in play order, each scene ~5 seconds, together forming one",
     "continuous ~15s arc. For each scene give: a `cameraAngle`, the",
     "`actionMovement` (what moves / how the camera moves), a DETAILED",
     "`sceneDescription`, the spoken `transcript` line described above, and a short",
@@ -371,8 +396,7 @@ export function buildStoryboardPrompt({
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
-    "- ONE single image, exactly FOUR equal-size panels in reading order — a",
-    "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
+    `- ONE single image, ${panelLayout},`,
     "  with only thin, uniform plain separator borders between panels.",
     `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
     "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
@@ -390,7 +414,7 @@ export function buildStoryboardPrompt({
           "  SHEET WINS. Render that EXACT individual photorealistically: a real,",
           "  lifelike human with natural skin and a realistic face, the SAME face,",
           "  hair, build, wardrobe, palette, apparent gender and identity as the",
-          "  sheet in all four panels (per the CHARACTER ANCHOR) — same facial",
+          "  sheet in all three panels (per the CHARACTER ANCHOR) — same facial",
           "  structure, features and proportions; do NOT beautify, restyle, age,",
           "  swap gender, or render a lookalike or a different person. The product,",
           "  setting and lighting stay photorealistic and faithful to the",
@@ -399,7 +423,7 @@ export function buildStoryboardPrompt({
       : []),
     "",
     "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
-    "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
+    "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, in",
     "  reading order. Small, clean, legible.",
     "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
     "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
@@ -413,17 +437,17 @@ export function buildStoryboardPrompt({
     "panels-within-a-panel anywhere. Convey motion through the imagery itself",
     "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
     "uninterrupted photographs — the ONLY non-photographic marks on the whole",
-    "sheet are the four number badges and the four caption bars.",
+    "sheet are the three number badges and the three caption bars.",
     "",
     `Honor the ad style ("${style}") in framing, pacing, and mood.`,
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
     "`imagePrompt` is ONE self-contained paragraph, roughly 150-200 words — long",
-    "enough to be specific, but NOT a rule restatement. It MUST cover: the 2×2",
-    "four-panel layout with thin",
+    "enough to be specific, but NOT a rule restatement. It MUST cover:",
+    `${panelLayout} with thin`,
     `plain separator borders at ${resolutionLabel}; each panel's number badge`,
-    "(01–04, in order) + a thin uppercase storyboard-style bottom caption bar",
+    "(01–03, in order) + a thin uppercase storyboard-style bottom caption bar",
     "(the EXACT caption text is appended after your prompt automatically — so",
     "describe the bar's STYLE and placement only; do NOT write the caption words",
     'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
@@ -434,14 +458,17 @@ export function buildStoryboardPrompt({
     hasUse
       ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
       : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
+    "the three panels running setup → active use → a settled RESULT (the final",
+    "panel showing the use COMPLETE and the payoff visible, the person pleased and",
+    "the product at rest, never mid-action);",
     "and",
     adType === "ugc"
       ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
       : "the polished cinematic keyframe look.",
     hasPerson
-      ? "It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the four panels, faithful to the person sheet."
+      ? "It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the three panels, faithful to the person sheet."
       : "",
-    "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`",
+    "`scenes` MUST have exactly 3 entries, in order. Set every scene's `adStyle`",
     `to "${style}".`,
   ]
     .filter(Boolean)
@@ -452,9 +479,9 @@ export function buildStoryboardPrompt({
     `Ad type: ${adType}`,
     `User prompt: ${userPrompt}`,
     "The reference sheets are attached in the image-generation step.",
-    "Review them, then produce the 4-scene script (with spoken transcripts and a",
+    "Review them, then produce the 3-scene script (with spoken transcripts and a",
     "brief panelCaption per scene) and the composite storyboard-sheet plan —",
-    "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+    "exactly 3 keyframe panels, each LABELLED with its number badge (01–03) and",
     "its panelCaption bar, in order; no other text and no arrows.",
     ...(directive
       ? directiveBlock(directive)

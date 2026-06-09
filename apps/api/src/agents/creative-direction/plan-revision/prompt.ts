@@ -77,7 +77,7 @@ export function buildRevisionPrompt({
           `Current person brief: ${brief || "(none)"}`,
         ]
       : [
-          "The user is revising the STORYBOARD sheet (a 2×2 grid of four labelled",
+          "The user is revising the STORYBOARD sheet (a strip of three labelled",
           "keyframe panels for one ~15s ad). The FIRST attached image is that",
           "storyboard; the SECOND, when present, is the PRODUCT reference sheet.",
           "",

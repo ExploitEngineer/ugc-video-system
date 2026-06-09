@@ -33,7 +33,7 @@ const VOICE: Record<AdType, string> = {
  *     no clipping/morphing) so the clip comes out clean and realistic.
  *
  * Division of labour: the LABELLED storyboard sheet is attached separately as
- * `@Image 1` (a 2×2 grid of four numbered keyframe panels — the authoritative
+ * `@Image 1` (a strip of three numbered keyframe panels — the authoritative
  * identity + framing reference AND the ordered shot sequence, panel N → time
  * slice N); this prompt translates the scene plan into motion, single-move
  * camera grammar, mood and synchronized spoken/voiceover audio, and tells the
@@ -69,6 +69,12 @@ export function buildVideoPrompt(input: {
   const anchor = (input.characterAnchor ?? "").trim();
 
   const ugc = adType === "ugc";
+  // Orientation-conditional sheet descriptor — matches the storyboard's 3-panel
+  // strip (horizontal row for 16:9, vertical stack for 9:16).
+  const portrait = aspectRatio === "9:16";
+  const sheetDesc = portrait
+    ? "a vertical strip of THREE numbered keyframe panels (01 top, 02 middle, 03 bottom)"
+    : "a horizontal strip of THREE numbered keyframe panels (01 left, 02 middle, 03 right)";
   // Pin the presenter's identity in the FIRST tokens of Segment 1 — Seedance
   // weights early tokens most, and an unpinned subject drifts into a new person.
   const hasPresenter = Boolean(anchor) || ugc;
@@ -114,12 +120,12 @@ export function buildVideoPrompt(input: {
   const system = [
     "You are a Seedance 2.0 multimodal video director and prompt engineer for an AI ad-video pipeline.",
     `Author ONE engineered Seedance 2.0 video prompt for a ~${durationSec}s, fully photorealistic live-action ${ugc ? "UGC-style ad" : "commercial ad"} in the "${adStyle}" style.`,
-    "A LABELLED storyboard sheet is attached as `@Image 1` — a 2×2 grid of FOUR numbered keyframe panels (01 top-left, 02 top-right, 03 bottom-left, 04 bottom-right). It is the AUTHORITATIVE reference for product/person identity, framing and the ORDERED shot sequence: panel N is the keyframe for time slice N — follow them in number order. Use each panel for identity/framing/composition, but the OUTPUT is ONE continuous live-action shot: never render the grid, panels, badges, caption bars/text or any boxes from the sheet into the video — they are direction only.",
+    `A LABELLED storyboard sheet is attached as \`@Image 1\` — ${sheetDesc}. It is the AUTHORITATIVE reference for product/person identity, framing and the ORDERED shot sequence: panel N is the keyframe for time slice N — follow them in number order. Use each panel for identity/framing/composition, but the OUTPUT is ONE continuous live-action shot: never render the grid, panels, badges, caption bars/text or any boxes from the sheet into the video — they are direction only.`,
     "Cover ALL EIGHT core elements: subject (who/what), action (what happens), setting/environment (where), light & tone (atmosphere), camera movement (how shot), visual style, image quality, and anti-distortion constraints.",
     "Organize the prompt into THREE labelled segments, written inline as ONE continuous paragraph using the literal labels below — do NOT use any line breaks, newlines, bullet points or list formatting anywhere in the output string.",
     `Segment 1 'Global setup:' — ${presenterPin}the subject (the product${hasPresenter ? " and the on-screen presenter" : ""}), the environment, the visual style, and the overall lighting/mood. ${globalLook} The product is shown WORN or IN REAL USE at its true real-world scale, as the bare real item. Anchor identity to \`@Image 1\`; after any \`@Image 1\` reference immediately add a noun (e.g. \`@Image 1 (the presenter)\`, \`@Image 1 (the product)\`).`,
-    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE per panel in number order, inline like '0-4s: …; 4-8s: …'. For EACH slice: its time range, one concrete ACTION BEAT tied to that panel, EXACTLY ONE camera move (static, dolly, pan, tilt, tracking or push), and the audio. Say what the PRODUCT visibly DOES so it reads as genuinely working (its real motion — e.g. a cap twisted off and the level dropping). Any prep step (e.g. opening) goes in its OWN earlier slice, before the slice that uses it, and the changed state PERSISTS in every later slice. ${audioDirective}`,
-    `Segment 3 'Quality & constraints:' — ${qualityLook}. ${realismFloor} Keep the SAME single person and the SAME product identity across all four beats. ${avoidTail}`,
+    `Segment 2 'Timeline:' — walk the full ~${durationSec}s as ordered time slices, ONE per panel in number order, inline like '0-4s: …; 4-8s: …'. For EACH slice: its time range, one concrete ACTION BEAT tied to that panel, EXACTLY ONE camera move (static, dolly, pan, tilt, tracking or push), and the audio. Say what the PRODUCT visibly DOES so it reads as genuinely working (its real motion — e.g. a cap twisted off and the level dropping). Any prep step (e.g. opening) goes in its OWN earlier slice, before the slice that uses it, and the changed state PERSISTS in every later slice. The FINAL slice RESOLVES the ad: the action completes and settles on the closing RESULT beat (the person showing the payoff/benefit, the product at rest), holding cleanly on that last moment so the clip ends on a real ending and never freezes mid-action. ${audioDirective}`,
+    `Segment 3 'Quality & constraints:' — ${qualityLook}. ${realismFloor} Keep the SAME single person and the SAME product identity across all three beats. ${avoidTail}`,
     `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the prompt TIGHT — aim for roughly 70-100 words TOTAL (Seedance follows short, front-loaded prompts far better than long ones): lead each slice with subject + action + camera, lean on \`@Image 1\` for look/identity instead of re-describing it, and keep the single 'Avoid:' list short and at the very end. Do not pad or restate.`,
     'CRITICAL OUTPUT RULE: return STRICT JSON only — a single object {"videoPrompt": "…"} whose value is ONE single-line string with NO raw line breaks. Escape nothing else; just keep it on one line.',
   ].join(" ");
@@ -213,8 +219,8 @@ export function buildDeterministicVideoPrompt(input: {
     })
     .join("; ");
   return (
-    `Global setup: @Image 1 (the storyboard) is a 2×2 grid of four numbered panels (01–04); render ONE continuous, photorealistic live-action ad in the "${adStyle}" style that follows the panels in order, keeping their identity and framing while showing only the clean live scene (no grid, badges or captions). ${presenterPin}${globalLook} The product is shown worn or in real use at true scale, as the bare real item. ` +
-    `Timeline: ${timeline}. Show the product genuinely working (its real motion — e.g. a cap twisted off and the level dropping); any prep (e.g. opening) comes in an EARLIER slice, before the slice that uses it, and the changed state persists. Audio: ${ugc ? `${voice}, lip-synced, light ambience, no music` : `${voice} voiceover, light score allowed`}; sip or handle the product and speak in separate beats, mouth visible while speaking. ` +
+    `Global setup: @Image 1 (the storyboard) is a strip of three numbered panels (01–03); render ONE continuous, photorealistic live-action ad in the "${adStyle}" style that follows the panels in order, keeping their identity and framing while showing only the clean live scene (no grid, badges or captions). ${presenterPin}${globalLook} The product is shown worn or in real use at true scale, as the bare real item. ` +
+    `Timeline: ${timeline}. Show the product genuinely working (its real motion — e.g. a cap twisted off and the level dropping); any prep (e.g. opening) comes in an EARLIER slice, before the slice that uses it, and the changed state persists. The final slice settles on the completed RESULT (use done, the payoff visible, the product at rest), so the clip ends cleanly and never freezes mid-action. Audio: ${ugc ? `${voice}, lip-synced, light ambience, no music` : `${voice} voiceover, light score allowed`}; sip or handle the product and speak in separate beats, mouth visible while speaking. ` +
     `Quality & constraints: ${quality}; the person moves and emotes like a real human (micro-expressions, blinks, relaxed body language); indistinguishable from real footage — true anatomy, natural motion, real material physics. Keep the SAME person and product across all beats. ${FRAME_LABEL[aspectRatio].short}. Avoid: extra or warped fingers, face morphing, on-screen text or captions, watermark${ugc ? ", background music" : ""}.`
   );
 }
