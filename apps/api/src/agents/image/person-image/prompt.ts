@@ -52,11 +52,11 @@ const SHEET_RULES =
   "Output ONE single image: a clean 2×2 grid of FOUR full-body views of the " +
   "SAME person — top-left front, top-right three-quarter, bottom-left side " +
   "(profile), bottom-right back. A thin neutral separator between cells, a " +
-  "plain seamless neutral studio backdrop, soft even lighting, the person " +
-  "centered at the same scale in every view. Photorealistic — a real human " +
-  "photographed with a real camera (natural skin texture, lifelike face), NOT " +
-  "CGI/plastic/illustration. No text, labels, captions, numbers, arrows or " +
-  "watermarks anywhere.";
+  "plain seamless neutral studio backdrop, soft natural lighting with gentle " +
+  "believable shadowing, the person centered at the same scale in every view. " +
+  "Photorealistic — a real human photographed with a real camera (natural skin " +
+  "texture, lifelike face, relaxed candid expression), NOT CGI/plastic/illustration. " +
+  "No text, labels, captions, numbers, arrows or watermarks anywhere.";
 
 /**
  * SHORT edit instruction for an image-to-image revise of the attached prior
@@ -134,10 +134,12 @@ export function buildPersonImagePrompt({
     "- A thin, uniform neutral separator line (a small gutter/border) divides the",
     "  four views so each reads as its own clean panel.",
     "- Plain seamless studio backdrop: one flat neutral color, identical in",
-    "  every view. Soft, even, shadowless studio lighting.",
+    "  every view. Soft, natural studio lighting with gentle, believable shadowing",
+    "  (lifelike face modelling), consistent across all views.",
     "- Full-body, same person centered at the same scale in each view, in a",
-    "  natural, relaxed standing pose with BOTH HANDS EMPTY and visible, holding",
-    "  or displaying NOTHING. Generous even margins.",
+    "  natural, relaxed standing pose with a candid, natural expression (not a",
+    "  stiff posed stock smile), BOTH HANDS EMPTY and visible, holding or",
+    "  displaying NOTHING. Generous even margins.",
     "",
     "ABSOLUTE CONSISTENCY: it must be the exact same person in all four views",
     "— identical face, age, skin tone, hair, build, and wardrobe, and the same",
@@ -146,8 +148,9 @@ export function buildPersonImagePrompt({
     "PHOTOREALISM — the person MUST look like a REAL, living human photographed",
     "with a real camera, NOT a 3D render, CGI character, doll, or illustration:",
     "- Natural skin with realistic texture, pores, fine detail and subtle",
-    "  imperfections; lifelike eyes with natural catchlights; real, individually",
-    "  detailed hair; believable hands and proportions.",
+    "  imperfections; natural facial asymmetry (not mirror-symmetric); lifelike",
+    "  eyes with natural catchlights; real, individually detailed hair; believable",
+    "  hands and proportions.",
     "- Soft, even, flattering studio lighting on the skin with natural soft",
     "  shadowing; full-frame camera, sharp portrait/prime lens, accurate skin",
     "  tones and natural color.",
@@ -182,8 +185,9 @@ export function buildPersonImagePrompt({
     "`imagePrompt` is the full, self-contained prompt for the image model and",
     "MUST itself restate: the four-view 2×2 layout with thin separators between",
     "views, the PHOTOREALISTIC real-human look (real camera, natural skin texture,",
-    "lifelike face — a real, relatable everyday person, no CGI/plastic/airbrushed",
-    "or glossy-model look), EMPTY hands holding nothing and NO product / props /",
+    "lifelike face, candid relaxed expression, soft natural lighting with gentle",
+    "shadowing — a real, relatable everyday person, no CGI/plastic/airbrushed or",
+    "glossy-model look), EMPTY hands holding nothing and NO product / props /",
     "invented accessories, the images-only / no-added-text rule, and the",
     `${resolutionLabel} resolution. \`views\` (all four) and`,
     "`personDetails` are metadata (NOT drawn on the image).",
