@@ -143,6 +143,10 @@ export function createBytePlusProvider(): VideoProvider {
         ratio: input.aspectRatio ?? DEFAULT_RATIO, // Seedance 2.0 key (16:9 | 9:16)
         generate_audio: true, // native synchronized audio
         watermark: false,
+        // Optional fixed seed (eval only) — unset → BytePlus picks at random.
+        ...(env.BYTEPLUS_VIDEO_SEED != null
+          ? { seed: env.BYTEPLUS_VIDEO_SEED }
+          : {}),
       };
 
       log.info("submit task", {

@@ -27,6 +27,10 @@ const serverEnvSchema = z.object({
   // looks like downsampled AI video. Overridable per-deploy (e.g. "720p" to cut
   // cost/time). Seedance 2.0 supports 480p | 720p | 1080p.
   BYTEPLUS_VIDEO_RESOLUTION: z.string().default("1080p"),
+  // Optional FIXED seed — set during prompt iteration so output changes can be
+  // attributed to the prompt, not sampling noise. Leave unset in production for
+  // per-generation variety (the provider then sends a random seed).
+  BYTEPLUS_VIDEO_SEED: z.coerce.number().int().optional(),
   BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
 
