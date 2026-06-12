@@ -55,7 +55,7 @@ export const runSchema = z.object({
   adType: adTypeSchema,
   mode: modeSchema,
   aspectRatio: aspectRatioSchema,
-  /** Target ad length — `15s` (single clip) or `60s` (four merged clips). */
+  /** Target ad length — `15s` (single clip) or `30/45/60s` (N merged clips). */
   duration: durationSchema,
   criticEnabled: z.boolean(),
   status: runStatusSchema,
@@ -119,18 +119,18 @@ export const runDetailSchema = runSchema.extend({
   stepEvents: z.array(stepEventSchema),
   /**
    * Storyboard scenes + transcripts, null until the storyboard step lands.
-   * For 15s runs this is the single storyboard's four scenes. For 60s runs it
-   * is the concatenation of all four sheets' scenes (16), in segment order;
-   * `segmentScenes` carries the same scenes grouped by segment for the UI.
+   * For 15s runs this is the single storyboard's four scenes. For multi-segment
+   * runs it is the concatenation of all N sheets' scenes (N×4), in segment
+   * order; `segmentScenes` carries the same scenes grouped by segment for the UI.
    */
   scenes: z.array(sceneSchema).nullable(),
   /**
-   * 60s runs only: the 16 scenes grouped by segment (`[seg0[], seg1[], …]`),
-   * in `segment_index` order. Null for 15s runs (use `scenes`).
+   * Multi-segment runs only: the N×4 scenes grouped by segment
+   * (`[seg0[], seg1[], …]`), in `segment_index` order. Null for 15s (use `scenes`).
    */
   segmentScenes: z.array(z.array(sceneSchema)).nullable(),
   /**
-   * 60s runs only: the planned narrative arc (four segment summaries), null
+   * Multi-segment runs only: the planned narrative arc (segment summaries), null
    * until the `narrative_outline` step lands (and always null for 15s).
    */
   narrativeOutline: narrativeOutlineSchema.nullable(),
