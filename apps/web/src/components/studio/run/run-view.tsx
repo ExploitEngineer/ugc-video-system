@@ -152,6 +152,25 @@ export function RunView({ runId }: { runId: string }) {
   }
 
   const finalVideo = run.assets.find((a) => a.kind === "final_video");
+  // 60s: the four 15s segment clips + the four segment storyboard sheets. Segments
+  // finish in parallel (random order), so order by the `segmentIndex` stamped on
+  // each asset's meta — 1,2 / 3,4 — falling back to original order if absent.
+  const is60s = run.duration === "60s";
+  const segmentClips = is60s
+    ? run.assets
+        .filter((a) => a.kind === "segment_video")
+        .sort(
+          (a, b) =>
+            Number(a.meta?.segmentIndex ?? Number.POSITIVE_INFINITY) -
+            Number(b.meta?.segmentIndex ?? Number.POSITIVE_INFINITY),
+        )
+    : [];
+  // 60s: the ONE 16-panel master storyboard (all four segments × four panels in a
+  // single 4×4 sheet). The four cropped row strips (`storyboard_sheet`) are an
+  // internal step input — the master is what's shown.
+  const masterSheet = is60s
+    ? run.assets.find((a) => a.kind === "storyboard_master")
+    : undefined;
   const pending = mutation.isPending || feedbackMutation.isPending;
   // The gate a paused run sits at — names the agent its approval will start.
   const awaitingGate =
@@ -181,6 +200,46 @@ export function RunView({ runId }: { runId: string }) {
         </motion.div>
       )}
 
+      {is60s && (segmentClips.length > 0 || masterSheet) && (
+        <Card>
+          <CardContent className="flex flex-col gap-6 py-6">
+            {masterSheet && (
+              <div>
+                <h2 className="mb-3 text-sm font-semibold">
+                  Storyboard{" "}
+                  <span className="text-muted-foreground font-normal">
+                    — 16 panels (4 segments × 4)
+                  </span>
+                </h2>
+                <ArtifactCard
+                  asset={masterSheet}
+                  title="Storyboard (16 panels)"
+                />
+              </div>
+            )}
+            {segmentClips.length > 0 && (
+              <div>
+                <h2 className="mb-3 text-sm font-semibold">
+                  15-second segments{" "}
+                  <span className="text-muted-foreground font-normal">
+                    — {segmentClips.length} of 4
+                  </span>
+                </h2>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {segmentClips.map((asset, i) => (
+                    <ArtifactCard
+                      key={asset.id}
+                      asset={asset}
+                      title={`Segment ${i + 1}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {run.status === "failed" && (
         <Card className="border-destructive/40">
           <CardContent className="flex items-center gap-3 py-5">
@@ -204,11 +263,21 @@ export function RunView({ runId }: { runId: string }) {
       <ScriptPanel run={run} />
 
       {run.status === "awaiting_confirmation" && (
-        <div className="border-brand/40 bg-brand/10 text-brand flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium">
-          <SparklesIcon className="size-4 shrink-0" />
-          {awaitingGate
-            ? `Paused — review below, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
-            : "Paused — awaiting your feedback before the next step."}
+        <div className="border-brand/40 bg-brand/10 text-brand flex flex-col gap-1.5 rounded-xl border px-4 py-3 text-sm font-medium">
+          <div className="flex items-center gap-2">
+            <SparklesIcon className="size-4 shrink-0" />
+            {awaitingGate
+              ? `Paused — review below, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
+              : "Paused — awaiting your feedback before the next step."}
+          </div>
+          {is60s && awaitingGate === "storyboard" && (
+            <p className="text-brand/80 pl-6 text-xs font-normal">
+              Spot an issue? Describe what to change — e.g.{" "}
+              <span className="font-medium">“make the lighting warmer”</span> —
+              and we’ll regenerate the whole 16-panel storyboard. Or say{" "}
+              <span className="font-medium">“looks good”</span> to continue.
+            </p>
+          )}
         </div>
       )}
 

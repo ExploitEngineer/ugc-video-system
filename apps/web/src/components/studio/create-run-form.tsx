@@ -1,10 +1,12 @@
 "use client";
 
-import type { AspectRatio, Mode } from "@ugc/shared";
+import type { AspectRatio, Duration, Mode } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
   ArrowUpIcon,
+  ClockIcon,
+  FilmIcon,
   GaugeIcon,
   ImageIcon,
   ListChecksIcon,
@@ -39,6 +41,7 @@ export function CreateRunForm({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
+  const [duration, setDuration] = useState<Duration>("15s");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -72,6 +75,7 @@ export function CreateRunForm({
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
     fd.set("aspectRatio", aspectRatio);
+    fd.set("duration", duration);
 
     startTransition(async () => {
       try {
@@ -135,6 +139,7 @@ export function CreateRunForm({
             />
             <ModeToggle value={mode} onChange={setMode} />
             <AspectRatioToggle value={aspectRatio} onChange={setAspectRatio} />
+            <DurationToggle value={duration} onChange={setDuration} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -320,6 +325,66 @@ function ModeToggle({
             {selected && (
               <motion.span
                 layoutId="mode-pill"
+                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              />
+            )}
+            <opt.icon className="size-3.5" />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Compact segmented control for the ad length — single 15s clip vs merged 60s. */
+function DurationToggle({
+  value,
+  onChange,
+}: {
+  value: Duration;
+  onChange: (d: Duration) => void;
+}) {
+  const opts: Array<{
+    value: Duration;
+    label: string;
+    title: string;
+    icon: typeof GaugeIcon;
+  }> = [
+    {
+      value: "15s",
+      label: "15s",
+      title: "One ~15s ad clip",
+      icon: ClockIcon,
+    },
+    {
+      value: "60s",
+      label: "60s",
+      title:
+        "Four storyboards → four 15s clips merged into one 60s ad (longer render)",
+      icon: FilmIcon,
+    },
+  ];
+  return (
+    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+      {opts.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={selected}
+            title={opt.title}
+            className={cn(
+              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {selected && (
+              <motion.span
+                layoutId="duration-pill"
                 className="bg-accent absolute inset-0 -z-10 rounded-full"
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
               />
