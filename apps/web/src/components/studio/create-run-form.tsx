@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
   ArrowUpIcon,
+  ChevronDownIcon,
   ClockIcon,
   FilmIcon,
   GaugeIcon,
@@ -13,6 +14,7 @@ import {
   Loader2Icon,
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
+  SlidersHorizontalIcon,
   UserIcon,
   XIcon,
 } from "lucide-react";
@@ -20,6 +22,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { createRun } from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
@@ -27,6 +34,11 @@ import { cn } from "@/lib/utils";
 const MAX = 2000;
 const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
 const ACCEPT = ["image/png", "image/jpeg", "image/webp", "image/avif"];
+
+const MODE_LABEL: Record<Mode, string> = {
+  automatic: "Auto",
+  confirm: "Step-by-step",
+};
 
 export function CreateRunForm({
   initialPrompt = "",
@@ -121,7 +133,7 @@ export function CreateRunForm({
         />
 
         <div className="flex items-end justify-between gap-2 px-1">
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1.5">
             <AttachButton
               label="Product"
               icon={ImageIcon}
@@ -137,9 +149,17 @@ export function CreateRunForm({
               onFile={setPersonFile}
               onError={setError}
             />
-            <ModeToggle value={mode} onChange={setMode} />
-            <AspectRatioToggle value={aspectRatio} onChange={setAspectRatio} />
-            <DurationToggle value={duration} onChange={setDuration} />
+            <OptionsMenu
+              mode={mode}
+              onMode={setMode}
+              aspectRatio={aspectRatio}
+              onAspect={setAspectRatio}
+              duration={duration}
+              onDuration={setDuration}
+            />
+            <span className="text-muted-foreground hidden items-center pl-1 font-mono text-[11px] tabular-nums sm:inline-flex">
+              {duration} · {aspectRatio} · {MODE_LABEL[mode]}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -290,6 +310,75 @@ function AttachButton({
   );
 }
 
+/** One Options popover — collapses mode / aspect / duration into a single
+ *  trigger so the composer reads cleanly. Picks stay visible via the inline
+ *  summary next to it. */
+function OptionsMenu({
+  mode,
+  onMode,
+  aspectRatio,
+  onAspect,
+  duration,
+  onDuration,
+}: {
+  mode: Mode;
+  onMode: (m: Mode) => void;
+  aspectRatio: AspectRatio;
+  onAspect: (r: AspectRatio) => void;
+  duration: Duration;
+  onDuration: (d: Duration) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="border-border/60 bg-background/40 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-accent/40 data-[state=open]:border-brand/50 data-[state=open]:text-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors"
+        >
+          <SlidersHorizontalIcon className="size-3.5" />
+          Options
+          <ChevronDownIcon className="size-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={10}
+        className="ring-glow w-80 rounded-2xl border-border/70 p-4"
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Duration">
+            <DurationToggle value={duration} onChange={onDuration} />
+          </Field>
+          <Field label="Aspect ratio">
+            <AspectRatioToggle value={aspectRatio} onChange={onAspect} />
+          </Field>
+          <Field label="Mode">
+            <ModeToggle value={mode} onChange={onMode} />
+          </Field>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Labelled row inside the Options popover. */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-muted-foreground font-mono text-[10px] font-medium tracking-[0.12em] uppercase">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
 /** Compact two-state run-mode segmented control. */
 function ModeToggle({
   value,
@@ -303,7 +392,7 @@ function ModeToggle({
     { value: "confirm", label: "Step-by-step", icon: ListChecksIcon },
   ];
   return (
-    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+    <div className="border-border/60 bg-background/40 relative inline-flex w-full items-center rounded-full border p-0.5">
       {opts.map((opt) => {
         const selected = value === opt.value;
         return (
@@ -318,7 +407,7 @@ function ModeToggle({
                 : "Pause after each artifact for your feedback to approve or revise"
             }
             className={cn(
-              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
               selected ? "text-foreground" : "text-muted-foreground",
             )}
           >
@@ -379,7 +468,7 @@ function DurationToggle({
     },
   ];
   return (
-    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+    <div className="border-border/60 bg-background/40 relative inline-flex w-full items-center rounded-full border p-0.5">
       {opts.map((opt) => {
         const selected = value === opt.value;
         return (
@@ -390,7 +479,7 @@ function DurationToggle({
             aria-pressed={selected}
             title={opt.title}
             className={cn(
-              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors",
               selected ? "text-foreground" : "text-muted-foreground",
             )}
           >
@@ -438,7 +527,7 @@ function AspectRatioToggle({
     },
   ];
   return (
-    <div className="border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5">
+    <div className="border-border/60 bg-background/40 relative inline-flex w-full items-center rounded-full border p-0.5">
       {opts.map((opt) => {
         const selected = value === opt.value;
         return (
@@ -449,7 +538,7 @@ function AspectRatioToggle({
             aria-pressed={selected}
             title={opt.title}
             className={cn(
-              "relative inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
               selected ? "text-foreground" : "text-muted-foreground",
             )}
           >

@@ -23,8 +23,9 @@ export function CtaBand() {
               Make your first ad video
             </h2>
             <p className="text-brand-foreground/85 relative mx-auto mt-4 max-w-xl text-pretty">
-              Open the studio, drop a product image, and watch the pipeline run
-              step by step.
+              Open the studio, drop a product image, and watch the agents take
+              it from prompt to finished video — 15 to 60 seconds, audio
+              included.
             </p>
             <div className="relative mt-9 flex justify-center">
               <Button
