@@ -19,6 +19,7 @@ import type {
   ArtifactStatus,
   AspectRatio,
   AssetKind,
+  Duration,
   Mode,
   RunStatus,
   Step,
@@ -28,6 +29,7 @@ import {
   aspectRatioSchema,
   assetKindSchema,
   artifactStatusSchema,
+  durationSchema,
   modeSchema,
   runStatusSchema,
   stepSchema,
@@ -37,6 +39,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   jsonb,
   numeric,
   pgEnum,
@@ -78,6 +81,10 @@ export const artifactStatusEnum = pgEnum(
   "artifact_status",
   artifactStatusSchema.options as [ArtifactStatus, ...ArtifactStatus[]],
 );
+export const durationEnum = pgEnum(
+  "duration",
+  durationSchema.options as [Duration, ...Duration[]],
+);
 
 // ── Core tables ───────────────────────────────────────────────────────
 
@@ -107,6 +114,9 @@ export const runs = pgTable(
     productUse: jsonb("product_use"), // causal use-sequence {accessVerb,changedState,persistenceCue,functionSignal,useVerb}; baked into the storyboard still
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
+    duration: durationEnum("duration").notNull().default("15s"), // 15s single-clip pipeline | 60s four-clip merged pipeline
+    narrativeOutline: jsonb("narrative_outline"), // 60s only: { segments: [{ index, beat, summary }], visualStyle } — continuity arc planned before any storyboard
+    visualStyle: text("visual_style"), // 60s only: locked visual-style bible (grade/lens/lighting/palette/time-of-day arc), injected verbatim into all 4 storyboard + 4 video prompts
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
@@ -229,16 +239,23 @@ export const storyboardSheets = pgTable(
       .notNull()
       .references(() => assets.id, { onDelete: "cascade" }),
     scenes: jsonb("scenes"), // [{ index, cameraAngle, actionMovement, sceneDescription, panelCaption, transcript, adStyle }]
+    segmentIndex: integer("segment_index"), // 60s: 0..3 segment; null = 15s single sheet
     promptUsed: text("prompt_used"),
     status: artifactStatusEnum("status").notNull().default("draft"),
   },
   (t) => [
     index("storyboard_sheets_run_id_idx").on(t.runId),
     index("storyboard_sheets_asset_id_idx").on(t.assetId),
+    index("storyboard_sheets_run_segment_idx").on(t.runId, t.segmentIndex),
   ],
 ).enableRLS();
 
-/** The single ~15s final clip with native Seedance 2.0 audio. No merge step. */
+/**
+ * A final clip with native Seedance 2.0 audio. 15s runs have one row
+ * (`segmentIndex` null). 60s runs have four segment rows (`segmentIndex` 0..3,
+ * ~15s each) plus one merged row (`segmentIndex` null, ~60s) — the merged row
+ * is the `final_video`; the segment rows are `segment_video` assets.
+ */
 export const videos = pgTable(
   "videos",
   {
@@ -249,7 +266,8 @@ export const videos = pgTable(
     assetId: uuid("asset_id")
       .notNull()
       .references(() => assets.id, { onDelete: "cascade" }),
-    durationSec: numeric("duration_sec"), // ~15
+    durationSec: numeric("duration_sec"), // ~15 per segment / ~60 merged
+    segmentIndex: integer("segment_index"), // 60s: 0..3 segment clip; null = merged 60s OR legacy 15s
     hasAudio: boolean("has_audio").notNull().default(true),
     providerMeta: jsonb("provider_meta"), // BytePlus task id, model slug, params
     status: text("status").notNull().default("processing"), // processing / completed / failed
@@ -257,6 +275,7 @@ export const videos = pgTable(
   (t) => [
     index("videos_run_id_idx").on(t.runId),
     index("videos_asset_id_idx").on(t.assetId),
+    index("videos_run_segment_idx").on(t.runId, t.segmentIndex),
     check(
       "videos_status_check",
       sql`${t.status} in ('processing', 'completed', 'failed')`,
