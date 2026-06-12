@@ -60,9 +60,45 @@ export interface SkillContext {
   personBrief: string;
   /** User-chosen output shape — sizes the image sheets and the final video. */
   aspectRatio: AspectRatio;
+  /**
+   * 60s only — the locked visual-style bible from `runs.visual_style` (planned
+   * by `narrativeOutline`). Injected VERBATIM into every segment storyboard +
+   * video prompt so all four clips share one grade/lighting/palette. Undefined
+   * for 15s runs and before the `narrative_outline` step lands.
+   */
+  visualStyle?: string;
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;
+}
+
+/**
+ * One ~15s segment of a 60s ad, planned by the `narrativeOutline` skill BEFORE
+ * any storyboard renders. The four summaries are the continuity glue: each
+ * `segment_storyboard`/`segment_video` receives its own summary plus the other
+ * three, so the four clips read as ONE cohesive ad (same person/wardrobe,
+ * product state carried forward, coherent time/location progression).
+ */
+export interface SegmentSummary {
+  /** Segment position, 0..3. */
+  index: number;
+  /** The act this segment plays in the arc, e.g. "hook" / "product in use". */
+  beat: string;
+  /** 2–3 sentences: setting, action, product state, spoken beat for these ~15s. */
+  summary: string;
+}
+
+/** The 60s narrative arc — exactly four segment summaries, persisted to `runs.narrativeOutline`. */
+export interface NarrativeOutline {
+  segments: SegmentSummary[];
+  /**
+   * The ONE locked visual-style bible for the whole 60s ad — color grade, film
+   * stock/lens, lighting language, palette, and the time-of-day arc across the
+   * four segments. Planned once here and injected VERBATIM into all four
+   * storyboard prompts and all four video prompts (8 prompts, identical string)
+   * so the four clips share one look. Persisted to `runs.visual_style`.
+   */
+  visualStyle: string;
 }
 
 /** Uniform skill output: the persisted asset + the inserted artifact row. */

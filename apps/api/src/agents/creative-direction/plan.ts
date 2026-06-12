@@ -5,7 +5,7 @@
 // modes; confirm-mode gating pauses after each VALIDATED stage — i.e. after
 // `product_inspection` and after `storyboard_inspection` (SPEC §4 mermaid).
 
-import type { Step } from "@ugc/shared";
+import type { Duration, Step } from "@ugc/shared";
 
 /** The first step of every run. */
 export function firstStep(): Step {
@@ -25,21 +25,43 @@ export function nextStep(
   step: Step,
   _personUploaded: boolean,
   criticEnabled: boolean,
+  duration: Duration = "15s",
 ): Step | null {
-  // What follows the product image: inspection (critic on) or straight to storyboard.
-  const afterProduct: Step = criticEnabled ? "product_inspection" : "storyboard";
+  const sixty = duration === "60s";
+  // What follows the reference phase: inspection (critic on), else the 60s
+  // single 16-panel master storyboard or the 15s single storyboard. (The 60s
+  // `narrative_outline` step is retired — the master is authored as ONE coherent
+  // scene from the prompt, so there are no per-segment summaries to plan.)
+  const afterReference: Step = criticEnabled
+    ? "product_inspection"
+    : sixty
+      ? "segment_storyboard"
+      : "storyboard";
+  const afterProductInspection: Step = sixty
+    ? "segment_storyboard"
+    : "storyboard";
   switch (step) {
     case "product_sheet":
       return "person_sheet";
     case "person_sheet":
-      return afterProduct;
+      return afterReference;
     case "product_inspection":
-      return "storyboard";
+      return afterProductInspection;
     case "storyboard":
       return criticEnabled ? "storyboard_inspection" : "video";
     case "storyboard_inspection":
       return "video";
     case "video":
+      return null;
+    // 60s pipeline: master storyboard (+ row crops) → four videos → merge.
+    // `narrative_outline` is dormant (never sequenced) but kept in the enum.
+    case "narrative_outline":
+      return "segment_storyboard";
+    case "segment_storyboard":
+      return "segment_video";
+    case "segment_video":
+      return "merge";
+    case "merge":
       return null;
   }
 }
@@ -54,16 +76,23 @@ export function nextStep(
  */
 export type Gate = "reference" | "storyboard";
 
-/** The gate we land at by completing the step whose next step is `next`. */
+/**
+ * The gate we land at by completing the step whose next step is `next`.
+ *   - reference gate  → right before the storyboard work (both ref sheets ready):
+ *     15s `storyboard`, 60s `segment_storyboard` (the first post-reference step).
+ *   - storyboard gate → right before the video work (storyboard ready):
+ *     15s `video`, 60s `segment_video` (after the master + its row crops).
+ */
 export function gateForNext(next: Step | null): Gate | null {
-  if (next === "storyboard") return "reference";
-  if (next === "video") return "storyboard";
+  if (next === "storyboard" || next === "segment_storyboard") return "reference";
+  if (next === "video" || next === "segment_video") return "storyboard";
   return null;
 }
 
 /**
  * Recover the gate of a paused run from its `currentStep` (= last completed
- * step). Mirrors `gateForNext` for every step that can sit at a gate.
+ * step). Mirrors `gateForNext` for every step that can sit at a gate. For 60s
+ * the storyboard gate is sat at `segment_storyboard` (all four sheets done).
  */
 export function gateForCurrentStep(step: Step): Gate | null {
   switch (step) {
@@ -73,6 +102,7 @@ export function gateForCurrentStep(step: Step): Gate | null {
       return "reference";
     case "storyboard":
     case "storyboard_inspection":
+    case "segment_storyboard":
       return "storyboard";
     default:
       return null;
@@ -83,7 +113,14 @@ export function gateForCurrentStep(step: Step): Gate | null {
  * The generation step to re-run when the user revises a gated artifact
  * (status `regenerating`). The reference gate always re-runs `person_sheet`
  * (the product sheet is hidden from the user, so `target` "product" is ignored).
+ * The storyboard gate re-runs the single `storyboard` (15s) or the segment
+ * storyboards (60s — narrowed to the targeted segment in the orchestrator).
  */
-export function genStepForRevise(gate: Gate, _target: "product" | "person" | null): Step {
-  return gate === "storyboard" ? "storyboard" : "person_sheet";
+export function genStepForRevise(
+  gate: Gate,
+  _target: "product" | "person" | null,
+  duration: Duration = "15s",
+): Step {
+  if (gate !== "storyboard") return "person_sheet";
+  return duration === "60s" ? "segment_storyboard" : "storyboard";
 }
