@@ -35,6 +35,7 @@ export async function productSheetBuilder(
       adStyle: ctx.adStyle,
       userPrompt: input.userPrompt,
       aspectRatio: ctx.aspectRatio,
+      productUpload: input.productUpload,
       critique: input.critique,
     }),
     { jsonMode: true },

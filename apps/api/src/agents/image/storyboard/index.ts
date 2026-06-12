@@ -13,7 +13,11 @@ import type { RevisionDirective } from "../../creative-direction/plan-revision/i
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
-import { buildStoryboardPrompt, type StoryboardPlan } from "./prompt.js";
+import {
+  buildStoryboardPrompt,
+  type StoryboardPlan,
+  type StoryboardScene,
+} from "./prompt.js";
 
 type StoryboardSheet = typeof schema.storyboardSheets.$inferSelect;
 
@@ -26,14 +30,42 @@ export interface StoryboardInput {
   critique?: string;
   /** Broken-down USER revision directive (confirm-mode storyboard gate). */
   directive?: RevisionDirective;
+  // ── 60s segment fields (absent ⇒ the original single-sheet 15s behavior) ──
+  /** This sheet's segment position in a 60s run (0..3); persisted on the row. */
+  segmentIndex?: number;
+  /** This segment's own brief from the narrative outline. */
+  segmentSummary?: string;
+  /** The OTHER three segments' summaries, for cross-segment continuity. */
+  otherSummaries?: string[];
 }
 
-export async function storyboardGenerator(
+/** A rendered storyboard image + its parsed scenes, BEFORE persistence. */
+interface RenderedStoryboard {
+  bytes: Uint8Array;
+  mime: string;
+  scenes: StoryboardScene[];
+  imagePrompt: string;
+}
+
+/**
+ * Plan (LLM) + render (gpt-image-2) a storyboard sheet WITHOUT persisting.
+ * Shared by the 15s `storyboardGenerator` (4-panel 2×2) and the 60s
+ * `generateMaster` (16-panel 4×4). `opts.full60s` switches the panel count, the
+ * token ceiling, and the prompt's layout/scene-count mode.
+ */
+async function renderStoryboard(
   ctx: SkillContext,
   input: StoryboardInput,
-): Promise<SkillResult<StoryboardSheet>> {
-  const log = createLogger("image", { run: ctx.runId, skill: "storyboard" });
+  opts: { full60s?: boolean } = {},
+): Promise<RenderedStoryboard> {
+  const full60s = Boolean(opts.full60s);
+  const panelCount = full60s ? 16 : 4;
+  const log = createLogger("image", {
+    run: ctx.runId,
+    skill: full60s ? "storyboard-master" : "storyboard",
+  });
   log.info("▶ planning storyboard", {
+    full60s,
     hasPerson: Boolean(input.personSheetRef),
     critique: Boolean(input.critique),
     revise: Boolean(input.directive),
@@ -50,17 +82,22 @@ export async function storyboardGenerator(
     aspectRatio: ctx.aspectRatio,
     critique: input.critique,
     directive: input.directive,
+    segmentIndex: input.segmentIndex,
+    segmentSummary: input.segmentSummary,
+    otherSummaries: input.otherSummaries,
+    visualStyle: ctx.visualStyle,
+    full60s,
   });
   // The storyboard plan is the longest LLM output in the pipeline, so JSON mode
   // + a generous token ceiling are essential (a truncated reply = invalid JSON).
-  // Retry ONCE with an even larger ceiling before surfacing a parse failure.
+  // The 16-panel master carries 4× the scenes of a 15s sheet, so it needs a far
+  // larger ceiling. Retry ONCE with an even larger ceiling before failing.
+  const ceilings = full60s ? [12288, 16384] : [5120, 8192];
   let plan: StoryboardPlan | undefined;
   for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
     const reply = await ctx.openai.chat(messages, {
       jsonMode: true,
-      // Richer caption/sceneDescription prose grows the `scenes` payload, so give
-      // headroom over the prior 4096/6144 to keep the JSON from truncating.
-      maxTokens: attempt === 1 ? 5120 : 8192,
+      maxTokens: ceilings[attempt - 1],
     });
     try {
       plan = parseJsonObject<StoryboardPlan>(reply);
@@ -73,8 +110,8 @@ export async function storyboardGenerator(
     }
   }
   if (!plan) throw new Error("storyboard plan missing after retries");
-  // Storyboard is fixed at 4 scenes — clamp in case the model overshoots.
-  plan.scenes = plan.scenes.slice(0, 4);
+  // Clamp to the expected panel count in case the model overshoots.
+  plan.scenes = plan.scenes.slice(0, panelCount);
 
   // The planner tends to write the META-instruction ("quote each panelCaption
   // exactly") into `imagePrompt` instead of the caption TEXT, so the image model
@@ -104,6 +141,15 @@ export async function storyboardGenerator(
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
+  return { bytes, mime, scenes: plan.scenes, imagePrompt };
+}
+
+export async function storyboardGenerator(
+  ctx: SkillContext,
+  input: StoryboardInput,
+): Promise<SkillResult<StoryboardSheet>> {
+  const log = createLogger("image", { run: ctx.runId, skill: "storyboard" });
+  const { bytes, mime, scenes, imagePrompt } = await renderStoryboard(ctx, input);
 
   const { assetId, assetUrl, artifact } = await persistSheet({
     runId: ctx.runId,
@@ -116,7 +162,8 @@ export async function storyboardGenerator(
         .values({
           runId: ctx.runId,
           assetId: newAssetId,
-          scenes: plan.scenes,
+          scenes,
+          segmentIndex: input.segmentIndex ?? null,
           promptUsed: imagePrompt,
           status: "draft",
         })
@@ -125,6 +172,45 @@ export async function storyboardGenerator(
     },
   });
 
-  log.info("✓ storyboard persisted", { assetId, scenes: plan.scenes.length });
+  log.info("✓ storyboard persisted", { assetId, scenes: scenes.length });
   return { assetId, assetUrl, artifact, promptUsed: imagePrompt };
+}
+
+/** Input for the 60s master sheet — one coherent 16-panel scene from the prompt. */
+export interface GenerateMasterInput {
+  productSheetRef: ImageRef;
+  personSheetRef?: ImageRef;
+  userPrompt: string;
+  /** Confirm-mode storyboard-gate revise — applies to the whole 16-panel sheet. */
+  directive?: RevisionDirective;
+}
+
+/** A 60s 16-panel master storyboard — raw bytes + 16 scenes, NOT persisted. */
+export interface MasterStoryboard {
+  bytes: Uint8Array;
+  mime: string;
+  scenes: StoryboardScene[];
+  imagePrompt: string;
+}
+
+/**
+ * 60s ONE-MASTER: plan + render the single 16-panel (4×4) storyboard sheet as ONE
+ * continuous coherent scene, authored from the user prompt + briefs (no per-segment
+ * summaries). Returns the raw image bytes + all 16 scenes so the orchestrator can
+ * crop the sheet into row strips and own persistence. Does NOT persist.
+ */
+export async function generateMaster(
+  ctx: SkillContext,
+  input: GenerateMasterInput,
+): Promise<MasterStoryboard> {
+  return renderStoryboard(
+    ctx,
+    {
+      productSheetRef: input.productSheetRef,
+      personSheetRef: input.personSheetRef,
+      userPrompt: input.userPrompt,
+      directive: input.directive,
+    },
+    { full60s: true },
+  );
 }

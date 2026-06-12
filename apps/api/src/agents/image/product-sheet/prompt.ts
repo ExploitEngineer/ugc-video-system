@@ -6,7 +6,7 @@
 // text/labels baked into the image) — plus structured `views` metadata.
 
 import type { AspectRatio } from "@ugc/shared";
-import type { ChatMessage } from "../../../providers/openai/index.js";
+import type { ChatMessage, ImageRef } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
 
 export interface ProductSheetPromptInput {
@@ -14,6 +14,12 @@ export interface ProductSheetPromptInput {
   userPrompt: string;
   /** Output aspect ratio — sizes the sheet so it matches the final video frame. */
   aspectRatio: AspectRatio;
+  /**
+   * The uploaded product image — attached to the planning chat (vision) so the
+   * author can transcribe the product's real markings/materials/colors into the
+   * `imagePrompt`, instead of writing generic fidelity boilerplate blind.
+   */
+  productUpload: ImageRef;
   /** Critic feedback from a rejected prior attempt — appended to steer a full regen (F5). */
   critique?: string;
 }
@@ -34,6 +40,7 @@ export function buildProductSheetPrompt({
   adStyle,
   userPrompt,
   aspectRatio,
+  productUpload,
   critique,
 }: ProductSheetPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
@@ -41,10 +48,10 @@ export function buildProductSheetPrompt({
 
   const system = [
     "You are the Product Sheet Builder skill of an ad-video Image Agent.",
-    "A reference photo of the product is attached in the image step. Your job",
-    "is to author the final text-to-image prompt for ONE composite product",
-    "reference sheet that downstream agents will use to keep the product",
-    "consistent across the whole ad.",
+    "The product's reference photo is attached to THIS message — study it",
+    "closely. Your job is to author the final text-to-image prompt for ONE",
+    "composite product reference sheet that downstream agents will use to keep",
+    "the product consistent across the whole ad.",
     "",
     "THE SHEET (describe all of this inside `imagePrompt`):",
     "- ONE single image, a clean 2×2 grid of exactly FOUR cells.",
@@ -81,6 +88,15 @@ export function buildProductSheetPrompt({
     "rearrange, or restyle any text, number, or marking on the product. Do not",
     "redesign or restyle the product; only the viewing angle changes per cell.",
     "",
+    "USE THE ATTACHED PHOTO — you can SEE the product, so be SPECIFIC, not generic.",
+    "In the `imagePrompt`, NAME the product (its category) and TRANSCRIBE its real",
+    "detail from the photo: the exact brand name / wordmarks / printed text /",
+    "numerals VERBATIM and where each sits on the product, the real materials and",
+    "surface finish (brushed metal, matte plastic, grained leather, frosted glass,",
+    "etc.), and the exact primary + accent colors. The image model reproduces text",
+    "and markings far better when the prompt states what they literally say and",
+    "where — never leave it as a vague 'reproduce the logo'.",
+    "",
     "HARD NEGATIVE CONSTRAINTS. Add NOTHING of your own to the sheet: no labels,",
     "captions, view names, annotation numbers, arrows, callouts, dimension or",
     "measurement lines, color swatches, added logos or watermarks, no UI. The",
@@ -107,25 +123,27 @@ export function buildProductSheetPrompt({
     "note (metadata, NOT drawn on the image) on what that angle emphasizes.",
   ].join("\n");
 
-  const user = [
-    `Ad style: ${style}`,
-    `User prompt: ${userPrompt}`,
-    "A product reference image is attached in the image-generation step.",
-    "Produce the composite four-view product reference sheet plan — clean 2×2",
-    "grid with thin separators between cells, every product marking/text/numeral",
-    "reproduced exactly, and no added labels or annotation text.",
-    ...(critique?.trim()
-      ? [
-          "",
-          "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
-          "`imagePrompt` that fixes these issues while keeping everything else:",
-          critique.trim(),
-        ]
-      : []),
-  ].join("\n");
+  const user: ChatMessage = {
+    role: "user",
+    content: [
+      `Ad style: ${style}`,
+      `User prompt: ${userPrompt}`,
+      "The product reference photo is attached below — study it and transcribe",
+      "its real markings, materials and colors into the `imagePrompt`.",
+      "Produce the composite four-view product reference sheet plan — clean 2×2",
+      "grid with thin separators between cells, every product marking/text/numeral",
+      "reproduced exactly, and no added labels or annotation text.",
+      ...(critique?.trim()
+        ? [
+            "",
+            "PREVIOUS ATTEMPT WAS REJECTED by the Critic. Author a corrected",
+            "`imagePrompt` that fixes these issues while keeping everything else:",
+            critique.trim(),
+          ]
+        : []),
+    ].join("\n"),
+    images: [productUpload],
+  };
 
-  return [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ];
+  return [{ role: "system", content: system }, user];
 }
