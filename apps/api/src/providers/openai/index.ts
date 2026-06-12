@@ -12,6 +12,7 @@ import type {
 } from "openai/resources/chat/completions";
 import { env } from "../../config/index.js";
 import { internal } from "../../lib/errors.js";
+import { fetchWithRetry } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
 import {
   DEFAULT_CHAT_MAX_TOKENS,
@@ -80,7 +81,10 @@ function getClient(): OpenAI {
       // 240s: a complex full-body person sheet can legitimately run >120s, so a
       // tight timeout forced a wasteful regen instead of letting it finish.
       timeout: 240_000,
-      maxRetries: 2,
+      // The SDK auto-retries connection errors + 429/5xx on chat/image calls;
+      // give it more headroom so the parallel 60s fan-outs survive provider
+      // overload without surfacing a transient failure to the orchestrator.
+      maxRetries: 4,
     });
   }
   return client;
@@ -100,7 +104,7 @@ const sleep = (ms: number): Promise<void> =>
  */
 async function imageRefToDataUri(ref: ImageRef): Promise<string> {
   if (ref.source.startsWith("data:")) return ref.source;
-  const res = await fetch(ref.source);
+  const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
   if (!res.ok) {
     throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
   }
@@ -131,7 +135,7 @@ async function toChatMessage(m: ChatMessage): Promise<ChatCompletionMessageParam
 
 /** Fetch an `ImageRef` (URL or data URI) into an Uploadable file for edits. */
 async function imageRefToFile(ref: ImageRef): Promise<File> {
-  const res = await fetch(ref.source);
+  const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
   if (!res.ok) {
     throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
   }

@@ -12,9 +12,9 @@ import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 export interface VideoBuilderInput {
   /**
    * The LABELLED storyboard sheet — four numbered keyframe panels (01–04), each
-   * with a caption. It IS sent to the video provider as the sole guidance image
-   * and ordered shot sequence — the product/person reference sheets are NOT
-   * sent; identity + shot order reach the model through these numbered keyframes
+   * with a caption. Sent to the video provider as the ordered shot-sequence /
+   * framing guide (alongside the product sheet and, when present, the person
+   * face). Shot order + framing reach the model through these numbered keyframes
    * plus the `scenes` text and `transcript`s. The badges/captions are direction
    * only and must not be rendered into the final clip (enforced via the prompt).
    */
@@ -32,6 +32,15 @@ export interface VideoBuilderInput {
    * Without it, identity comes only from the storyboard (which may have drifted).
    */
   personFaceRef?: ImageRef;
+  /**
+   * The shared PRODUCT reference sheet (both 15s and 60s). Sent as a plain
+   * `reference_image` (`@Image 1`) so Seedance locks the product's exact
+   * identity/finish/markings instead of inheriting the storyboard's drift. It
+   * carries no real human, so it is the raw-URL ref Seedance's privacy filter
+   * accepts; the storyboard + face go through the asset:// path when there is a
+   * person. Absent ⇒ falls back to storyboard-only product identity.
+   */
+  productSheetRef?: ImageRef;
   /** Scene metadata (incl. transcripts) from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   /**
@@ -45,6 +54,16 @@ export interface VideoBuilderInput {
   durationSec?: number;
   /** Optional critique to steer a regen (reserved for F7). */
   critique?: string;
+  // ── 60s segment fields (absent ⇒ the original single 15s final_video) ──
+  /**
+   * This clip's segment position in a 60s run (0..3). When set, the clip is
+   * persisted as a `segment_video` asset with this `segmentIndex` and its step
+   * events are written under the `segment_video` step; the merge step later
+   * concatenates the four segments into the `final_video`.
+   */
+  segmentIndex?: number;
+  /** The OTHER three segments' summaries — continuity context for the prompt. */
+  otherSummaries?: string[];
 }
 
 const DEFAULT_DURATION_SEC = 15;
@@ -57,26 +76,39 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
  * injected video provider) together with the LABELLED storyboard sheet as the
- * sole guidance image. The sheet's four numbered panels (01–04) are the ordered
+ * ordered shot-sequence guide. The sheet's four numbered panels (01–04) are the
  * shot sequence — the model follows them in order while rendering ONE clean
  * continuous clip; the badges/captions are direction only and (per the prompt)
- * must not appear in the output. The product/person reference sheets are NOT
- * sent. Poll until ready, download, and persist `assets` (final_video) +
- * `videos`. Final output of the pipeline; no merge step.
+ * must not appear in the output. The product sheet (plain ref) and, when there
+ * is a person, the face (asset ref) are sent alongside it to lock identity.
+ * Poll until ready, download, and persist `assets` (final_video) + `videos`.
+ * Final output of the pipeline; no merge step.
  */
 export async function videoBuilder(
   ctx: SkillContext,
   input: VideoBuilderInput,
 ): Promise<SkillResult<Video>> {
   const durationSec = input.durationSec ?? DEFAULT_DURATION_SEC;
+  // 60s segment vs the single 15s clip: a segment is one of four parts merged
+  // later, so it persists as a `segment_video` (with its index) and reports under
+  // the `segment_video` step; the 15s clip stays the single `final_video`.
+  const isSegment = input.segmentIndex != null;
+  const step = isSegment ? "segment_video" : "video";
+  const assetKind = isSegment ? "segment_video" : "final_video";
   const log = createLogger("video", { run: ctx.runId });
   log.info("▶ building video", {
     durationSec,
     hasPerson: input.hasPerson,
     scenes: input.scenes.length,
+    segment: input.segmentIndex ?? null,
   });
 
-  await writeStepEvent({ runId: ctx.runId, step: "video", status: "started" });
+  await writeStepEvent({
+    runId: ctx.runId,
+    step,
+    status: "started",
+    payload: isSegment ? { segmentIndex: input.segmentIndex } : undefined,
+  });
 
   try {
     // 1. Compose the cinematic motion/audio prompt from the scenes + transcripts.
@@ -92,6 +124,10 @@ export async function videoBuilder(
       aspectRatio: ctx.aspectRatio,
       characterAnchor: input.characterAnchor,
       critique: input.critique,
+      segmentIndex: input.segmentIndex,
+      otherSummaries: input.otherSummaries,
+      visualStyle: ctx.visualStyle,
+      hasProductSheet: Boolean(input.productSheetRef?.source),
     });
     let videoPrompt = "";
     for (let attempt = 1; attempt <= 2 && !videoPrompt.trim(); attempt++) {
@@ -116,35 +152,77 @@ export async function videoBuilder(
         durationSec,
         aspectRatio: ctx.aspectRatio,
         characterAnchor: input.characterAnchor,
+        segmentIndex: input.segmentIndex,
+        hasProductSheet: Boolean(input.productSheetRef?.source),
       });
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
 
-    // 2. Submit to the video provider. The LABELLED storyboard sheet is the sole
-    // guidance image and ordered shot guide (no product/person sheets); the
-    // detailed scene descriptions + transcripts ride in the text prompt. The
-    // prompt tells the model to follow panels 01→04 in order yet keep the
-    // badges/captions/grid out of the rendered frame. When the ad has a person,
-    // route the storyboard through the face-asset path so Seedance's face filter
-    // accepts it.
-    // Keep this lead-in SHORT — Seedance follows tight prompts far better, and
-    // the grid-suppression + shot order are also stated inside `videoPrompt`.
-    const prompt = `@Image 1 (the storyboard) sets identity, framing and shot order — follow its four panels 01→04 in order, one per beat, holding each object's state consistent across the shot. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges or caption bars).\n\n${videoPrompt}`;
+    // 2. Submit to the video provider. The detailed scene descriptions +
+    // transcripts ride in the text prompt; the reference images carry identity,
+    // framing and shot order. The prompt tells the model to follow panels 01→04
+    // in order yet keep the badges/captions/grid out of the rendered frame.
     const storyboardUrl = input.storyboardSheetRef.source;
-    // When the ad has a person, send the person's IDENTITY image FIRST as the
-    // primary face reference (so the rendered person matches it exactly), then
-    // the storyboard for layout + shot order — both via the face-asset path so
-    // Seedance's real-human filter accepts them. Falls back to just the
-    // storyboard when no identity image is available (keeps prior behaviour).
-    const personReferences = input.hasPerson
-      ? [input.personFaceRef?.source, storyboardUrl].filter((u): u is string =>
-          Boolean(u),
-        )
-      : [];
+    const productUrl = input.productSheetRef?.source;
+
+    // The @Image numbering is built from the SAME content[] order submit uses
+    // (provider appends `referenceImages` (plain) then `personReferences`
+    // (asset) after the text), so the legend can never drift from the array.
+    let prompt: string;
+    let referenceImages: string[];
+    let personReferences: string[];
+
+    // Reference routing + @Image legend, shared by the 15s and 60s paths.
+    // Submit order is text → referenceImages (plain) → personReferences (asset),
+    // so @Image numbers follow that order. The PRODUCT sheet carries no human →
+    // safe as a plain ref at @Image1. The STORYBOARD panels show the person (and
+    // 60s segments always treat it as person content), so it rides the asset://
+    // face path when the ad has a person — a raw human ref trips Seedance's
+    // privacy filter (InputImageSensitiveContentDetected.PrivacyInformation);
+    // with no person it is a plain ref. The face, when present, follows the
+    // storyboard. Net numbering: product=1, storyboard=2, face=3 (each shifts
+    // down by one when no product sheet is attached).
+    const faceUrl = input.hasPerson ? input.personFaceRef?.source : undefined;
+    const storyboardIsPersonContent = input.hasPerson || isSegment;
+
+    referenceImages = productUrl ? [productUrl] : [];
+    personReferences = [];
+    if (storyboardIsPersonContent) {
+      personReferences.push(storyboardUrl);
+      if (faceUrl) personReferences.push(faceUrl);
+    } else {
+      referenceImages.push(storyboardUrl);
+    }
+
+    const boardNo = productUrl ? 2 : 1;
+    const roles: string[] = [];
+    if (productUrl) {
+      roles.push(
+        "@Image1 (the product) locks the product's exact identity, shape, colour, finish and markings — keep the product visually identical to it in every beat",
+      );
+    }
+    roles.push(
+      `@Image${boardNo} (the storyboard) sets shot composition, framing and timeline — a 2×2 grid of four panels (top-left, top-right, bottom-left, bottom-right = 01→04); follow them in order, one per beat`,
+    );
+    if (faceUrl) {
+      roles.push(
+        `@Image${boardNo + 1} (the on-screen face) is the presenter — keep this exact face and identity for the entire shot`,
+      );
+    }
+    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}`;
+
     const task = await ctx.video.submitVideo({
-      referenceImages: input.hasPerson ? [] : [storyboardUrl],
+      referenceImages,
       personReferences,
-      referenceTag: ctx.runId,
+      // Per-SEGMENT face-asset namespace: every 60s segment submits a DIFFERENT
+      // crop strip (all showing the same person), but the provider names face
+      // assets `${tag}-person-${i}` with `i` reset per submit — so a shared
+      // `ctx.runId` tag would register seg0 and seg1 both as `${runId}-person-0`
+      // and `findAssetByName` would hand segments 1-3 segment 0's strip. Scope
+      // the tag by segment so each strip registers (and resolves) distinctly.
+      referenceTag: isSegment
+        ? `${ctx.runId}-seg${input.segmentIndex}`
+        : ctx.runId,
       prompt,
       durationSec,
       aspectRatio: ctx.aspectRatio,
@@ -199,9 +277,12 @@ export async function videoBuilder(
     // 5. Persist: Storage → assets (final_video) → videos row, in one tx.
     const persisted = await persistSheet<Video>({
       runId: ctx.runId,
-      kind: "final_video",
+      kind: assetKind,
       bytes,
       mime: "video/mp4",
+      // Carry the segment index onto the asset so the UI can order the four
+      // segment clips deterministically (they finish in parallel, random order).
+      meta: isSegment ? { segmentIndex: input.segmentIndex } : undefined,
       artifactInsert: async (tx, assetId) => {
         const [row] = await tx
           .insert(schema.videos)
@@ -209,6 +290,7 @@ export async function videoBuilder(
             runId: ctx.runId,
             assetId,
             durationSec: String(durationSec),
+            segmentIndex: input.segmentIndex ?? null,
             hasAudio,
             providerMeta: {
               provider: "byteplus",
@@ -225,9 +307,14 @@ export async function videoBuilder(
 
     await writeStepEvent({
       runId: ctx.runId,
-      step: "video",
+      step,
       status: "passed",
-      payload: { taskId: task.taskId, durationSec, hasAudio },
+      payload: {
+        taskId: task.taskId,
+        durationSec,
+        hasAudio,
+        ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
+      },
     });
     log.info("✓ video persisted", {
       assetId: persisted.assetId,
@@ -247,9 +334,12 @@ export async function videoBuilder(
     });
     await writeStepEvent({
       runId: ctx.runId,
-      step: "video",
+      step,
       status: "failed",
-      payload: { error: err instanceof Error ? err.message : String(err) },
+      payload: {
+        error: err instanceof Error ? err.message : String(err),
+        ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
+      },
     });
     throw err;
   }
