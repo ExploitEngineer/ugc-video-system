@@ -15,8 +15,9 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import type { Step } from "@ugc/shared";
+import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
 import { eq } from "drizzle-orm";
+import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
 import {
   createOpenAIProvider,
@@ -26,23 +27,39 @@ import {
 import { createVideoProvider } from "../../providers/index.js";
 import type { VideoProvider } from "../../providers/video.js";
 import { writeStepEvent } from "../events.js";
+import { persistSheet } from "../persist.js";
+import { cropRowsAs2x2 } from "../../lib/image/crop.js";
+import { fetchWithRetry } from "../../lib/http.js";
 import { logRun, logRunError } from "../../lib/log.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
+import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { describeProduct } from "./describe-product/index.js";
+import {
+  narrativeOutline,
+  PANELS_PER_SEGMENT,
+} from "./narrative-outline/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
 import { derivePersonBrief } from "./derive-person-brief/index.js";
-import { planRevision, type RevisionDirective } from "./plan-revision/index.js";
 import {
+  planRevision,
+  type RevisionDirective,
+} from "./plan-revision/index.js";
+import {
+  latestMasterStoryboard,
   latestProductSheet,
   latestStoryboardSheet,
   loadUploads,
+  persistedMasterStoryboard,
+  persistedSegmentStoryboardIndices,
+  persistedSegmentVideoIndices,
   resolvePersonRef,
+  segmentStoryboards,
 } from "./inputs.js";
 import {
   gateForCurrentStep,
@@ -105,9 +122,45 @@ function buildCtx(run: RunRow): SkillContext {
     productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
+    duration: run.duration,
+    // Multi-segment only — the locked visual-style bible. Each driveRun loop
+    // iteration re-reads the run and rebuilds ctx, so by the time
+    // segment_storyboard/segment_video run it is populated.
+    visualStyle: isMultiSegment(run.duration)
+      ? (run.visualStyle ?? undefined)
+      : undefined,
     openai,
     video,
   };
+}
+
+/**
+ * Run `items` through `worker` with at most `limit` in flight at once. Like a
+ * bounded `Promise.allSettled` — every item runs, failures are returned (not
+ * thrown) so the caller can surface the first one after all have settled. Used
+ * to throttle the parallel segment-video fan-out against BytePlus task limits.
+ */
+async function runBounded<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<PromiseSettledResult<void>[]> {
+  const results: PromiseSettledResult<void>[] = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      try {
+        await worker(items[i]);
+        results[i] = { status: "fulfilled", value: undefined };
+      } catch (reason) {
+        results[i] = { status: "rejected", reason };
+      }
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 /**
@@ -240,17 +293,219 @@ async function executeStep(
       // rendered person matches it exactly; videoBuilder routes both through the
       // face-asset path so Seedance's face filter accepts them.
       const personRef = await resolvePersonRef(runId, personUpload);
+      // Also pass the PRODUCT sheet as a plain ref (@Image1) so Seedance locks
+      // the product's exact identity/finish/markings instead of inheriting the
+      // storyboard's drift — same as the 60s segment path does.
+      const product = await latestProductSheet(runId);
+      const productSheetRef: ImageRef | undefined = product
+        ? { source: product.assetUrl, mime: "image/png" }
+        : undefined;
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
         hasPerson: Boolean(personRef),
         personFaceRef: personRef,
+        productSheetRef,
         scenes: (storyboard.scenes ?? []) as StoryboardScene[],
         // Pin the presenter's identity in the video prompt. Empty for uploaded
         // persons (no text brief) — the gender-locked scene text carries it then.
         characterAnchor: ctx.personBrief,
         userPrompt,
       });
+      return {};
+    }
+
+    // ── 60s pipeline ────────────────────────────────────────────────────
+
+    case "narrative_outline": {
+      // Plan the whole 60s arc as four segment summaries BEFORE any storyboard,
+      // so each storyboard can be handed the others' summaries (continuity).
+      await writeStepEvent({ runId, step, status: "started" });
+      const outline = await narrativeOutline(ctx, { userPrompt });
+      // Persist the arc AND the locked visual-style bible. visual_style is then
+      // read back into ctx on the next loop iteration and injected verbatim into
+      // every segment storyboard + video prompt.
+      await setRun(runId, {
+        narrativeOutline: outline,
+        visualStyle: outline.visualStyle,
+      });
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { segments: outline.segments.length },
+      });
+      return {};
+    }
+
+    case "segment_storyboard": {
+      // MULTI-SEGMENT ONE-MASTER: generate a SINGLE N×4-panel storyboard sheet,
+      // then crop it into N row strips — one per segment — that the video step
+      // animates. Consistency is inherent (it is ONE image), so there is no
+      // per-segment image fan-out here. Idempotent / resume:
+      //   • plain resume → skip if the master + all N crops already exist;
+      //     else reload/regenerate the master and fill only the MISSING crops.
+      //   • revise (directive) → rebuild the whole master and re-crop ALL N
+      //     (newest-per-index supersedes the old crop rows; no deletes).
+      const segCount = segmentCountFor(ctx.duration);
+      const product = await latestProductSheet(runId);
+      if (!product) throw new Error("no product sheet before segment storyboards");
+      const personSheetRef = await resolvePersonRef(runId, personUpload);
+      const productSheetRef: ImageRef = {
+        source: product.assetUrl,
+        mime: "image/png",
+      };
+
+      const haveMaster = await persistedMasterStoryboard(runId);
+      const crops = await persistedSegmentStoryboardIndices(runId);
+      const isRevise = Boolean(directive);
+
+      // Plain resume with the master + all N crops already persisted → done.
+      if (!isRevise && haveMaster && crops.size >= segCount) return {};
+
+      await writeStepEvent({ runId, step, status: "started" });
+
+      // 1. The N×4-panel master sheet. Generate fresh on a first run / revise; on
+      //    a mid-step resume reload the persisted master's bytes + scenes so the
+      //    one paid image gen is never repeated.
+      let masterBytes: Uint8Array;
+      let masterScenes: StoryboardScene[];
+      let masterPrompt: string;
+      if (isRevise || !haveMaster) {
+        const master = await imageAgent.generateMaster(ctx, {
+          productSheetRef,
+          personSheetRef,
+          userPrompt,
+          directive,
+          segmentCount: segCount,
+        });
+        masterBytes = master.bytes;
+        masterScenes = master.scenes;
+        masterPrompt = master.imagePrompt;
+        await persistSheet({
+          runId,
+          kind: "storyboard_master",
+          bytes: master.bytes,
+          mime: master.mime,
+          artifactInsert: async (tx, assetId) => {
+            const [row] = await tx
+              .insert(schema.storyboardSheets)
+              .values({
+                runId,
+                assetId,
+                scenes: master.scenes,
+                segmentIndex: null,
+                promptUsed: master.imagePrompt,
+                status: "draft",
+              })
+              .returning();
+            return row;
+          },
+        });
+      } else {
+        const existing = await latestMasterStoryboard(runId);
+        if (!existing) throw new Error("master storyboard missing on resume");
+        masterScenes = (existing.scenes ?? []) as StoryboardScene[];
+        masterPrompt = "segment crop of master";
+        const res = await fetchWithRetry(existing.assetUrl, undefined, {
+          label: "master-storyboard-download",
+        });
+        if (!res.ok) {
+          throw new Error(`master storyboard download failed: ${res.status}`);
+        }
+        masterBytes = new Uint8Array(await res.arrayBuffer());
+      }
+
+      // 2. Crop the master into N per-segment guides — each row re-tiled into a
+      //    2×2 block (BytePlus rejects the ~7:1 row strip) — and persist any missing
+      //    crop as a `storyboard_sheet` (segment_index 0..N-1) carrying that row's 4
+      //    scenes — exactly the shape segment_video reads via segmentStoryboards().
+      const strips = await cropRowsAs2x2(masterBytes, segCount);
+      for (let i = 0; i < segCount; i++) {
+        if (!isRevise && crops.has(i)) continue;
+        const stripScenes = masterScenes.slice(
+          i * PANELS_PER_SEGMENT,
+          i * PANELS_PER_SEGMENT + PANELS_PER_SEGMENT,
+        );
+        await persistSheet({
+          runId,
+          kind: "storyboard_sheet",
+          bytes: strips[i],
+          mime: "image/png",
+          artifactInsert: async (tx, assetId) => {
+            const [row] = await tx
+              .insert(schema.storyboardSheets)
+              .values({
+                runId,
+                assetId,
+                scenes: stripScenes,
+                segmentIndex: i,
+                promptUsed: masterPrompt,
+                status: "draft",
+              })
+              .returning();
+            return row;
+          },
+        });
+      }
+
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { segments: segCount },
+      });
+      return {};
+    }
+
+    case "segment_video": {
+      // Fan out the N 15s clips, one per row strip, throttled to
+      // SEGMENT_VIDEO_CONCURRENCY against BytePlus task limits. videoBuilder writes
+      // its own per-segment step events. Idempotent: skip segments already built.
+      const segCount = segmentCountFor(ctx.duration);
+      const sheets = await segmentStoryboards(runId);
+      if (sheets.length < segCount) {
+        throw new Error(
+          `segment_video: expected ${segCount} storyboards, found ${sheets.length}`,
+        );
+      }
+      const done = await persistedSegmentVideoIndices(runId);
+      const todo = sheets.filter((s) => !done.has(s.segmentIndex));
+      const personRef = await resolvePersonRef(runId, personUpload);
+      // Shared PRODUCT reference sheet — sent to every segment as a plain
+      // `@Image 1` ref so Seedance locks the product's identity identically
+      // across all four clips (the per-segment storyboard alone drifts).
+      const product = await latestProductSheet(runId);
+      const productSheetRef: ImageRef | undefined = product
+        ? { source: product.assetUrl, mime: "image/png" }
+        : undefined;
+
+      const results = await runBounded(
+        todo,
+        env.SEGMENT_VIDEO_CONCURRENCY,
+        async (sheet) => {
+          await videoAgent.videoBuilder(ctx, {
+            storyboardSheetRef: { source: sheet.assetUrl } as ImageRef,
+            hasPerson: Boolean(personRef),
+            personFaceRef: personRef,
+            productSheetRef,
+            scenes: (sheet.scenes ?? []) as StoryboardScene[],
+            characterAnchor: ctx.personBrief,
+            userPrompt,
+            segmentIndex: sheet.segmentIndex,
+            segmentCount: segCount,
+          });
+        },
+      );
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) throw (failed as PromiseRejectedResult).reason;
+      return {};
+    }
+
+    case "merge": {
+      // Concatenate the N clips into the final merged video. Writes its own
+      // started/passed/failed events and persists the merged final_video.
+      await mergeAgent.mergeSegments(ctx);
       return {};
     }
   }
@@ -443,8 +698,8 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         return;
       }
       // Reference gate always re-runs person_sheet (product is hidden); the
-      // storyboard gate re-runs storyboard.
-      const genStep = genStepForRevise(gate, "person");
+      // storyboard gate re-runs the storyboard (15s) / segment storyboards (60s).
+      const genStep = genStepForRevise(gate, "person", run.duration);
       const message = run.feedback?.trim() ?? "";
       const t0 = Date.now();
 
@@ -461,7 +716,13 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
           : undefined;
         let currentArtifact: ImageRef | undefined;
         if (gate === "storyboard") {
-          const sb = await latestStoryboardSheet(runId);
+          // Ground the revise on the WHOLE current storyboard the user rejected:
+          // the multi-segment N×4-panel master sheet (one image now, no
+          // per-segment target), else the 15s single sheet.
+          const master = isMultiSegment(run.duration)
+            ? await latestMasterStoryboard(runId)
+            : undefined;
+          const sb = master ?? (await latestStoryboardSheet(runId));
           if (sb) currentArtifact = { source: sb.assetUrl, mime: "image/png" };
         } else {
           currentArtifact = await resolvePersonRef(runId, personUpload);
@@ -550,7 +811,12 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         return;
       }
     } else {
-      step = nextStep(run.currentStep, personUploaded, run.criticEnabled);
+      step = nextStep(
+        run.currentStep,
+        personUploaded,
+        run.criticEnabled,
+        run.duration,
+      );
       if (!step) {
         await setRun(runId, { status: "completed" });
         return;
@@ -586,16 +852,18 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       return;
     }
 
-    // Success — advance the checkpoint, then decide the next state.
-    if (step === "video") {
+    // Success — advance the checkpoint, then decide the next state. The pipeline
+    // terminates at `video` (15s) or `merge` (60s).
+    if (step === "video" || step === "merge") {
       logRun(runId, "✓ run completed — final video ready", tag);
       await setRun(runId, { status: "completed", currentStep: step });
       return;
     }
     // Step-by-step gate: pause if completing this step lands us at a gate
-    // boundary (next step is storyboard or video). Independent of the Critic
-    // — gateForNext works whether or not inspection steps run.
-    const next = nextStep(step, personUploaded, run.criticEnabled);
+    // boundary (next step is storyboard/outline or video/segment_video).
+    // Independent of the Critic — gateForNext works whether or not inspection
+    // steps run.
+    const next = nextStep(step, personUploaded, run.criticEnabled, run.duration);
     const gate = gateForNext(next);
     if (run.mode === "confirm" && gate) {
       logRun(

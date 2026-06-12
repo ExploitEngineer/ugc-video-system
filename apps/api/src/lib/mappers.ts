@@ -8,7 +8,12 @@
 
 import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
 import type { Run } from "@ugc/shared";
-import { sceneSchema, stepEventStatusSchema } from "@ugc/shared";
+import {
+  isMultiSegment,
+  narrativeOutlineSchema,
+  sceneSchema,
+  stepEventStatusSchema,
+} from "@ugc/shared";
 import type { schema } from "../db/index.js";
 import { createLogger } from "./log.js";
 
@@ -72,6 +77,7 @@ export function toRunDto(row: RunRow): Run {
     adType: row.adType ?? "ugc",
     mode: row.mode,
     aspectRatio: row.aspectRatio,
+    duration: row.duration,
     criticEnabled: row.criticEnabled,
     status: row.status,
     // Pass `currentStep` through verbatim — null means "no step has completed
@@ -91,11 +97,43 @@ export function toRunDetailDto(
   assets: AssetRow[],
   stepEvents: StepEventRow[],
   storyboard?: StoryboardRow | null,
+  segmentStoryboards?: StoryboardRow[] | null,
 ): RunDetail {
+  // Multi-segment: group the segment sheets' scenes by segment, in `segmentIndex`
+  // order, and flatten into `scenes` for back-compat. 15s leaves both as the
+  // single storyboard (`segmentScenes` null).
+  let scenes = parseScenes(storyboard?.scenes);
+  let segmentScenes: Scene[][] | null = null;
+  if (
+    isMultiSegment(run.duration) &&
+    segmentStoryboards &&
+    segmentStoryboards.length
+  ) {
+    // Rows arrive oldest→newest; keep the LAST (newest) per segment index so a
+    // targeted regen's fresh sheet wins, then order by segment index.
+    const byIndex = new Map<number, StoryboardRow>();
+    for (const s of segmentStoryboards) {
+      if (s.segmentIndex != null) byIndex.set(s.segmentIndex, s);
+    }
+    const ordered = [...byIndex.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, s]) => s);
+    segmentScenes = ordered.map((s) => parseScenes(s.scenes) ?? []);
+    scenes = segmentScenes.flat();
+  }
+  // The planned narrative arc (jsonb). Validate at the wire boundary; drop on drift.
+  const outline =
+    isMultiSegment(run.duration) && run.narrativeOutline != null
+      ? (narrativeOutlineSchema.safeParse(run.narrativeOutline).data ?? null)
+      : null;
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),
     stepEvents: stepEvents.map(toStepEventDto),
-    scenes: parseScenes(storyboard?.scenes),
+    scenes,
+    segmentScenes,
+    narrativeOutline: outline,
+    // The locked visual-style bible (multi-segment only; null for 15s/pre-outline).
+    visualStyle: isMultiSegment(run.duration) ? (run.visualStyle ?? null) : null,
   };
 }

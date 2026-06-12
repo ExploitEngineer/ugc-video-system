@@ -15,7 +15,16 @@ export const runStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
-/** Discrete pipeline units (`runs.currentStep`, `step_events.step`). */
+/**
+ * Discrete pipeline units (`runs.currentStep`, `step_events.step`).
+ *
+ * The first six are the ~15s pipeline. The last four are the multi-segment
+ * pipeline (`isMultiSegment(duration)` — 30/45/60s): `narrative_outline` is
+ * dormant; `segment_storyboard`/`segment_video` are single steps that fan out
+ * over the run's N segments internally (the "which segment" dimension lives in
+ * the `segment_index` artifact columns, not in this enum), and `merge`
+ * concatenates the N clips into the final video. A 15s run never emits these.
+ */
 export const stepSchema = z.enum([
   "product_sheet",
   "person_sheet",
@@ -23,17 +32,30 @@ export const stepSchema = z.enum([
   "storyboard",
   "storyboard_inspection",
   "video",
+  "narrative_outline",
+  "segment_storyboard",
+  "segment_video",
+  "merge",
 ]);
 export type Step = z.infer<typeof stepSchema>;
 
-/** Kind of stored file (`assets.kind`). */
+/**
+ * Kind of stored file (`assets.kind`). `final_video` is the single ~15s clip
+ * AND the merged multi-segment output; `segment_video` is one of the N 15s
+ * segment clips of a 30/45/60s run. `storyboard_master` is the multi-segment
+ * single N×4-panel sheet; its cropped row blocks are persisted as
+ * `storyboard_sheet` (`segment_index` 0..N-1), the same kind a 15s run's
+ * single sheet uses.
+ */
 export const assetKindSchema = z.enum([
   "product_upload",
   "person_upload",
   "product_sheet",
   "person_sheet",
   "storyboard_sheet",
+  "storyboard_master",
   "final_video",
+  "segment_video",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 
@@ -60,3 +82,26 @@ export type AdType = z.infer<typeof adTypeSchema>;
 /** Approval state of a generated artifact (sheets, video). */
 export const artifactStatusSchema = z.enum(["draft", "approved", "rejected"]);
 export type ArtifactStatus = z.infer<typeof artifactStatusSchema>;
+
+/**
+ * Target length of the final ad, chosen by the user at run creation. One ~15s
+ * segment per step of 15: `15s` (default) is the single-storyboard, single-clip
+ * pipeline; `30s`/`45s`/`60s` author one master sheet of N×4 panels, crop it
+ * into N row blocks, render N 15s clips, and merge them into the final video.
+ */
+export const durationSchema = z.enum(["15s", "30s", "45s", "60s"]);
+export type Duration = z.infer<typeof durationSchema>;
+
+/** Number of ~15s segments for a duration: 15s→1, 30s→2, 45s→3, 60s→4. */
+export function segmentCountFor(duration: Duration): number {
+  return Number.parseInt(duration, 10) / 15;
+}
+
+/**
+ * Whether a run uses the multi-segment pipeline (master sheet → row crops →
+ * per-segment videos → merge). True for everything but `15s`, which stays the
+ * single-storyboard, single-clip path.
+ */
+export function isMultiSegment(duration: Duration): boolean {
+  return duration !== "15s";
+}

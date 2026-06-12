@@ -15,8 +15,8 @@ import {
   gateOf,
   gateStartsStep,
   STEP_LABEL,
-  STEP_ORDER,
   type StepState,
+  stepOrderFor,
   stepState,
   stepSublabel,
 } from "@/components/studio/run/run-meta";
@@ -28,6 +28,11 @@ const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
   person_sheet: "person_sheet",
   storyboard: "storyboard_sheet",
   video: "final_video",
+  // Multi-segment: segment_storyboard's artifact is the single N×4-panel master
+  // sheet; the merge step's is the final merged clip. The N segment clips are
+  // shown in their own gallery in the run view.
+  segment_storyboard: "storyboard_master",
+  merge: "final_video",
 };
 
 /** Compact status pill — a colored dot + label, far lighter than a chip. */
@@ -196,11 +201,14 @@ export function StepTimeline({ run }: { run: RunDetail }) {
   // video at the storyboard gate) — surfaced as an explicit "Up next" cue.
   const awaitingGate =
     run.status === "awaiting_confirmation" ? gateOf(run.currentStep) : null;
-  const upNextStep = awaitingGate ? gateStartsStep(awaitingGate) : null;
+  const upNextStep = awaitingGate
+    ? gateStartsStep(awaitingGate, run.duration)
+    : null;
+  const order = stepOrderFor(run.duration);
 
   return (
     <ol className="relative">
-      {STEP_ORDER.map((step, i) => {
+      {order.map((step, i) => {
         const state = stepState(run, step);
         const upNext = step === upNextStep && state === "pending";
         const assetKind = STEP_ASSET_KIND[step];
@@ -211,7 +219,7 @@ export function StepTimeline({ run }: { run: RunDetail }) {
           ? run.assets.findLast((a) => a.kind === assetKind)
           : undefined;
         const showAsset = asset && (state === "done" || state === "awaiting");
-        const last = i === STEP_ORDER.length - 1;
+        const last = i === order.length - 1;
         const dim = (state === "pending" || state === "skipped") && !upNext;
         const live =
           upNext ||

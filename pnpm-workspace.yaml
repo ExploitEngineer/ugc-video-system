@@ -11,11 +11,13 @@ allowBuilds:
   "@biomejs/biome": true
   esbuild: true
   sharp: true
+  ffmpeg-static: true
 
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - esbuild
   - sharp
+  - ffmpeg-static
 
 ignoredBuiltDependencies:
   - unrs-resolver

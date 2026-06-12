@@ -1,6 +1,11 @@
 // Shared display metadata for run steps + statuses. Pure data/helpers, no JSX.
 
-import type { RunDetail, RunStatus, Step } from "@ugc/shared";
+import {
+  isMultiSegment,
+  type RunDetail,
+  type RunStatus,
+  type Step,
+} from "@ugc/shared";
 
 // Critic inspection steps (product_inspection / storyboard_inspection) are
 // intentionally omitted — the Critic is parked (off by default), so they never
@@ -12,6 +17,20 @@ export const STEP_ORDER: Step[] = [
   "storyboard",
   "video",
 ];
+
+/** The multi-segment pipeline timeline — master storyboard → N clips → merge. */
+export const STEP_ORDER_MULTI: Step[] = [
+  "product_sheet",
+  "person_sheet",
+  "segment_storyboard",
+  "segment_video",
+  "merge",
+];
+
+/** The timeline steps for a run, by its duration. */
+export function stepOrderFor(duration: RunDetail["duration"]): Step[] {
+  return isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
+}
 
 /**
  * The two reference sheets the backend generates IN PARALLEL as a single phase.
@@ -29,6 +48,11 @@ export const STEP_LABEL: Record<Step, string> = {
   storyboard: "Storyboard sheet",
   storyboard_inspection: "Storyboard inspection",
   video: "Final ad video",
+  // 60s pipeline steps
+  narrative_outline: "Story outline",
+  segment_storyboard: "Storyboard sheets",
+  segment_video: "Segment videos",
+  merge: "Final merged video",
 };
 
 /** The skill + agent responsible for each step — surfaced live in the UI. */
@@ -47,6 +71,14 @@ export const STEP_AGENT: Record<Step, StepAgent> = {
     agent: "Critic Agent",
   },
   video: { skill: "Video Builder", agent: "Video Agent" },
+  // 60s pipeline steps
+  narrative_outline: {
+    skill: "Narrative Outline",
+    agent: "Creative Direction Agent",
+  },
+  segment_storyboard: { skill: "Storyboard", agent: "Image Agent" },
+  segment_video: { skill: "Video Builder", agent: "Video Agent" },
+  merge: { skill: "Merge", agent: "Video Agent" },
 };
 
 /** `"<skill> · <agent>"` — the timeline sublabel for a step. */
@@ -79,7 +111,13 @@ export function gateOf(step: Step | null): Gate | null {
 }
 
 /** The agent step that approving a gate will START next. */
-export function gateStartsStep(gate: Gate): Step {
+export function gateStartsStep(
+  gate: Gate,
+  duration: RunDetail["duration"] = "15s",
+): Step {
+  if (isMultiSegment(duration)) {
+    return gate === "reference" ? "segment_storyboard" : "segment_video";
+  }
   return gate === "reference" ? "storyboard" : "video";
 }
 
@@ -114,7 +152,7 @@ export type StepState =
 export function activeSteps(run: RunDetail): Step[] {
   if (run.status !== "running" && run.status !== "regenerating") return [];
   const active: Step[] = [];
-  for (const step of STEP_ORDER) {
+  for (const step of stepOrderFor(run.duration)) {
     const events = run.stepEvents.filter((e) => e.step === step);
     if (events.length === 0) continue;
     const started = events.some((e) => e.status === "started");
@@ -128,10 +166,11 @@ export function activeSteps(run: RunDetail): Step[] {
 
 /** Resolve the display state of a single step from the run detail. */
 export function stepState(run: RunDetail, step: Step): StepState {
-  const idx = STEP_ORDER.indexOf(step);
+  const order = stepOrderFor(run.duration);
+  const idx = order.indexOf(step);
   // `currentStep` is null before the first step completes (and during the
   // parallel reference phase) → -1, so no step reads as "behind currentStep".
-  const currentIdx = run.currentStep ? STEP_ORDER.indexOf(run.currentStep) : -1;
+  const currentIdx = run.currentStep ? order.indexOf(run.currentStep) : -1;
   const events = run.stepEvents.filter((e) => e.step === step);
   const hasPassed = events.some((e) => e.status === "passed");
 
@@ -140,7 +179,7 @@ export function stepState(run: RunDetail, step: Step): StepState {
   if (
     step === "person_sheet" &&
     events.length === 0 &&
-    currentIdx > STEP_ORDER.indexOf("person_sheet")
+    currentIdx > order.indexOf("person_sheet")
   ) {
     return "skipped";
   }

@@ -4,15 +4,29 @@
 // Every step reloads from the DB (never threads state through memory) so a
 // crash/restart resumes purely from persisted rows.
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "../../db/index.js";
 import type { ImageRef } from "../../providers/openai/index.js";
+import type { NarrativeOutline } from "../types.js";
 
 type ProductReferenceSheet = typeof schema.productReferenceSheets.$inferSelect;
 type StoryboardSheet = typeof schema.storyboardSheets.$inferSelect;
 
 export interface SheetHandle {
   artifactId: string;
+  assetId: string;
+  assetUrl: string;
+}
+
+/** One 60s segment storyboard, resolved to the NEWEST sheet for its index. */
+export interface SegmentSheetHandle extends SheetHandle {
+  segmentIndex: number;
+  scenes: StoryboardSheet["scenes"];
+}
+
+/** One 60s segment video clip + its stored asset URL, for the merge step. */
+export interface SegmentVideoHandle {
+  segmentIndex: number;
   assetId: string;
   assetUrl: string;
 }
@@ -76,6 +90,143 @@ export async function latestStoryboardSheet(runId: string): Promise<
     assetUrl: row.url,
     scenes: row.sheet.scenes,
   };
+}
+
+// ── 60s pipeline loaders ──────────────────────────────────────────────
+
+/**
+ * Newest 60s MASTER storyboard sheet (the single 16-panel 4×4 sheet) + its URL
+ * and 16 scenes. Distinguished from the four cropped row strips by its asset
+ * `kind = "storyboard_master"` (the crops are `storyboard_sheet`); distinguished
+ * from a 15s single sheet by the kind too. Undefined until the master is built.
+ */
+export async function latestMasterStoryboard(runId: string): Promise<
+  (SheetHandle & { scenes: StoryboardSheet["scenes"] }) | undefined
+> {
+  const [row] = await db
+    .select({ sheet: schema.storyboardSheets, url: schema.assets.url })
+    .from(schema.storyboardSheets)
+    .innerJoin(
+      schema.assets,
+      eq(schema.storyboardSheets.assetId, schema.assets.id),
+    )
+    .where(
+      and(
+        eq(schema.storyboardSheets.runId, runId),
+        eq(schema.assets.kind, "storyboard_master"),
+      ),
+    )
+    .orderBy(desc(schema.assets.createdAt))
+    .limit(1);
+  if (!row?.url) return undefined;
+  return {
+    artifactId: row.sheet.id,
+    assetId: row.sheet.assetId,
+    assetUrl: row.url,
+    scenes: row.sheet.scenes,
+  };
+}
+
+/** Whether the 60s master sheet has been persisted (idempotent resume). */
+export async function persistedMasterStoryboard(runId: string): Promise<boolean> {
+  return Boolean(await latestMasterStoryboard(runId));
+}
+
+/** The planned 60s arc (`runs.narrativeOutline`), or undefined if not planned yet. */
+export async function latestNarrativeOutline(
+  runId: string,
+): Promise<NarrativeOutline | undefined> {
+  const [row] = await db
+    .select({ outline: schema.runs.narrativeOutline })
+    .from(schema.runs)
+    .where(eq(schema.runs.id, runId))
+    .limit(1);
+  const outline = row?.outline as NarrativeOutline | null | undefined;
+  return outline && Array.isArray(outline.segments) ? outline : undefined;
+}
+
+/**
+ * The NEWEST storyboard sheet per segment index (0..3), ordered by index.
+ * A targeted regen inserts a fresh row for one index; ordering by the asset's
+ * createdAt desc and keeping the first seen per index makes the latest win.
+ */
+export async function segmentStoryboards(
+  runId: string,
+): Promise<SegmentSheetHandle[]> {
+  const rows = await db
+    .select({ sheet: schema.storyboardSheets, url: schema.assets.url })
+    .from(schema.storyboardSheets)
+    .innerJoin(
+      schema.assets,
+      eq(schema.storyboardSheets.assetId, schema.assets.id),
+    )
+    .where(
+      and(
+        eq(schema.storyboardSheets.runId, runId),
+        isNotNull(schema.storyboardSheets.segmentIndex),
+      ),
+    )
+    .orderBy(desc(schema.assets.createdAt));
+
+  const byIndex = new Map<number, SegmentSheetHandle>();
+  for (const row of rows) {
+    const idx = row.sheet.segmentIndex;
+    if (idx == null || !row.url || byIndex.has(idx)) continue;
+    byIndex.set(idx, {
+      segmentIndex: idx,
+      artifactId: row.sheet.id,
+      assetId: row.sheet.assetId,
+      assetUrl: row.url,
+      scenes: row.sheet.scenes,
+    });
+  }
+  return [...byIndex.values()].sort((a, b) => a.segmentIndex - b.segmentIndex);
+}
+
+/** Segment indices that already have a persisted storyboard sheet (idempotent resume). */
+export async function persistedSegmentStoryboardIndices(
+  runId: string,
+): Promise<Set<number>> {
+  const sheets = await segmentStoryboards(runId);
+  return new Set(sheets.map((s) => s.segmentIndex));
+}
+
+/** The NEWEST segment video clip per index (0..3), ordered by index, for merge. */
+export async function segmentVideos(
+  runId: string,
+): Promise<SegmentVideoHandle[]> {
+  const rows = await db
+    .select({
+      segmentIndex: schema.videos.segmentIndex,
+      assetId: schema.videos.assetId,
+      url: schema.assets.url,
+      createdAt: schema.assets.createdAt,
+    })
+    .from(schema.videos)
+    .innerJoin(schema.assets, eq(schema.videos.assetId, schema.assets.id))
+    .where(
+      and(
+        eq(schema.videos.runId, runId),
+        isNotNull(schema.videos.segmentIndex),
+      ),
+    )
+    .orderBy(desc(schema.assets.createdAt));
+
+  const byIndex = new Map<number, SegmentVideoHandle>();
+  for (const row of rows) {
+    const idx = row.segmentIndex;
+    if (idx == null || !row.url || byIndex.has(idx)) continue;
+    byIndex.set(idx, { segmentIndex: idx, assetId: row.assetId, assetUrl: row.url });
+  }
+  return [...byIndex.values()].sort((a, b) => a.segmentIndex - b.segmentIndex);
+}
+
+/** Segment indices that already have a persisted video clip (idempotent resume). */
+export async function persistedSegmentVideoIndices(
+  runId: string,
+): Promise<Set<number>> {
+  const vids = await segmentVideos(runId);
+  return new Set(vids.map((v) => v.segmentIndex));
 }
 
 /** Newest generated person sheet URL for the run (none when person uploaded). */

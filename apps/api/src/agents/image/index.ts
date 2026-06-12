@@ -3,17 +3,27 @@
 
 import { generatePersonImage } from "./person-image/index.js";
 import { productSheetBuilder } from "./product-sheet/index.js";
-import { storyboardGenerator } from "./storyboard/index.js";
+import { generateMaster, storyboardGenerator } from "./storyboard/index.js";
 
 export const imageAgent = {
   productSheetBuilder,
   generatePersonImage,
   storyboardGenerator,
+  generateMaster,
 };
 
 export type ImageAgent = typeof imageAgent;
 
-export { productSheetBuilder, generatePersonImage, storyboardGenerator };
+export {
+  productSheetBuilder,
+  generatePersonImage,
+  storyboardGenerator,
+  generateMaster,
+};
 export type { ProductSheetInput } from "./product-sheet/index.js";
 export type { PersonImageInput } from "./person-image/index.js";
-export type { StoryboardInput } from "./storyboard/index.js";
+export type {
+  StoryboardInput,
+  GenerateMasterInput,
+  MasterStoryboard,
+} from "./storyboard/index.js";

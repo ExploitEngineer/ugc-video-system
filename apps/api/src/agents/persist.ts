@@ -14,6 +14,8 @@ export interface PersistSheetInput<TArtifact> {
   kind: AssetKind;
   bytes: Uint8Array;
   mime: string;
+  /** Optional asset metadata (e.g. `{ segmentIndex }` so the UI can order segments). */
+  meta?: Record<string, unknown>;
   artifactInsert: (tx: Tx, assetId: string) => Promise<TArtifact>;
 }
 
@@ -28,6 +30,7 @@ export async function persistSheet<TArtifact>({
   kind,
   bytes,
   mime,
+  meta,
   artifactInsert,
 }: PersistSheetInput<TArtifact>): Promise<PersistSheetResult<TArtifact>> {
   const { storagePath, url } = await uploadAsset({
@@ -46,6 +49,7 @@ export async function persistSheet<TArtifact>({
         storagePath,
         url,
         mime,
+        meta: meta ?? null,
       })
       .returning();
 

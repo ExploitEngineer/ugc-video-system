@@ -51,6 +51,33 @@ export interface StoryboardPromptInput {
    * user's feedback rather than the Critic's free-text issues.
    */
   directive?: RevisionDirective;
+  // ── 60s segment continuity (absent ⇒ single-sheet 15s behavior) ──
+  /** This sheet's segment position in a 60s run (0..3). */
+  segmentIndex?: number;
+  /** This segment's own brief from the narrative outline. */
+  segmentSummary?: string;
+  /** The OTHER three segments' summaries, for cross-segment continuity. */
+  otherSummaries?: string[];
+  /**
+   * MULTI-SEGMENT ONE-MASTER mode. When true, this single sheet IS the whole
+   * multi-segment storyboard: N×4 panels in an N-row grid (row-major) of ONE
+   * continuous coherent scene, not the 4-panel 15s sheet. The arc is authored
+   * from the user prompt + briefs directly (no per-segment summaries).
+   * `segmentIndex` / `segmentSummary` / `otherSummaries` are NOT used. Falsy ⇒
+   * the 15s sheet. Pair with `segmentCount` (rows) to size the grid.
+   */
+  full60s?: boolean;
+  /**
+   * Master-mode segment rows (2/3/4 for 30/45/60s) → an N×4 master grid
+   * (8/12/16 panels). Ignored when `full60s` is falsy. Defaults to 4.
+   */
+  segmentCount?: number;
+  /**
+   * Multi-segment only — the locked visual-style bible (`runs.visual_style`).
+   * Injected VERBATIM (identical string across all segment storyboards AND video
+   * prompts) so the whole ad shares one grade/lens/lighting/palette.
+   */
+  visualStyle?: string;
 }
 
 export interface StoryboardScene {
@@ -105,11 +132,169 @@ export function buildStoryboardPrompt({
   aspectRatio,
   critique,
   directive,
+  segmentIndex,
+  segmentSummary,
+  otherSummaries,
+  visualStyle,
+  full60s,
+  segmentCount,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
+
+  // ── MULTI-SEGMENT ONE-MASTER mode (full60s): this single sheet is the WHOLE
+  // multi-segment storyboard — N×4 panels in an N-row grid of ONE continuous
+  // coherent scene. The 15s path (full60s falsy) keeps its 4-panel 2×2 sheet
+  // byte-for-byte; every master divergence is isolated in the fragments below. ──
+  const isMaster = Boolean(full60s);
+
+  // Master grid geometry, sized by the run's segment count (rows × 4 panels).
+  const rows = segmentCount ?? 4;
+  const totalPanels = rows * 4; // PANELS_PER_SEGMENT = 4
+  const totalSec = rows * 15;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const lastBadge = pad2(totalPanels);
+  const NUM_WORD: Record<number, string> = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    8: "eight",
+    12: "twelve",
+    16: "sixteen",
+  };
+  const rowsWord = NUM_WORD[rows] ?? String(rows);
+  const totalWordLower = NUM_WORD[totalPanels] ?? String(totalPanels);
+  const totalWordUpper = totalWordLower.toUpperCase();
+  // "row 1 = panels 01-04 left→right, row 2 = 05-08, …" — the master's row map.
+  const rowMap = Array.from({ length: rows }, (_, r) => {
+    const span = `${pad2(r * 4 + 1)}-${pad2(r * 4 + 4)}`;
+    return r === 0 ? `row 1 = panels ${span} left→right` : `row ${r + 1} = ${span}`;
+  }).join(", ");
+  // "panels 1-4, 5-8, …" — the per-segment ~15s timing stretches.
+  const stretchMap = Array.from(
+    { length: rows },
+    (_, r) => `${r * 4 + 1}-${r * 4 + 4}`,
+  ).join(", ");
+  // Word budget scales with panel count (~16-20 words/panel).
+  const masterWords =
+    ({ 8: "140-200", 12: "190-260", 16: "240-320" } as Record<number, string>)[
+      totalPanels
+    ] ?? "240-320";
+
+  // STEP 2 opener — N×4 scenes of ONE continuous scene vs the 15s 4.
+  const scriptStep = isMaster
+    ? [
+        `STEP 2 — SCRIPT. Produce exactly ${totalWordUpper} scenes, no more, no less. \`index\``,
+        `runs 1..${totalPanels} in play order — ONE continuous ~${totalSec}-second take of a SINGLE`,
+        "coherent scene (see ONE CONTINUOUS SCENE below), split only for timing into",
+        `${rowsWord} ~15s stretches (panels ${stretchMap}), each panel ~3-4s. Keep`,
+        `the SAME place, person, wardrobe, product and look across all ${totalWordLower}; only`,
+        "the SHOT and the small moment change. For each scene give: a `cameraAngle`,",
+        "the `actionMovement` (what moves / how the camera moves), a DETAILED",
+        "`sceneDescription`, the spoken `transcript` line described above, and a short",
+        "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
+      ]
+    : [
+        "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
+        "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
+        "continuous ~15s arc. For each scene give: a `cameraAngle`, the",
+        "`actionMovement` (what moves / how the camera moves), a DETAILED",
+        "`sceneDescription`, the spoken `transcript` line described above, and a short",
+        "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
+      ];
+
+  // STEP 3 layout — N×4 grid vs the 15s 2×2.
+  const gridLayout = isMaster
+    ? [
+        `- ONE single image, exactly ${totalWordUpper} equal-size panels in a clean ${rows}×4 grid`,
+        `  (${rows} rows × 4 columns), ROW-MAJOR reading order: ${rowMap} — with only thin,`,
+        "  uniform plain separator borders between panels.",
+      ]
+    : [
+        "- ONE single image, exactly FOUR equal-size panels in reading order — a",
+        "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
+        "  with only thin, uniform plain separator borders between panels.",
+      ];
+
+  // Distinct-SHOTS rule — variety must come from the CAMERA + moment, NOT from
+  // changing the world (which would re-introduce the scene-jumping). 15s ⇒ empty.
+  const antiRepetition = isMaster
+    ? [
+        "- Make every panel a DISTINCT SHOT of the SAME continuous scene: vary the",
+        "  camera angle, shot type, framing and the small moment/action across panels",
+        "  (wide / medium / close, different angles, a beat later). Do NOT repeat a",
+        "  near-identical frame — but do NOT change the location, outfit, lighting or",
+        "  time-of-day to create variety; the variety is in the CAMERA and the moment,",
+        "  never the world.",
+      ]
+    : [];
+
+  // PANEL LABELS badge range — 01..N×4 vs 01..04.
+  const labelBadge = isMaster
+    ? [
+        `- A scene-number BADGE in a top corner of each panel: 01 through ${lastBadge}, in`,
+        "  ROW-MAJOR reading order. Small, clean, legible.",
+      ]
+    : [
+        "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
+        "  reading order. Small, clean, legible.",
+      ];
+
+  // Closing JSON-spec fragments (word budget, layout phrase, badge range, count).
+  const imagePromptWords = isMaster ? masterWords : "150-200";
+  const layoutPhrase = isMaster
+    ? `the ${rows}×4 ${totalWordLower}-panel layout (row-major 01-${lastBadge}, all panels visually distinct) with thin`
+    : "the 2×2 four-panel layout with thin";
+  const badgeRangePhrase = isMaster ? `(01–${lastBadge}, in order)` : "(01–04, in order)";
+  const scenesCountLine = isMaster
+    ? `\`scenes\` MUST have exactly ${totalPanels} entries, in order. Set every scene's \`adStyle\``
+    : "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`";
+
+  // Master: the N×4 panels are ONE coherent continuous scene (no per-segment
+  // summaries — the arc is authored from the user prompt + briefs).
+  const coherentSceneBlock = isMaster
+    ? [
+        "",
+        `ONE CONTINUOUS SCENE — these ${totalWordLower} panels are a SINGLE ~${totalSec}-second take of`,
+        `ONE coherent scene, NOT ${totalWordLower} different scenes. Across ALL ${totalWordLower} keep the`,
+        "SAME person, the SAME wardrobe and hair, the SAME product, the SAME location",
+        "and the SAME lighting/look. A gentle, natural progression is fine (one real",
+        "moment unfolding in one place — e.g. the same room as the light shifts a",
+        "little), but NEVER cut to a different place, outfit, time-of-day or set",
+        `between panels. Panels 1→${totalPanels} flow as ONE continuous shoot of the SAME scene;`,
+        "only the CAMERA (shot type, angle, distance) and the small moment/action move",
+        "from panel to panel. Build this arc from the user's prompt and the product —",
+        "do NOT split it into separate vignettes.",
+        ...(adType === "ugc"
+          ? [
+              "Because this is UGC, the continuous action IS the person presenting the",
+              `product to camera in that one spot — across the ${totalWordLower} panels they keep`,
+              "showing and handling it to the lens (hold it up, take it off / put it on,",
+              "rotate it, point at a detail, demonstrate it), addressing the camera; the",
+              "product is clearly visible and the focus, never passive background.",
+            ]
+          : []),
+      ]
+    : [];
+
+  // User-block "produce the script" line — N×4 vs 4.
+  const produceLine = isMaster
+    ? [
+        `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
+        "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
+        `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
+        `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
+        "and no arrows.",
+      ]
+    : [
+        "Review them, then produce the 4-scene script (with spoken transcripts and a",
+        "brief panelCaption per scene) and the composite storyboard-sheet plan —",
+        "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+        "its panelCaption bar, in order; no other text and no arrows.",
+      ];
 
   // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
   // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
@@ -167,16 +352,27 @@ export function buildStoryboardPrompt({
   const typeBlock =
     adType === "ugc"
       ? [
-          "AD TYPE — UGC (user-generated-content review):",
-          "- The ad is a REAL PERSON giving an authentic, first-person review /",
-          "  testimonial of the product, talking DIRECTLY TO CAMERA as if",
-          "  recommending it to a friend. The arc: hook → wearing / using the",
-          "  product → a concrete benefit or reaction → a closing recommendation.",
-          "- Each scene's `transcript` is the natural, conversational line the",
-          "  on-screen person SPEAKS to camera in that scene (first person, ~1",
-          "  short sentence, real human speech — not ad copy), referencing the",
-          "  product as they WEAR or USE it. Keep lines short and split around the",
-          "  action beats; the four lines flow as one continuous spoken review.",
+          "AD TYPE — UGC (a real person SHOWING the product to camera):",
+          "- The ad is a REAL PERSON talking TO CAMERA about the product the way",
+          "  they'd show it to a friend — relaxed, genuine, off-the-cuff. NOT a",
+          "  scripted ad, review read or sales pitch, and NOT silent lifestyle b-roll.",
+          "- They ACTIVELY DEMONSTRATE the product to the lens across the panels: hold",
+          "  it up close to camera, take it off / put it on (or pick it up / handle",
+          "  it), turn or rotate it to show its key parts and details, point at a",
+          "  feature, and show it actually working — like a creator doing a real",
+          "  hands-on review. The PRODUCT is the focus of most panels, shown clearly",
+          "  and large to camera, NOT just worn or held passively in the background.",
+          "- They look at and address the camera. The flow is natural: show the",
+          "  product → demonstrate / use it → an honest reaction. It ENDS on a real",
+          "  personal verdict, never a sales close or call-to-action.",
+          "- AVOID passive lifestyle filler that hides the product: walking in,",
+          "  dropping a bag, stretching, relaxing, gazing away, or candid moments not",
+          "  addressed to camera.",
+          "- Each scene's `transcript` is one natural spoken line the on-screen",
+          "  person says in that scene (first person, the way people really talk —",
+          "  contractions, casual phrasing, not ad copy), tied to what they're",
+          "  SHOWING/doing with the product. Keep lines short and let their length",
+          "  vary; the lines flow as one continuous, natural bit of talking.",
         ]
       : [
           "AD TYPE — Inspirational (open-ended cinematic):",
@@ -209,7 +405,8 @@ export function buildStoryboardPrompt({
     "- Each line is a DIFFERENT beat that OPENS with a different word — a distinct",
     "  concrete benefit, feature, use-moment or reaction tied to what that panel",
     "  shows. Across the four: hook → product-in-use → a concrete benefit/reaction",
-    "  → a closing line. No two lines may share an idea, a phrase or an opener.",
+    "  → an honest closing thought (a real personal verdict, never a pitch or",
+    "  call-to-action). No two lines may share an idea, a phrase or an opener.",
     hasPerson
       ? `- Write the way THIS specific person speaks — their age, gender and energy from the CHARACTER ANCHOR${person ? ` (${person})` : ""}; a real individual, never a generic creator template or brand script.`
       : `- Make the wording sound like a real, specific human (${speaker}), not interchangeable ad copy.`,
@@ -337,23 +534,20 @@ export function buildStoryboardPrompt({
     "",
     ...presentationBlock,
     "",
-    "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
-    "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
-    "continuous ~15s arc. For each scene give: a `cameraAngle`, the",
-    "`actionMovement` (what moves / how the camera moves), a DETAILED",
-    "`sceneDescription`, the spoken `transcript` line described above, and a short",
-    "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
+    ...scriptStep,
     "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
-    "  setting, the key action, and what the PRODUCT visibly DOES to show it is",
-    "  genuinely working (substitute THIS product's real motion — a watch's hand",
-    "  sweeping; a cap twisted off and the liquid level dropping; a shoe flexing).",
+    "  setting (a real, ordinary place that fits how THIS product is actually",
+    "  used — not a styled studio or stock-commercial cliché), the key action, and",
+    "  what the PRODUCT visibly DOES to show it is genuinely working (substitute",
+    "  THIS product's real motion — a watch's hand sweeping; a cap twisted off and",
+    "  the liquid level dropping; a shoe flexing).",
     "  Keep it LEAN — no padding, no second/extra clauses; richer than the",
     "  panelCaption but close to it in spirit. It feeds the video step, which does",
     "  BETTER with short, focused direction than long paragraphs — do NOT write a",
     "  paragraph. Match the panel, the real product (per the identity above) and",
     "  the real person with correct, consistent pronouns (see CHARACTER ANCHOR).",
-    '  e.g. (STRUCTURE ONLY — substitute THIS product) "Medium close-up in a sunlit',
-    '  kitchen; she sips from the bottle, cap off in her other hand, water level dropping."',
+    '  e.g. (STRUCTURE ONLY — substitute THIS product and a fitting real setting)',
+    '  "Medium close-up; she [uses the product] and [its real working motion shows]."',
     "- `panelCaption` — the on-image caption-bar label, in the MANDATORY format",
     "  `<SHOT TYPE>. <concrete action that NAMES the product>`. The shot-type",
     "  prefix is REQUIRED on every caption (WIDE SHOT / MEDIUM SHOT / MEDIUM",
@@ -371,12 +565,11 @@ export function buildStoryboardPrompt({
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
-    "- ONE single image, exactly FOUR equal-size panels in reading order — a",
-    "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
-    "  with only thin, uniform plain separator borders between panels.",
+    ...gridLayout,
     `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
     "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
     "  frame lifted straight from the finished ad.",
+    ...antiRepetition,
     ...keyframeLook,
     "- Keep the product (and the person, if present) faithfully consistent with",
     "  the attached reference sheets in EVERY panel — the SAME product with all",
@@ -399,8 +592,7 @@ export function buildStoryboardPrompt({
       : []),
     "",
     "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
-    "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
-    "  reading order. Small, clean, legible.",
+    ...labelBadge,
     "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
     "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
     "  clean uppercase storyboard lettering — like the supplied example sheet.",
@@ -419,11 +611,10 @@ export function buildStoryboardPrompt({
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
-    "`imagePrompt` is ONE self-contained paragraph, roughly 150-200 words — long",
-    "enough to be specific, but NOT a rule restatement. It MUST cover: the 2×2",
-    "four-panel layout with thin",
+    `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
+    `enough to be specific, but NOT a rule restatement. It MUST cover: ${layoutPhrase}`,
     `plain separator borders at ${resolutionLabel}; each panel's number badge`,
-    "(01–04, in order) + a thin uppercase storyboard-style bottom caption bar",
+    `${badgeRangePhrase} + a thin uppercase storyboard-style bottom caption bar`,
     "(the EXACT caption text is appended after your prompt automatically — so",
     "describe the bar's STYLE and placement only; do NOT write the caption words",
     'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
@@ -439,23 +630,66 @@ export function buildStoryboardPrompt({
       ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
       : "the polished cinematic keyframe look.",
     hasPerson
-      ? "It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the four panels, faithful to the person sheet."
+      ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? totalWordLower : "four"} panels, faithful to the person sheet.`
       : "",
-    "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`",
+    scenesCountLine,
     `to "${style}".`,
   ]
     .filter(Boolean)
     .join("\n");
 
+  // 60s continuity: this sheet renders ONE ~15s segment of a four-part ad. The
+  // segment's own brief drives these four panels; the OTHER summaries are
+  // consistency context only (NOT to be drawn) so the four sheets read as one
+  // ad — same person/wardrobe, product state carried forward, coherent
+  // time/location progression, clean hand-off to the neighbouring segments.
+  const isSegment = segmentSummary != null && segmentIndex != null;
+  const continuityBlock = isSegment
+    ? [
+        "",
+        `SEGMENT ${segmentIndex + 1} OF 4 — this storyboard renders ONE 15-second`,
+        "segment of a single continuous 60-second ad. Your four panels cover ONLY",
+        "this segment's beat.",
+        `THIS SEGMENT'S BRIEF: ${segmentSummary.trim()}`,
+        ...(otherSummaries && otherSummaries.length
+          ? [
+              "THE OTHER SEGMENTS (for continuity ONLY — do NOT render these; stay",
+              "consistent with them):",
+              ...otherSummaries
+                .filter((s) => s?.trim())
+                .map((s) => `  - ${s.trim()}`),
+            ]
+          : []),
+        "Keep the SAME person, wardrobe, hairstyle and the SAME product across all",
+        "four segments; carry the product's state FORWARD (never reset it); keep a",
+        "coherent time-of-day and location progression. These four panels must hand",
+        "off cleanly to the adjacent segments so the final 60s cut feels seamless.",
+      ]
+    : [];
+
+  // 60s only — the ONE locked visual-style bible, injected VERBATIM here and in
+  // every other segment storyboard + every video prompt, so all four panels (×4
+  // sheets) and all four clips share one grade/lens/lighting/palette. Keep the
+  // string byte-identical everywhere; do not paraphrase per segment.
+  const visualStyleBlock =
+    (isSegment || isMaster) && visualStyle?.trim()
+      ? [
+          "",
+          "LOCKED VISUAL STYLE — identical across all four segments; render these",
+          "four panels in EXACTLY this look (do not reinterpret per segment):",
+          visualStyle.trim(),
+        ]
+      : [];
+
   const user = [
     `Ad style: ${style}`,
     `Ad type: ${adType}`,
     `User prompt: ${userPrompt}`,
+    ...continuityBlock,
+    ...coherentSceneBlock,
+    ...visualStyleBlock,
     "The reference sheets are attached in the image-generation step.",
-    "Review them, then produce the 4-scene script (with spoken transcripts and a",
-    "brief panelCaption per scene) and the composite storyboard-sheet plan —",
-    "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
-    "its panelCaption bar, in order; no other text and no arrows.",
+    ...produceLine,
     ...(directive
       ? directiveBlock(directive)
       : critique?.trim()

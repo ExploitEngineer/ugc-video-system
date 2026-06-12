@@ -63,6 +63,20 @@ const serverEnvSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1500),
+  // Max concurrent Seedance segment-video tasks per 60s run (fan-out throttle).
+  // Lower if BytePlus rejects parallel tasks; 4 = all segments at once.
+  SEGMENT_VIDEO_CONCURRENCY: z.coerce.number().int().positive().default(4),
+  // Max concurrent segment-storyboard generations per 60s run. Each is a GPT
+  // Image 2 call that also fetches the shared product/person sheets, so bursting
+  // all four at once multiplies concurrent fetches against the same hosts; 3
+  // keeps the pipeline moving while avoiding the thundering-herd that surfaced
+  // transient "fetch failed" drops.
+  SEGMENT_STORYBOARD_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  // Optional continuous music bed for the 60s merge. When set, this ONE track is
+  // mixed under the full 60s video and ducked beneath the native per-clip audio
+  // (sidechain) so on-camera UGC dialogue is never drowned. Unset → the merge
+  // keeps native audio as-is, plus the loudnorm + grade normalization.
+  MUSIC_BED_URL: z.string().url().optional(),
 
   // Runtime
   NODE_ENV: z

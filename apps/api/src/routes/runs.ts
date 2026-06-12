@@ -6,8 +6,12 @@
 // `awaiting_confirmation`. Cancel works from any non-terminal status.
 
 import type { AssetKind } from "@ugc/shared";
-import { createRunInputSchema, feedbackInputSchema } from "@ugc/shared";
-import { desc, eq } from "drizzle-orm";
+import {
+  createRunInputSchema,
+  feedbackInputSchema,
+  isMultiSegment,
+} from "@ugc/shared";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   gateForCurrentStep,
@@ -61,6 +65,8 @@ runs.post("/", async (c) => {
     prompt: body.prompt,
     mode: body.mode,
     aspectRatio: body.aspectRatio,
+    // FormData omits `duration` on legacy clients → schema default "15s".
+    ...(body.duration ? { duration: body.duration } : {}),
     // FormData carries strings; Critic is parked (off by default) — enabled
     // only if explicitly "true". The studio UI no longer sends this field.
     criticEnabled: body.criticEnabled === "true",
@@ -72,7 +78,7 @@ runs.post("/", async (c) => {
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, criticEnabled } = parsed.data;
+  const { prompt, mode, aspectRatio, duration, criticEnabled } = parsed.data;
 
   // `runs.projectId` is NOT NULL → auto-create a project to own this run.
   const [project] = await db
@@ -87,6 +93,7 @@ runs.post("/", async (c) => {
       prompt,
       mode,
       aspectRatio,
+      duration,
       criticEnabled,
       status: "queued",
       // Insert the run already LOCKED so the worker can't claim it yet. Without
@@ -165,7 +172,7 @@ runs.get("/:id", async (c) => {
 // ── GET /runs/:id/artifacts — generated sheets + final video ──────────
 runs.get("/:id/artifacts", async (c) => {
   const id = c.req.param("id");
-  await getRunOr404(id); // 404 if the run doesn't exist
+  const run = await getRunOr404(id); // 404 if the run doesn't exist
 
   const assetRows = await db
     .select()
@@ -176,25 +183,96 @@ runs.get("/:id/artifacts", async (c) => {
     const row = assetRows.find((a) => a.kind === kind);
     return row ? toAssetDto(row) : null;
   };
+  const assetById = (assetId: string) => {
+    const row = assetRows.find((a) => a.id === assetId);
+    return row ? toAssetDto(row) : null;
+  };
 
-  const videoRow = await db.query.videos.findFirst({
-    where: eq(schema.videos.runId, id),
+  // The merged 60s clip (and the single 15s clip) is the `final_video` row —
+  // `segment_index IS NULL`. `findFirst` could otherwise return a segment clip.
+  const finalVideoRow = await db.query.videos.findFirst({
+    where: and(
+      eq(schema.videos.runId, id),
+      isNull(schema.videos.segmentIndex),
+    ),
   });
+
+  // 60s segment artifacts, ordered by segment index. Empty for 15s runs.
+  const [segStoryboardRows, segVideoRows] = await Promise.all([
+    db
+      .select({ segmentIndex: schema.storyboardSheets.segmentIndex, assetId: schema.storyboardSheets.assetId })
+      .from(schema.storyboardSheets)
+      .where(
+        and(
+          eq(schema.storyboardSheets.runId, id),
+          isNotNull(schema.storyboardSheets.segmentIndex),
+        ),
+      ),
+    db
+      .select({
+        segmentIndex: schema.videos.segmentIndex,
+        assetId: schema.videos.assetId,
+        durationSec: schema.videos.durationSec,
+      })
+      .from(schema.videos)
+      .where(
+        and(eq(schema.videos.runId, id), isNotNull(schema.videos.segmentIndex)),
+      ),
+  ]);
+
+  // Newest asset per segment index wins (a targeted regen adds a row).
+  const newestPerSegment = <T extends { segmentIndex: number | null; assetId: string }>(
+    rows: T[],
+  ): T[] => {
+    const order = new Map(assetRows.map((a, i) => [a.id, i]));
+    const byIdx = new Map<number, T>();
+    for (const r of rows) {
+      if (r.segmentIndex == null) continue;
+      const prev = byIdx.get(r.segmentIndex);
+      if (!prev || (order.get(r.assetId) ?? 0) > (order.get(prev.assetId) ?? 0)) {
+        byIdx.set(r.segmentIndex, r);
+      }
+    }
+    return [...byIdx.values()].sort(
+      (a, b) => (a.segmentIndex ?? 0) - (b.segmentIndex ?? 0),
+    );
+  };
+
+  const segmentStoryboards = newestPerSegment(segStoryboardRows).map((r) => ({
+    segmentIndex: r.segmentIndex as number,
+    asset: assetById(r.assetId),
+  }));
+  const segmentVideos = newestPerSegment(segVideoRows).map((r) => ({
+    segmentIndex: r.segmentIndex as number,
+    asset: assetById(r.assetId),
+    durationSec: r.durationSec == null ? null : Number(r.durationSec),
+  }));
 
   return c.json({
     runId: id,
     productSheet: byKind("product_sheet"),
     personSheet: byKind("person_sheet"),
-    storyboardSheet: byKind("storyboard_sheet"),
-    finalVideo: byKind("final_video"),
+    // 15s: the single labelled sheet. Multi-segment: the crops live in
+    // `segmentStoryboards`; the whole-grid sheet is `storyboardMaster`, so the
+    // singular field is null (it would otherwise return an arbitrary crop).
+    storyboardSheet: isMultiSegment(run.duration)
+      ? null
+      : byKind("storyboard_sheet"),
+    storyboardMaster: byKind("storyboard_master"),
+    finalVideo: finalVideoRow ? assetById(finalVideoRow.assetId) : null,
     // `duration_sec` is `numeric` → Drizzle returns a string; coerce.
-    video: videoRow
+    video: finalVideoRow
       ? {
           durationSec:
-            videoRow.durationSec == null ? null : Number(videoRow.durationSec),
-          hasAudio: videoRow.hasAudio,
+            finalVideoRow.durationSec == null
+              ? null
+              : Number(finalVideoRow.durationSec),
+          hasAudio: finalVideoRow.hasAudio,
         }
       : null,
+    // 60s only — empty arrays for 15s runs.
+    segmentStoryboards,
+    segmentVideos,
   });
 });
 

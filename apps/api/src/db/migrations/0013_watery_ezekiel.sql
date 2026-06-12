@@ -1,0 +1,1 @@
+ALTER TYPE "public"."asset_kind" ADD VALUE 'storyboard_master' BEFORE 'final_video';
