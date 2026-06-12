@@ -38,6 +38,15 @@ iteration (`currentStep === null`) via `runReferencePhase`; the run then checkpo
 `person_sheet` (or `product_sheet` when a person was uploaded) and the gate/advance logic
 proceeds unchanged. `firstStep` is retained in `plan.ts` for sequencing helpers.
 
+**Multi-segment runs (30/45/60s)** add steps between the reference phase and `completed`:
+`narrative_outline → segment_storyboard → segment_video → merge` (the `segment_*` steps fan out over
+N segments internally). See [apps/api/docs/pipeline.md](../apps/api/docs/pipeline.md) §8.
+
+**After `completed`** the run is terminal and the worker never claims it again — which is exactly what
+makes the post-completion **video editor** safe. Editing the `final_video` and saving an
+`edited_video` goes through `POST /runs/:id/edited-video` (not a worker step, no status change). See
+[apps/api/docs/video-editor.md](../apps/api/docs/video-editor.md).
+
 `runs.currentStep` tracks position; `step_events` is the append-only audit trail
 (`started`/`passed`/`failed`/`regenerated`) the UI timeline renders.
 

@@ -51,3 +51,32 @@ export async function fetchRun(runId: string): Promise<RunDetail> {
   if (!res.ok) throw new Error("Failed to load run");
   return res.json();
 }
+
+/**
+ * Save a CE.SDK edit of the run's final video. POSTs the exported MP4 (and,
+ * when present, the serialized editor scene) as multipart form data to the
+ * same-origin Next proxy (`/api/runs/:id/edited-video`), which streams it to
+ * the API. Returns the updated `RunDetail` — now carrying the new
+ * `edited_video` (and `editor_scene`) assets. Throws a readable error on failure.
+ */
+export async function uploadEditedVideo(
+  runId: string,
+  video: Blob,
+  scene?: Blob,
+): Promise<RunDetail> {
+  const form = new FormData();
+  form.append("video", video, "edited-video.mp4");
+  if (scene) form.append("scene", scene, "scene.json");
+
+  const res = await fetch(`/api/runs/${runId}/edited-video`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to save the edited video.");
+  }
+  return res.json() as Promise<RunDetail>;
+}

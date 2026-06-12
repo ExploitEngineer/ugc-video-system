@@ -18,7 +18,9 @@ export function ArtifactCard({
   title: string;
 }) {
   const isVideo =
-    asset.kind === "final_video" || asset.kind === "segment_video";
+    asset.kind === "final_video" ||
+    asset.kind === "segment_video" ||
+    asset.kind === "edited_video";
   const isRealVideo = asset.mime.startsWith("video/");
 
   if (isVideo && isRealVideo) {

@@ -18,6 +18,7 @@ import {
   getOpenAI,
   interpretFeedback,
 } from "../agents/creative-direction/index.js";
+import { persistAsset } from "../agents/persist.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
 import { createLogger } from "../lib/log.js";
@@ -27,6 +28,9 @@ import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
 
 const ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+const ALLOWED_VIDEO_MIME = ["video/mp4"];
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200MB — headroom for a ~60s 1080p client-side MP4 export
 
 const log = createLogger("runs");
 
@@ -46,6 +50,24 @@ function validateImage(value: unknown, field: string, required: boolean): File |
   }
   if (value.size > MAX_IMAGE_BYTES) {
     throw unprocessable(`${field} exceeds the 10MB limit.`);
+  }
+  return value;
+}
+
+/** Read + validate a required video (the CE.SDK MP4 export) from a parsed body. */
+function validateVideo(value: unknown, field: string): File {
+  if (!(value instanceof File) || value.size === 0) {
+    throw unprocessable(`An edited ${field} is required.`);
+  }
+  if (!ALLOWED_VIDEO_MIME.includes(value.type)) {
+    throw unprocessable(
+      `Unsupported video type for ${field}: ${value.type || "unknown"}. Use MP4.`,
+    );
+  }
+  if (value.size > MAX_VIDEO_BYTES) {
+    throw unprocessable(
+      `${field} exceeds the ${MAX_VIDEO_BYTES / (1024 * 1024)}MB limit.`,
+    );
   }
   return value;
 }
@@ -274,6 +296,44 @@ runs.get("/:id/artifacts", async (c) => {
     segmentStoryboards,
     segmentVideos,
   });
+});
+
+// ── POST /runs/:id/edited-video — save a CE.SDK edit of the final video ──
+// The advanced video editor (img.ly CE.SDK) runs entirely client-side on a
+// COMPLETED run's final video; the worker never touches completed runs, so this
+// write is race-free. The MP4 export lands as a new `edited_video` asset — the
+// original `final_video` is always kept — and, when the editor includes one,
+// the serialized scene lands as `editor_scene` so reopening resumes the edit.
+// Multipart body: `video` (required MP4) + `scene` (optional scene JSON).
+runs.post("/:id/edited-video", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["completed"], "Run is not completed.");
+
+  const body = await c.req.parseBody();
+  const video = validateVideo(body.video, "video");
+  const sceneValue = body.scene;
+  const scene =
+    sceneValue instanceof File && sceneValue.size > 0 ? sceneValue : null;
+
+  await persistAsset({
+    runId: id,
+    kind: "edited_video",
+    bytes: await fileToBytes(video),
+    mime: "video/mp4",
+    meta: { source: "cesdk" },
+  });
+  if (scene) {
+    await persistAsset({
+      runId: id,
+      kind: "editor_scene",
+      bytes: await fileToBytes(scene),
+      mime: "application/json",
+    });
+  }
+
+  log.info("edited-video saved", { run: id, withScene: scene !== null });
+  return c.json(await loadRunDetail(id), 201);
 });
 
 // ── POST /runs/:id/feedback — the SINGLE step-by-step gate action ─────

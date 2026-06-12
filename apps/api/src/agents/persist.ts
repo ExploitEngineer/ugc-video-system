@@ -57,3 +57,41 @@ export async function persistSheet<TArtifact>({
     return { assetId: asset.id, assetUrl: url, artifact };
   });
 }
+
+export interface PersistAssetInput {
+  runId: string;
+  kind: AssetKind;
+  bytes: Uint8Array;
+  mime: string;
+  /** Optional asset metadata (e.g. `{ source: "cesdk" }`). */
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Persist a standalone asset that has NO artifact-table row: upload bytes →
+ * Storage, then insert the `assets` row. Used for files produced outside the
+ * generation pipeline — the user's CE.SDK `edited_video` / `editor_scene` saved
+ * on a completed run. (`persistSheet` is for pipeline sheets/videos that also
+ * need their structured artifact row inserted in the same transaction.)
+ */
+export async function persistAsset({
+  runId,
+  kind,
+  bytes,
+  mime,
+  meta,
+}: PersistAssetInput): Promise<{ assetId: string; assetUrl: string }> {
+  const { storagePath, url } = await uploadAsset({
+    runId,
+    kind,
+    bytes,
+    contentType: mime,
+  });
+
+  const [asset] = await db
+    .insert(schema.assets)
+    .values({ runId, kind, storagePath, url, mime, meta: meta ?? null })
+    .returning();
+
+  return { assetId: asset.id, assetUrl: url };
+}

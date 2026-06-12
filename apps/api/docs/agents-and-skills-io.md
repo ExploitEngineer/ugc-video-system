@@ -9,6 +9,11 @@ end-to-end **flow** (state machine, gates, four flows) see
 A "skill" = a prompt module (`prompt.ts`) + a function `(ctx, input) => result`,
 living under `apps/api/src/agents/<agent>/<skill>/`.
 
+> **Not an agent:** the post-completion **video editor** (img.ly CE.SDK) is a
+> client-side tool, not a generation agent/skill — it has no `prompt.ts`, makes no
+> model call, and runs after the pipeline on a `completed` run. It is out of scope
+> for this I/O table; see [video-editor.md](video-editor.md).
+
 ## Legend
 
 - `img` — an `ImageRef` (`{ source, mime? }`, a public/signed URL or base64 data URI).

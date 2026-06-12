@@ -57,3 +57,12 @@ When Supabase Auth lands and `projects.owner_id` is populated with `auth.uid()`:
 4. Decide Storage bucket RLS + signed-URL strategy alongside table RLS (tracked as an open question in SPEC.md §8).
 
 Policies will ship as a new Drizzle migration (declared via `pgPolicy` in `schema.ts`), not hand-edited in the dashboard, so the repo stays the source of truth.
+
+## Storage bucket CORS (video-editor prerequisite)
+
+Separate from table RLS: the post-completion **video editor** runs in the browser and fetches the
+`final_video`'s **public `ugc-assets` URL cross-origin** (`*.supabase.co` ≠ the web app origin). For
+that to work, **Supabase Storage CORS must allow the web origin for `GET`** (incl. range requests) —
+`http://localhost:3000` in dev, the deployed web origin in prod. If the editor canvas loads but the
+video never appears, this is almost always the cause. This is a Storage HTTP-layer setting (Supabase
+dashboard → Storage), not a Postgres policy. See [video-editor.md](video-editor.md).

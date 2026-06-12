@@ -40,14 +40,18 @@ Lean generated-outputs shape. → `200`:
 ```jsonc
 {
   "runId": "…",
-  "productSheet":   Asset | null,
-  "personSheet":    Asset | null,
-  "storyboardSheet":Asset | null,
-  "finalVideo":     Asset | null,
-  "video": { "durationSec": number | null, "hasAudio": boolean } | null
+  "productSheet":     Asset | null,
+  "personSheet":      Asset | null,
+  "storyboardSheet":  Asset | null,   // 15s only (null for multi-segment)
+  "storyboardMaster": Asset | null,   // multi-segment N×4 master sheet
+  "finalVideo":       Asset | null,   // merged clip for multi-segment
+  "video": { "durationSec": number | null, "hasAudio": boolean } | null,
+  "segmentStoryboards": { "segmentIndex": number, "asset": Asset|null }[],              // multi-segment
+  "segmentVideos":      { "segmentIndex": number, "asset": Asset|null, "durationSec": number|null }[]  // multi-segment
 }
 ```
-`404` if the run doesn't exist.
+`404` if the run doesn't exist. (Generation outputs only — the editor's `edited_video`/`editor_scene`
+are not here; they surface in `RunDetail.assets[]` via `GET /runs/:id`.)
 
 ### `POST /runs/:id/confirm`
 Confirm-mode gate: approve the current step. Requires `status = awaiting_confirmation` (else
@@ -66,6 +70,13 @@ Agent classifies the message: **approve** → `running` (clears `feedback`); **r
 ### `POST /runs/:id/cancel`
 Terminate a run. Idempotent — already-terminal runs return unchanged. Sets `failed` with
 `error: "Run cancelled."`. → `200 RunDetail`.
+
+### `POST /runs/:id/edited-video`
+Save a client-side CE.SDK edit of the final video. Requires `status = completed` (else `422`;
+the worker never touches completed runs, so this write is race-free). Multipart body: `video`
+(required `video/mp4`, ≤200MB) + `scene` (optional serialized editor scene JSON). Stores the export
+as a new `edited_video` asset and the scene as `editor_scene` — the original `final_video` is kept.
+→ `201 RunDetail` (now carrying the new assets). `404` if unknown.
 
 ### `DELETE /runs/:id`
 Permanently remove the run + all files (best-effort storage wipe) + DB rows (FK cascade removes
@@ -86,9 +97,9 @@ Single source of truth — Zod schemas + inferred types in `packages/shared/src`
 apps. DB enums (`db/schema.ts`) are derived from these.
 
 **Enums** — `RunStatus`: `queued | running | awaiting_confirmation | regenerating | completed | failed` ·
-`Step`: `product_sheet | person_sheet | product_inspection | storyboard | storyboard_inspection | video` ·
-`AssetKind`: `product_upload | person_upload | product_sheet | person_sheet | storyboard_sheet | final_video` ·
-`Mode`: `automatic | confirm` · `AdType`: `ugc | inspirational` ·
+`Step`: `product_sheet | person_sheet | product_inspection | storyboard | storyboard_inspection | video | narrative_outline | segment_storyboard | segment_video | merge` ·
+`AssetKind`: `product_upload | person_upload | product_sheet | person_sheet | storyboard_sheet | storyboard_master | final_video | segment_video | edited_video | editor_scene` ·
+`Mode`: `automatic | confirm` · `Duration`: `15s | 30s | 45s | 60s` · `AspectRatio`: `16:9 | 9:16` · `AdType`: `ugc | inspirational` ·
 `ArtifactStatus`: `draft | approved | rejected` · `StepEventStatus`: `started | passed | failed | regenerated`.
 
 **DTOs**
@@ -97,11 +108,13 @@ apps. DB enums (`db/schema.ts`) are derived from these.
 Asset      { id, runId, kind: AssetKind, url, mime, meta?: object|null, createdAt }
 StepEvent  { id, runId, step: Step, status: StepEventStatus, payload?: object|null, createdAt }
 Scene      { index, cameraAngle, actionMovement, sceneDescription, transcript, adStyle }
-Run        { id, projectId, prompt, adStyle, adType, mode, criticEnabled, status,
-             currentStep: Step, error: string|null, feedback: string|null, createdAt, updatedAt }
-RunDetail  = Run & { assets: Asset[]; stepEvents: StepEvent[]; scenes: Scene[]|null }
+Run        { id, projectId, prompt, adStyle, adType, mode, aspectRatio, duration, criticEnabled,
+             status, currentStep: Step, error: string|null, feedback: string|null, createdAt, updatedAt }
+RunDetail  = Run & { assets: Asset[]; stepEvents: StepEvent[]; scenes: Scene[]|null;
+             segmentScenes: Scene[][]|null; narrativeOutline: {segments:{index,beat,summary}[]}|null;
+             visualStyle: string|null }   // post-edit `edited_video`/`editor_scene` surface in `assets[]`
 
-CreateRunInput { prompt (1–2000), mode, criticEnabled, hasPersonImage }   // validated server-side
+CreateRunInput { prompt (1–2000), mode, aspectRatio, duration, criticEnabled, hasPersonImage }   // validated server-side
 FeedbackInput  { message (1–2000) }
 ```
 

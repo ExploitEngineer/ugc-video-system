@@ -9,7 +9,8 @@ follow exactly what happens and what reaches each model.
 > Companion docs (more depth on one subsystem): [pipeline.md](pipeline.md)
 > (end-to-end flow narrative), [agents-and-skills-io.md](agents-and-skills-io.md)
 > (per-skill I/O table), [database-schema.md](database-schema.md),
-> [byteplus-face-assets.md](byteplus-face-assets.md), [rls-policies.md](rls-policies.md).
+> [byteplus-face-assets.md](byteplus-face-assets.md), [rls-policies.md](rls-policies.md),
+> [video-editor.md](video-editor.md) (post-completion editor).
 
 ---
 
@@ -22,6 +23,10 @@ run by a `duration` toggle:
 - **`15s`** (default) — one storyboard sheet (4 panels) → one ~15s Seedance clip.
 - **`60s`** — four storyboard sheets (16 panels) → four ~15s clips → **merged**
   into one ~60s clip that feels like ONE cohesive ad.
+
+**Post-completion editing:** once a run is `completed`, its `final_video` can be opened in a
+client-side editor (img.ly CE.SDK) at `/studio/[runId]/edit` and saved back as a new `edited_video`
+(+ `editor_scene`) asset — outside the generation pipeline. See [video-editor.md](video-editor.md).
 
 Design principles:
 
@@ -394,6 +399,7 @@ rebuilds it; **newest-per-`segment_index` wins** for the fresh crops.
 | `GET /runs` | List runs (newest first). |
 | `GET /runs/:id` | Poll → `RunDetail` (run + assets + step events + `scenes`; **60s adds `duration`, `segmentScenes` (16 scenes grouped by segment), `narrativeOutline`**). |
 | `GET /runs/:id/artifacts` | Sheets + final video; **60s adds `segmentStoryboards[]` and `segmentVideos[]` (newest-per-index), `finalVideo` = merged clip**. |
+| `POST /runs/:id/edited-video` | Save a post-completion CE.SDK edit. Multipart: `video` (req `video/mp4`, ≤200MB), `scene?` (scene JSON). `completed`-only. Stores `edited_video` (+ `editor_scene`), keeps `final_video`. → `RunDetail`. See [video-editor.md](video-editor.md). |
 | `POST /runs/:id/feedback` | The confirm-mode gate action (§12). |
 | `POST /runs/:id/cancel` | Flip any non-terminal run to `failed` (idempotent). |
 | `DELETE /runs/:id` | Delete the run + its storage objects + cascaded rows. |

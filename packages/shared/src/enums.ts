@@ -46,6 +46,11 @@ export type Step = z.infer<typeof stepSchema>;
  * single N×4-panel sheet; its cropped row blocks are persisted as
  * `storyboard_sheet` (`segment_index` 0..N-1), the same kind a 15s run's
  * single sheet uses.
+ *
+ * Post-generation editing (img.ly CE.SDK) adds two kinds, both attached to a
+ * `completed` run alongside the original `final_video` (never replacing it):
+ * `edited_video` is the user's MP4 export from the editor, and `editor_scene`
+ * is the serialized CE.SDK scene (so reopening the editor resumes the edit).
  */
 export const assetKindSchema = z.enum([
   "product_upload",
@@ -56,6 +61,8 @@ export const assetKindSchema = z.enum([
   "storyboard_master",
   "final_video",
   "segment_video",
+  "edited_video",
+  "editor_scene",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 

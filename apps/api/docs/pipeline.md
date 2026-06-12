@@ -97,14 +97,23 @@ The 60s steps are detailed in **§8**; everything in §2–§7 below describes t
 
 **Artifacts & storage.** Every generated file is a row in `assets` (kind ∈
 `product_upload`, `person_upload`, `product_sheet`, `person_sheet`,
-`storyboard_sheet`, `final_video`, `segment_video`) plus a typed artifact row
-(`product_reference_sheets`, `person_reference_sheets`, `storyboard_sheets`,
-`videos`). For 60s, the four storyboard sheets share the `storyboard_sheet` kind
-and the four clips use `segment_video`; both carry a `segment_index` (0..3) on
-their typed row, and the merged 60s clip is the `final_video` (`segment_index =
-null`). Files live in the public Supabase Storage bucket `ugc-assets` at
-`runs/{runId}/{kind}-{uuid}.{ext}`; the `assets` row holds both `storage_path`
-and `url`. See [database-schema.md](database-schema.md).
+`storyboard_sheet`, `storyboard_master`, `final_video`, `segment_video`) plus a
+typed artifact row (`product_reference_sheets`, `person_reference_sheets`,
+`storyboard_sheets`, `videos`). For 60s, the four storyboard sheets share the
+`storyboard_sheet` kind and the four clips use `segment_video`; both carry a
+`segment_index` (0..3) on their typed row, and the merged 60s clip is the
+`final_video` (`segment_index = null`). Files live in the public Supabase Storage
+bucket `ugc-assets` at `runs/{runId}/{kind}-{uuid}.{ext}`; the `assets` row holds
+both `storage_path` and `url`. See [database-schema.md](database-schema.md).
+(Post-completion, the video editor adds `edited_video` + `editor_scene` rows under
+the same prefix — outside this pipeline; see below + [video-editor.md](video-editor.md).)
+
+**Post-completion: video editor.** A `completed` run ends the pipeline here. The
+studio can then open the `final_video` in a client-side editor (img.ly CE.SDK) at
+`/studio/[runId]/edit`; the export is saved back via `POST /runs/:id/edited-video`
+as a new `edited_video` (+ `editor_scene`). This is **not** a pipeline step — the
+worker never touches a `completed` run, the original `final_video` is kept, and the
+edit is non-destructive. Full flow in [video-editor.md](video-editor.md).
 
 ---
 

@@ -258,6 +258,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@cesdk/cesdk-js':
+        specifier: 1.76.0
+        version: 1.76.0(react@19.2.4)
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -428,6 +431,26 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@cesdk/cesdk-js@1.76.0':
+    resolution: {integrity: sha512-SHCoEed5MrHNn1AFuVNBZh38yqDzOAzTb1jMmTvIx5vKdVSFLKRRc0b8bOQdAQmOT6wKR6vSZRvhHnGTUDkdPg==}
+    peerDependencies:
+      '@angular/common': '>=14.0.0'
+      '@angular/core': '>=14.0.0'
+      react: '>16'
+      vue: ^3.0.0
+    peerDependenciesMeta:
+      '@angular/common':
+        optional: true
+      '@angular/core':
+        optional: true
+      react:
+        optional: true
+      vue:
+        optional: true
+
+  '@cesdk/engine@1.76.0':
+    resolution: {integrity: sha512-VRoy0FOsCY/hDZCvD12PLmIX8YvG0CUHBq4T278hhzdrvMSSNUdUXG4ZmQ/Ojbt4ShzzETEJgQODeWJAmcuEhA==}
 
   '@derhuerst/http-basic@8.2.4':
     resolution: {integrity: sha512-F9rL9k9Xjf5blCz8HsJRO4diy111cayL2vkY2XE4r4t3n0yPXVYy3KD3nJ1qbrSn9743UWSXH4IwuCa/HWlGFw==}
@@ -2241,6 +2264,14 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.2.0':
     optional: true
+
+  '@cesdk/cesdk-js@1.76.0(react@19.2.4)':
+    dependencies:
+      '@cesdk/engine': 1.76.0
+    optionalDependencies:
+      react: 19.2.4
+
+  '@cesdk/engine@1.76.0': {}
 
   '@derhuerst/http-basic@8.2.4':
     dependencies:

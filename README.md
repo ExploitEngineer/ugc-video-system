@@ -1,8 +1,9 @@
 # UGC Video System
 
-Turn a **product image (+ optional person image) + a text prompt** into a single ~15s ad video
-with native audio. Cooperating AI agents drive an **images → storyboard → video** pipeline.
-Monorepo, managed with [pnpm workspaces](https://pnpm.io/workspaces).
+Turn a **product image (+ optional person image) + a text prompt** into an ad video with native
+audio — a single ~15s clip or a merged 30/45/60s clip, chosen per run. Cooperating AI agents drive an
+**images → storyboard → video** pipeline, and a completed video can be edited in a browser editor
+(img.ly CE.SDK). Monorepo, managed with [pnpm workspaces](https://pnpm.io/workspaces).
 
 ## Structure
 
@@ -22,7 +23,8 @@ Monorepo, managed with [pnpm workspaces](https://pnpm.io/workspaces).
 - [docs/agents-and-skills.md](docs/agents-and-skills.md) — the skill contract + every agent skill
 - [docs/api-reference.md](docs/api-reference.md) — endpoints, request/response, shared DTOs
 - [docs/worker-state-machine.md](docs/worker-state-machine.md) — run statuses, worker, gating, resumability
-- `apps/api/docs/` — DB schema, RLS, BytePlus face-asset deep dives · `SPEC.md` — authoritative design + progress
+- [apps/api/docs/video-editor.md](apps/api/docs/video-editor.md) — post-completion video editor (flow, storage, data sources)
+- `apps/api/docs/` — pipeline, DB schema, RLS, BytePlus face-asset deep dives · `SPEC.md` — authoritative design + progress
 
 ## Requirements
 
@@ -41,7 +43,7 @@ pnpm install
 
 ```bash
 cp apps/api/.env.example apps/api/.env       # OPENAI_API_KEY, BYTEPLUS_*, SUPABASE_*, DATABASE_URL
-cp apps/web/.env.example apps/web/.env.local # NEXT_PUBLIC_API_URL=http://localhost:3001
+cp apps/web/.env.example apps/web/.env.local # NEXT_PUBLIC_API_URL + NEXT_PUBLIC_CESDK_LICENSE (img.ly editor; empty = watermark)
 ```
 
 **2. Local database.** Bring up a local Postgres and point `apps/api/.env` `DATABASE_URL` at it:

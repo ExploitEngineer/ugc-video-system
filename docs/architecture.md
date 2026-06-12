@@ -1,13 +1,14 @@
 # Architecture
 
-UGC Video System turns a **product image (+ optional person image) + a text prompt** into a
-single ~15s ad video with native audio. Cooperating AI agents drive an
-**images → storyboard → video** pipeline.
+UGC Video System turns a **product image (+ optional person image) + a text prompt** into an ad
+video with native audio — a single ~15s clip or a merged 30/45/60s clip, chosen per run. Cooperating
+AI agents drive an **images → storyboard → video** pipeline; once a run completes, the user can also
+edit the result in a browser video editor (see [apps/api/docs/video-editor.md](../apps/api/docs/video-editor.md)).
 
 > Companion docs: [agents-and-skills.md](./agents-and-skills.md) ·
 > [worker-state-machine.md](./worker-state-machine.md) ·
 > [api-reference.md](./api-reference.md). Deep dives live in
-> [apps/api/docs](../apps/api/docs/) (DB schema, RLS, BytePlus face assets).
+> [apps/api/docs](../apps/api/docs/) (DB schema, RLS, BytePlus face assets, video editor).
 > `SPEC.md` (repo root) is the authoritative design + progress tracker.
 
 ## Monorepo layout
@@ -48,8 +49,12 @@ storyboard_inspection         (only if criticEnabled)   Critic — vision check 
 video                                      Video Agent — Seedance 2.0, single final video + audio
 ```
 
-Hard non-goals (per SPEC): no per-scene video, no separate audio step, no merge step —
-Seedance 2.0 produces one final video with native audio.
+The diagram above is the 15s path. **Multi-segment runs (30/45/60s)** plan a narrative outline, then
+generate N segment storyboards + N ~15s clips and **merge** them into one final video — see
+[apps/api/docs/pipeline.md](../apps/api/docs/pipeline.md) §8. Per-run non-goals (per SPEC): no
+per-scene video generation and no separate audio step — Seedance emits each clip with native audio.
+After a run reaches `completed`, the **video editor** can edit the `final_video` (post-pipeline, not
+a step) — see [apps/api/docs/video-editor.md](../apps/api/docs/video-editor.md).
 
 ## Components
 
@@ -83,7 +88,7 @@ Drizzle over Supabase Postgres. Full reference: [apps/api/docs/database-schema.m
 | --- | --- |
 | `projects` | Owns runs (auto-created per run from the prompt). |
 | `runs` | The state-machine row: `status`, `currentStep`, `adStyle`, `adType`, `mode`, `criticEnabled`, `error`, `feedback`, `lockedAt`/`lockedBy`. |
-| `assets` | Every stored file (uploads + generated). Holds `storagePath` (internal) + public `url`. |
+| `assets` | Every stored file (uploads + generated; kinds incl. `final_video`, `segment_video`, `storyboard_master`, and the editor's `edited_video`/`editor_scene`). Holds `storagePath` (internal) + public `url`. |
 | `step_events` | Append-only audit trail (`started`/`passed`/`failed`/`regenerated`) — the frontend timeline. |
 | `product_reference_sheets`, `person_reference_sheets`, `storyboard_sheets`, `videos` | Per-artifact rows with `status` (`draft`/`approved`/`rejected`). |
 
@@ -103,7 +108,8 @@ Shared enums + DTOs (the wire contract) live in `packages/shared/src`; see
 Config is Zod-validated at boot in `apps/api/src/config/index.ts` (server secrets) and via
 `NEXT_PUBLIC_*` only on web. Keys: `OPENAI_API_KEY`, `BYTEPLUS_API_KEY` (+ optional `BYTEPLUS_*`),
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `CORS_ORIGIN`,
-`WORKER_ENABLED`, `WORKER_POLL_INTERVAL_MS`, `LOG_LEVEL`.
+`WORKER_ENABLED`, `WORKER_POLL_INTERVAL_MS`, `LOG_LEVEL`. Web also reads `NEXT_PUBLIC_API_URL` and
+`NEXT_PUBLIC_CESDK_LICENSE` (img.ly video-editor license — empty = watermarked exports).
 
 ## Known pre-production gaps
 
@@ -115,6 +121,9 @@ These are deliberate scope cuts, not bugs — track before a real launch:
 - **No rate limiting / cost controls.** Each run makes multiple paid OpenAI + BytePlus calls; a
   buggy or hostile client can run up spend. No per-user/run quota or token/cost accounting yet.
 - **CORS** is env-driven (`CORS_ORIGIN`). Set it to the exact frontend origin in prod — never `*`.
+- **Editor needs Storage CORS.** The in-browser video editor fetches the `final_video`'s public
+  `ugc-assets` URL cross-origin; Supabase **Storage** CORS must allow the web origin for `GET`
+  (see [apps/api/docs/video-editor.md](../apps/api/docs/video-editor.md)). Distinct from the API `CORS_ORIGIN` above.
 - **Single video provider.** Seedance 2.0 only (behind the `VideoProvider` interface, so swappable).
 - **One worker per database.** The worker claims runs with a DB lock; running two API instances
   against the **same** `DATABASE_URL` makes both drive runs. Keep dev on its own DB

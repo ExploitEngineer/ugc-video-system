@@ -6,9 +6,9 @@
 
 ## 1. Overview
 
-Turns a **product image** (required) + an **optional person image** + a **text prompt** into a finished **~15-second advertisement video with audio**. The ad can be **any style** the user asks for — UGC, inspirational, cinematic, minimalist, luxury, comedic, etc. Agents read the user's intent and adapt; nothing assumes UGC.
+Turns a **product image** (required) + an **optional person image** + a **text prompt** into a finished **advertisement video with audio** — a single **~15-second** clip or a merged **30/45/60-second** clip, chosen per run. The ad can be **any style** the user asks for — UGC, inspirational, cinematic, minimalist, luxury, comedic, etc. Agents read the user's intent and adapt; nothing assumes UGC.
 
-Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the storyboard scene plan (as text) + the clean product/person reference sheets to Seedance 2.0 (via BytePlus), which produces **one** video with audio — there is no per-scene video building, no separate audio step, and no merge step.
+Pipeline: **images → storyboard → video**, driven by cooperating AI agents that each carry their own skills and prompts. A Creative Direction Agent orchestrates the whole flow and propagates the requested ad style to every downstream agent. A Critic Agent validates artifacts and triggers regeneration. The final step sends the storyboard scene plan (as text) + the clean product/person reference sheets to Seedance 2.0 (via BytePlus). The 15s path produces **one** clip with native audio (no per-scene building, no separate audio step); 30/45/60s runs generate N such clips and **merge** them into one final video. After a run completes, the video can be edited in a client-side editor (see [apps/api/docs/video-editor.md](apps/api/docs/video-editor.md)).
 
 ---
 
@@ -28,8 +28,13 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 - ❌ Per-scene / per-keyframe video generation.
 - ❌ Separate audio generation or an audio↔video merge step.
 - ❌ Multiple output videos per run.
-- ❌ Real-time / timeline video editing.
+- ❌ Real-time / timeline video editing **built in-house** (we don't build an editor).
 - ❌ Auth in early phases (deferred to **F8**).
+
+> **Update:** a post-completion **video editor** (img.ly CE.SDK, third-party, client-side) now
+> provides timeline editing on the finished `final_video`. The system still builds no editor of its
+> own, and an edit saves a new `edited_video` asset on the **same** run (not a new run/output). See
+> [apps/api/docs/video-editor.md](apps/api/docs/video-editor.md).
 
 ---
 
@@ -67,7 +72,7 @@ Pipeline: **images → storyboard → video**, driven by cooperating AI agents t
 - **StoryBoard Generator** — takes the product sheet (+ person sheet if present) → **Storyboard/Keyframe Sheet** of scenes, each with camera/angle, action/movement, scene description, consistent with the ad style.
 - **Product Sheet Inspection** — validates the product sheet; regenerates the whole sheet, or **only the localized part**, when the problem is local.{"type":"excalidraw/clipboard","elements":[{"id":"GifwvUiE","type":"text","x":-540.8864558616417,"y":-304.77926271622357,"width":95.03242492675781,"height":35,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"hachure","strokeWidth":1,"strokeStyle":"solid","roughness":1,"opacity":100,"groupIds":[],"frameId":null,"index":"aG","roundness":null,"seed":1846301990,"version":191,"versionNonce":2119462586,"isDeleted":false,"boundElements":[],"updated":1781098310329,"link":null,"locked":false,"text":"Parallel","fontSize":28,"fontFamily":5,"textAlign":"left","verticalAlign":"top","containerId":null,"originalText":"Parallel","autoResize":true,"lineHeight":1.25,"rawText":"Parallel","hasTextLink":false}],"files":{}}
 - **StoryBoard Sheet Inspection** — validates the storyboard sheet; regenerates if problems.
-- **Video Builder** — sends the storyboard scene plan (text) + clean product/person reference sheets to Seedance 2.0 (via BytePlus) → final ~15s video with audio. Final output; no merge.
+- **Video Builder** — sends the storyboard scene plan (text) + clean product/person reference sheets to Seedance 2.0 (via BytePlus) → a ~15s clip with native audio. For 15s runs that clip is the final output; for 30/45/60s runs it's one of N segment clips later joined by the **merge** step.
 
 ### End-to-end flow
 
@@ -163,7 +168,7 @@ Each agent's prompts are written **inside that agent's own feature** (F4 Image, 
 | ----------- | -------------- | ----------------------------------------------------------------------------------------------------- |
 | id          | uuid PK        |                                                                                                       |
 | runId       | uuid FK → runs |                                                                                                       |
-| kind        | enum           | `product_upload`, `person_upload`, `product_sheet`, `person_sheet`, `storyboard_sheet`, `final_video` |
+| kind        | enum           | `product_upload`, `person_upload`, `product_sheet`, `person_sheet`, `storyboard_sheet`, `storyboard_master`, `final_video`, `segment_video`, `edited_video`, `editor_scene` |
 | storagePath | text           | Supabase Storage object path                                                                          |
 | url         | text           | public or signed URL                                                                                  |
 | mime        | text           |                                                                                                       |
@@ -327,9 +332,17 @@ CDA orchestrator + in-process background worker under `apps/api/src/agents/creat
 
 Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-based RLS policies; secret review + rate limiting + input hardening; cleanup, error states, asset retention policy.
 
+## Post-generation video editor — **Shipped (outside F0–F8)**
+
+A `completed` run's `final_video` can be edited in a client-side editor (img.ly CE.SDK) at `/studio/[runId]/edit`; the export saves as `edited_video` (+ `editor_scene`) via `POST /runs/:id/edited-video`. Post-pipeline (the worker never touches `completed` runs), non-destructive (original `final_video` kept), templates/stock content served by the img.ly CDN (not our backend). Full flow, storage, and config in [apps/api/docs/video-editor.md](apps/api/docs/video-editor.md); implementation notes in the 2026-06-12 Progress Log entry.
+
 ---
 
 ## Progress Log
+
+### 2026-06-12
+
+- **Post-generation video editor — img.ly CE.SDK Advanced Video Editor (`feat/video-editor`, code complete, live test pending).** A completed run's `final_video` can now be opened in a full client-side editor (trim/text/audio/effects/filters) and the export saved back to the run. **Editor** (`@cesdk/cesdk-js@1.76.0`, exact-pinned; no build scripts so no pnpm allowlist change): a dedicated full-screen route **`/studio/[runId]/edit`** (`app/studio/[runId]/edit/page.tsx` → `components/studio/edit/edit-video-view.tsx`) lazy-loads the WASM wrapper `components/studio/edit/cesdk-editor.tsx` (`next/dynamic({ssr:false})` + dynamic `import()` in-effect; StrictMode-safe create/`dispose`; engine in a `useRef`, never state). Config in **`lib/cesdk/`** (`index.ts` `initVideoEditor` = dark theme + `addDefaultAssetSources`/`addDemoAssetSources({sceneMode:"Video"})`; `actions.ts` overrides the `exportDesign` action to `utils.export()` the MP4 + `engine.scene.saveToString()` the scene and hand both to `onSaved`). Engine + demo assets load from the img.ly **CDN** in dev (version auto-matches the pinned SDK); self-hosting `public/assets` is a prod follow-up. License via new **`NEXT_PUBLIC_CESDK_LICENSE`** (empty = watermark). **Save path** (non-destructive — original `final_video` kept): `exportDesign` → `lib/api.ts` `uploadEditedVideo` → same-origin Next proxy `app/api/runs/[runId]/edited-video/route.ts` (streams multipart, `duplex:"half"`) → new API route **`POST /runs/:id/edited-video`** (`completed`-only; `validateVideo` mp4 ≤200MB; optional scene part) → new `persistAsset` helper (`agents/persist.ts`) stores **`edited_video`** (MP4) + **`editor_scene`** (scene JSON) assets. **Schema:** two asset kinds added to the shared Zod enum only (the Drizzle `assetKindEnum` is sourced from it) → migration `0015_regular_ironclad.sql` (`ALTER TYPE asset_kind ADD VALUE` ×2, applied local). **Web:** run-view prefers the newest `edited_video` for the "ready" card + adds an "Edit video" button; `artifact-card` treats `edited_video` as a video; reopening the editor resumes from the latest `editor_scene` (`loadFromURL`) else the source (`createFromVideo`). **Verified:** `pnpm typecheck` (all pkgs) + web `lint` green; migration applied. **Pending: user's manual local test** — incl. the **#1 risk: Supabase Storage CORS** must allow the web origin so the in-browser editor can fetch the public video URL — and a real license key to drop the watermark.
 
 ### 2026-06-11
 
