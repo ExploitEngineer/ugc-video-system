@@ -71,6 +71,9 @@ Seedance runs async: submit a task, then poll until `completed`/`failed` or time
 | **video-builder** `video` | `video` | clean storyboard sheet, scenes, `hasPerson` | `chat` → motion/audio prompt; `submitVideo`+`pollVideo` | `assets(final_video)` + `videos` |
 
 Notes:
+- **Post-generation editing is not a skill.** After `video`/`merge` completes, the user can edit the
+  `final_video` in a client-side editor (img.ly CE.SDK) and save an `edited_video` (+ `editor_scene`);
+  it makes no model call and isn't in this table. See [apps/api/docs/video-editor.md](../apps/api/docs/video-editor.md).
 - **Critic regen budget** is run-level (`MAX_REGEN_PER_RUN`, `critic/constants.ts`), shared across
   both inspection steps. The generic inspect→regen loop lives in `critic/remediate.ts`; outcomes
   are `approved` / `regenerated_approved` / `failed_retry_cap` (the last fails the run).

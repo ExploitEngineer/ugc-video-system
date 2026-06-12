@@ -25,8 +25,8 @@ Values are sourced from the shared Zod enums in `packages/shared/src/enums.ts` s
 | Enum | Values | Used by |
 |---|---|---|
 | `run_status` | `queued`, `running`, `awaiting_confirmation`, `regenerating`, `completed`, `failed` | `runs.status` |
-| `step` | `product_sheet`, `person_sheet`, `product_inspection`, `storyboard`, `storyboard_inspection`, `video` | `runs.current_step`, `step_events.step` |
-| `asset_kind` | `product_upload`, `person_upload`, `product_sheet`, `person_sheet`, `storyboard_sheet`, `final_video` | `assets.kind` |
+| `step` | `product_sheet`, `person_sheet`, `product_inspection`, `storyboard`, `storyboard_inspection`, `video`, `narrative_outline`, `segment_storyboard`, `segment_video`, `merge` | `runs.current_step`, `step_events.step` |
+| `asset_kind` | `product_upload`, `person_upload`, `product_sheet`, `person_sheet`, `storyboard_sheet`, `storyboard_master`, `final_video`, `segment_video`, `edited_video`, `editor_scene` | `assets.kind` |
 | `mode` | `automatic`, `confirm` | `runs.mode` |
 | `artifact_status` | `draft`, `approved`, `rejected` | sheet tables `.status` |
 
@@ -67,7 +67,7 @@ One generation job. The row is the authoritative state machine — a page refres
 **Indexes:** `runs_project_id_idx`, `runs_status_idx`.
 
 ### `assets`
-Every stored file — uploads and generated artifacts — backed by Supabase Storage. DB row holds the object path + URL.
+Every stored file — uploads and generated artifacts — backed by Supabase Storage. DB row holds the object path + URL. Generation writes rows via `persistSheet`; the post-completion **video editor** writes `edited_video` (the user's exported MP4) and `editor_scene` (the serialized CE.SDK scene) via `persistAsset` — see [video-editor.md](video-editor.md).
 
 | Column | Type | Null | Default | Key / Constraint |
 |---|---|---|---|---|
