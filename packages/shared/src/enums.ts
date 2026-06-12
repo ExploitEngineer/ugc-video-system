@@ -112,3 +112,22 @@ export function segmentCountFor(duration: Duration): number {
 export function isMultiSegment(duration: Duration): boolean {
   return duration !== "15s";
 }
+
+/**
+ * Machine-readable cause of a failed run (`runs.errorCode`). Paired with the
+ * user-facing sentence in `runs.error`; the raw provider/ffmpeg detail never
+ * leaves the server logs / step_event payloads. Stored as plain text in the DB
+ * (new codes must not require an enum migration) — this schema validates at
+ * the wire boundary.
+ */
+export const runErrorCodeSchema = z.enum([
+  "PERSON_IMAGE_INVALID",
+  "IMAGE_GENERATION_FAILED",
+  "VIDEO_GENERATION_FAILED",
+  "VIDEO_MERGE_FAILED",
+  "PROVIDER_RATE_LIMITED",
+  "PROVIDER_CONTENT_BLOCKED",
+  "RUN_CANCELLED",
+  "INTERNAL",
+]);
+export type RunErrorCode = z.infer<typeof runErrorCodeSchema>;

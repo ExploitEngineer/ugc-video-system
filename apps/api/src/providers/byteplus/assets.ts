@@ -19,6 +19,7 @@
 
 import { env } from "../../config/index.js";
 import { createLogger } from "../../lib/log.js";
+import { RUN_ERROR_MESSAGES, RunFailure } from "../../lib/run-failure.js";
 import { signedFetch, type SignedFetchResult } from "./sign.js";
 
 const log = createLogger("byteplus");
@@ -130,7 +131,16 @@ export async function createAsset(
     AssetType: "Image",
     Name: name,
   });
-  if (!res.ok) throw new Error(`BytePlus CreateAsset failed: ${errorOf(res)}`);
+  if (!res.ok) {
+    const detail = `BytePlus CreateAsset failed: ${errorOf(res)}`;
+    // Dimension/aspect rejections mean the INPUT image is unusable (normally
+    // prevented by upload-time normalization) — tell the user about the image,
+    // not about BytePlus.
+    const code = /aspectratio|resolution|width|height/i.test(detail)
+      ? "PERSON_IMAGE_INVALID"
+      : "VIDEO_GENERATION_FAILED";
+    throw new RunFailure(code, RUN_ERROR_MESSAGES[code], detail);
+  }
   const id = idOf(result(res));
   if (!id) throw new Error(`BytePlus CreateAsset returned no Id: ${res.raw.slice(0, 300)}`);
   return id;
@@ -147,7 +157,11 @@ async function waitAssetActive(groupId: string, assetId: string): Promise<void> 
     const status = row?.status;
     if (status === ACTIVE_STATUS) return;
     if (status && REJECTED_STATUSES.has(status)) {
-      throw new Error(`BytePlus asset ${assetId} moderation ${status}: ${row?.error ?? ""}`);
+      throw new RunFailure(
+        "PROVIDER_CONTENT_BLOCKED",
+        RUN_ERROR_MESSAGES.PROVIDER_CONTENT_BLOCKED,
+        `BytePlus asset ${assetId} moderation ${status}: ${row?.error ?? ""}`,
+      );
     }
     if (Date.now() > deadline) {
       throw new Error(`BytePlus asset ${assetId} not Active before timeout (last: ${status})`);
@@ -167,7 +181,11 @@ export async function ensureFaceAsset(url: string, name: string): Promise<string
   const existing = await findAssetByName(groupId, name);
   if (existing?.status === ACTIVE_STATUS) return existing.id;
   if (existing && REJECTED_STATUSES.has(existing.status)) {
-    throw new Error(`BytePlus asset "${name}" previously ${existing.status}: ${existing.error ?? ""}`);
+    throw new RunFailure(
+      "PROVIDER_CONTENT_BLOCKED",
+      RUN_ERROR_MESSAGES.PROVIDER_CONTENT_BLOCKED,
+      `BytePlus asset "${name}" previously ${existing.status}: ${existing.error ?? ""}`,
+    );
   }
   if (existing) {
     await waitAssetActive(groupId, existing.id);

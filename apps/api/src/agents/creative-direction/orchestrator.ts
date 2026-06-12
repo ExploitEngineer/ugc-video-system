@@ -31,6 +31,7 @@ import { persistSheet } from "../persist.js";
 import { cropRowsAs2x2 } from "../../lib/image/crop.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { logRun, logRunError } from "../../lib/log.js";
+import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
@@ -848,6 +849,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         status: "failed",
         currentStep: step,
         error: `Critic rejected the ${step} stage after the retry cap.`,
+        errorCode: "INTERNAL",
       });
       return;
     }
@@ -884,20 +886,32 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
   }
 }
 
-/** Mark a run failed and record a `failed` step_event (best effort). */
+/**
+ * Mark a run failed and record a `failed` step_event (best effort). The run row
+ * only ever gets the classified friendly message + code; the raw error text
+ * stays in the server log and the step_event payload (`detail`).
+ */
 async function failRun(
   runId: string,
   step: Step | null,
   err: unknown,
 ): Promise<void> {
-  const message = err instanceof Error ? err.message : String(err);
-  logRunError(runId, `${step ?? "run"} failed: ${message}`);
+  const failure = classifyRunError(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  logRunError(
+    runId,
+    `${step ?? "run"} failed [${failure.code}]: ${failure.detail ?? raw}`,
+  );
   if (step) {
     await writeStepEvent({
       runId,
       step,
       status: "failed",
-      payload: { error: message },
+      payload: {
+        error: failure.userMessage,
+        code: failure.code,
+        detail: truncateDetail(failure.detail ?? raw),
+      },
     }).catch((e) =>
       logRunError(
         runId,
@@ -908,7 +922,8 @@ async function failRun(
   await setRun(runId, {
     status: "failed",
     ...(step ? { currentStep: step } : {}),
-    error: message,
+    error: failure.userMessage,
+    errorCode: failure.code,
   }).catch((e) =>
     logRunError(
       runId,

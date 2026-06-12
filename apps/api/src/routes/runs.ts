@@ -21,6 +21,7 @@ import {
 import { persistAsset } from "../agents/persist.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
+import { normalizePersonImage } from "../lib/image/normalize.js";
 import { createLogger } from "../lib/log.js";
 import { toAssetDto, toRunDto } from "../lib/mappers.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
@@ -102,6 +103,26 @@ runs.post("/", async (c) => {
   }
   const { prompt, mode, aspectRatio, duration, criticEnabled } = parsed.data;
 
+  // Normalize the person photo BEFORE any DB inserts (a 422 here must not
+  // leave an orphaned run): pad/clamp it into BytePlus's CreateAsset limits
+  // (aspect 0.4–2.5, height 300–6000) so the stored `person_upload` is always
+  // usable as a face asset. The product image is left untouched — it never
+  // reaches CreateAsset, and padding bars would leak into generated stills.
+  const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [
+    {
+      kind: "product_upload",
+      bytes: await fileToBytes(productImage as File),
+      mime: (productImage as File).type,
+    },
+  ];
+  if (personImage) {
+    const norm = await normalizePersonImage(
+      await fileToBytes(personImage),
+      personImage.type,
+    );
+    uploads.push({ kind: "person_upload", bytes: norm.bytes, mime: norm.mime });
+  }
+
   // `runs.projectId` is NOT NULL → auto-create a project to own this run.
   const [project] = await db
     .insert(schema.projects)
@@ -132,25 +153,20 @@ runs.post("/", async (c) => {
 
   // Upload images, then record them as `assets`, BEFORE releasing the lock so
   // the worker only ever sees a run whose inputs already exist.
-  const uploads: { kind: AssetKind; file: File }[] = [
-    { kind: "product_upload", file: productImage as File },
-  ];
-  if (personImage) uploads.push({ kind: "person_upload", file: personImage });
-
   try {
-    for (const { kind, file } of uploads) {
+    for (const { kind, bytes, mime } of uploads) {
       const { storagePath, url } = await uploadAsset({
         runId: run.id,
         kind,
-        bytes: await fileToBytes(file),
-        contentType: file.type,
+        bytes,
+        contentType: mime,
       });
       await db.insert(schema.assets).values({
         runId: run.id,
         kind,
         storagePath,
         url,
-        mime: file.type,
+        mime,
       });
     }
   } catch (err) {
@@ -160,6 +176,7 @@ runs.post("/", async (c) => {
       .set({
         status: "failed",
         error: "Image upload failed.",
+        errorCode: "INTERNAL",
         lockedAt: null,
         lockedBy: null,
         updatedAt: new Date(),
@@ -401,7 +418,12 @@ runs.post("/:id/cancel", async (c) => {
     log.info("cancel →failed", { run: id, from: run.status });
     await db
       .update(schema.runs)
-      .set({ status: "failed", error: "Run cancelled.", updatedAt: new Date() })
+      .set({
+        status: "failed",
+        error: "Run cancelled.",
+        errorCode: "RUN_CANCELLED",
+        updatedAt: new Date(),
+      })
       .where(eq(schema.runs.id, id));
   }
 

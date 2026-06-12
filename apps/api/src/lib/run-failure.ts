@@ -1,0 +1,100 @@
+// Worker-side failure type + classifier — the counterpart to the HTTP-only
+// `ApiError` in ./errors.ts. A `RunFailure` carries the machine `code` that
+// lands in `runs.error_code`, the friendly `userMessage` that lands in
+// `runs.error` (and the studio UI banner), and the raw provider/ffmpeg text as
+// `detail` — which must only ever reach server logs and step_event payloads,
+// never the run row.
+//
+// Throw-sites that know their cause throw `RunFailure` directly (BytePlus
+// assets, video agent, merge agent). Everything else is funneled through
+// `classifyRunError` in `failRun`, which pattern-matches known provider error
+// signatures so even un-retrofitted paths fail with a readable sentence.
+
+import type { RunErrorCode } from "@ugc/shared";
+
+export class RunFailure extends Error {
+  readonly code: RunErrorCode;
+  /** Friendly, actionable sentence — what `runs.error` (and the UI) gets. */
+  readonly userMessage: string;
+  /** Raw provider/ffmpeg text — server logs + step_event payloads ONLY. */
+  readonly detail?: string;
+
+  constructor(
+    code: RunErrorCode,
+    userMessage: string,
+    detail?: string,
+    opts?: { cause?: unknown },
+  ) {
+    // super(userMessage) so any code that logs/stores err.message stays friendly.
+    super(userMessage, opts);
+    this.name = "RunFailure";
+    this.code = code;
+    this.userMessage = userMessage;
+    this.detail = detail;
+  }
+}
+
+export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
+  PERSON_IMAGE_INVALID:
+    "One of the reference images has a shape the video service can't use. If you uploaded a person photo, try one closer to a standard portrait or square format.",
+  PROVIDER_CONTENT_BLOCKED:
+    "Part of this generation was blocked by the provider's safety filters. Try a different photo or adjust your prompt.",
+  PROVIDER_RATE_LIMITED:
+    "The generation service is busy right now. Please try again in a few minutes.",
+  VIDEO_MERGE_FAILED:
+    "We couldn't assemble the final video from its segments. Please try the run again.",
+  VIDEO_GENERATION_FAILED: "Video generation failed. Please try the run again.",
+  IMAGE_GENERATION_FAILED:
+    "We couldn't generate the reference images. Please try the run again.",
+  RUN_CANCELLED: "Run cancelled.",
+  INTERNAL: "Something went wrong while generating your ad. Please try again.",
+};
+
+// Ordered, first match wins. Content-block / rate-limit MUST precede the
+// provider-generic rows: a BytePlus moderation rejection message contains
+// both "BytePlus" and "moderation".
+const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
+  {
+    pattern: /aspectratiotoo(small|large)|aspect ratio must be between/i,
+    code: "PERSON_IMAGE_INVALID",
+  },
+  {
+    pattern:
+      /sensitivecontentdetected|moderation\b|content.?policy|safety system|flagged/i,
+    code: "PROVIDER_CONTENT_BLOCKED",
+  },
+  {
+    pattern: /rate.?limit|too many requests|\b429\b|quota/i,
+    code: "PROVIDER_RATE_LIMITED",
+  },
+  { pattern: /ffmpeg|merge/i, code: "VIDEO_MERGE_FAILED" },
+  {
+    pattern: /byteplus|seedance|video task|video generation/i,
+    code: "VIDEO_GENERATION_FAILED",
+  },
+  {
+    pattern: /openai image|image generation|images\.(edit|generate)/i,
+    code: "IMAGE_GENERATION_FAILED",
+  },
+];
+
+/**
+ * Turn ANY error into a `RunFailure`. `RunFailure` instances pass through
+ * untouched; everything else is matched against known provider signatures,
+ * falling back to `defaultCode` (or INTERNAL) with a generic friendly message.
+ * The original raw message is preserved as `detail`.
+ */
+export function classifyRunError(
+  err: unknown,
+  defaultCode: RunErrorCode = "INTERNAL",
+): RunFailure {
+  if (err instanceof RunFailure) return err;
+  const raw = err instanceof Error ? err.message : String(err);
+  const code = CLASSIFIERS.find((c) => c.pattern.test(raw))?.code ?? defaultCode;
+  return new RunFailure(code, RUN_ERROR_MESSAGES[code], raw, { cause: err });
+}
+
+/** Bound raw detail before persisting it in a step_event payload. */
+export function truncateDetail(s: string, max = 1500): string {
+  return s.length <= max ? s : `${s.slice(0, max)}…`;
+}

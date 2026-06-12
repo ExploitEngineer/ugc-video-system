@@ -11,6 +11,7 @@ import {
   assetKindSchema,
   durationSchema,
   modeSchema,
+  runErrorCodeSchema,
   runStatusSchema,
   stepSchema,
 } from "./enums";
@@ -67,7 +68,10 @@ export const runSchema = z.object({
    * "passed", so it must NOT be coalesced to a step in the mapper.
    */
   currentStep: stepSchema.nullable(),
+  /** User-facing failure sentence — never raw provider/ffmpeg output. */
   error: z.string().nullable(),
+  /** Machine failure code; null while not failed and for pre-feature rows. */
+  errorCode: runErrorCodeSchema.nullable(),
   /** Pending step-by-step feedback message, consumed by the next regen. */
   feedback: z.string().nullable(),
   createdAt: z.string(),

@@ -120,7 +120,8 @@ export const runs = pgTable(
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
-    error: text("error"),
+    error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)
+    errorCode: text("error_code"), // RunErrorCode — plain text so new codes need no enum migration; Zod-validated at the mapper
     feedback: text("feedback"), // pending step-by-step feedback, consumed by next regen
     lockedAt: timestamp("locked_at", { withTimezone: true }), // worker lock — one driver per run
     lockedBy: text("locked_by"), // worker fencing token (workerId) — losing driver self-aborts
