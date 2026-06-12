@@ -16,11 +16,20 @@ living under `apps/api/src/agents/<agent>/<skill>/`.
 - `meta` — JSON metadata carried on the artifact row (not an image).
 - `?` — optional input.
 - **Models:** image generation = `gpt-image-2`; all reasoning/vision = `gpt-4.1`;
-  video = Seedance 2.0 via BytePlus ModelArk.
+  video = Seedance 2.0 via BytePlus ModelArk; the 60s **merge** step is ffmpeg
+  (no AI).
 
 Every skill **also** receives a shared `SkillContext` (`agents/types.ts`):
-`{ runId, adStyle, adType (ugc|inspirational), productBrief, personBrief, aspectRatio,
-openai, video }`. It is listed once here and not repeated per row.
+`{ runId, adStyle, adType (ugc|inspirational), productBrief, productUse?,
+personBrief, aspectRatio, openai, video }`. It is listed once here and not
+repeated per row.
+
+> **15s vs 60s.** The same skills serve both run lengths. A **60s** run
+> (`runs.duration = "60s"`) adds the `narrativeOutline` skill and runs the
+> storyboard + video skills **once per segment (×4)** with extra `segmentIndex` /
+> `segmentSummary` / `otherSummaries` inputs, then an ffmpeg **merge**. Those 60s
+> fields are marked **(60s)** below; a 15s run never passes them. See
+> [pipeline.md §8](pipeline.md) for the orchestration.
 
 ## Identity anchors — image vs text
 
@@ -51,7 +60,9 @@ inputs). `gpt-4.1`.
 | `interpretAdStyle` (`interpret-style/`)     | —                                         | `userPrompt`                                                          | —     | `{ adStyle: text, adType: ugc \| inspirational }`                                            |
 | `describeProduct` (`describe-product/`)     | `productUpload` (vision)                  | `userPrompt`, `adStyle`                                               | —     | `{ productBrief }` — text, 30–50 words (product category / materials / colors / markings); persisted to `runs.product_brief` |
 | `planPersonBrief` (`person-brief/`)         | `productUpload` (vision)                  | `userPrompt`, `adStyle`                                               | —     | `{ personBrief }` — text, 40–70 words (demographics / wardrobe / palette); persisted to `runs.person_brief` |
-| `planRevision` (`plan-revision/`)           | `currentArtifact` (vision), `productRef?` | `message`, `stage` (reference\|storyboard), `adStyle`, `personBrief?` | —     | `RevisionDirective { changes[], keep[], rationale, scope: edit\|regenerate, revisedBrief? }` |
+| `derivePersonBrief` (`derive-person-brief/`) | `personUpload` (vision)                  | `userPrompt`                                                          | —     | `{ personBrief }` — gender/age/hair anchor when a person was **uploaded**; persisted to `runs.person_brief` (best-effort, concurrent) |
+| `narrativeOutline` (`narrative-outline/`) **(60s)** | —                                | `adStyle`, `adType`, `productBrief`, `productUse?`, `personBrief`, `userPrompt` | — | `{ segments: [{ index, beat, summary }] }` — exactly 4; the 60s arc, persisted to `runs.narrative_outline` |
+| `planRevision` (`plan-revision/`)           | `currentArtifact` (vision), `productRef?` | `message`, `stage` (reference\|storyboard), `adStyle`, `personBrief?` | —     | `RevisionDirective { changes[], keep[], rationale, scope: edit\|regenerate, revisedBrief?, targetSegments? }` — `targetSegments` **(60s)** = which storyboard segments to regen (from `parseTargetSegments`) |
 | `interpretFeedback` (`interpret-feedback/`) | —                                         | `message`, `stage`                                                    | —     | `{ intent: approve \| revise }` (defaults to `revise` on parse failure)                      |
 
 `planRevision`'s `revisedBrief` is emitted only at the **reference** gate and is
@@ -68,14 +79,16 @@ falls back to image-only grounding) rather than failing the run.
 
 ## Image Agent — `agents/image/` (`gpt-image-2`)
 
-Produces the composite reference/storyboard sheets. Each output is a single 2×2
-grid PNG (`2048x1152` for 16:9, `1152x2048` for 9:16).
+Produces the composite reference/storyboard sheets. Each output is a single grid
+PNG (`2048x1152` for 16:9, `1152x2048` for 9:16) — the product and storyboard
+sheets are a 2×2 four-panel grid; the person sheet is an 8-panel two-row grid.
 
 | Skill                                    | Image in                                                           | Prompt / text in                          | Output                                                                                                              |
 | ---------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `productSheetBuilder` (`product-sheet/`) | `productUpload`                                                    | `userPrompt`, `critique?`                 | `ProductReferenceSheet` — 2×2 product views (front / three-quarter / side / rear) PNG + `views` meta + `promptUsed` |
-| `generatePersonImage` (`person-image/`)  | `baseRef?` (uploaded photo OR prior person sheet; absent ⇒ invent) | `personBrief`, `userPrompt`, `directive?` | `PersonReferenceSheet` — 2×2 person views PNG + `personDetails` meta                                                |
-| `storyboardGenerator` (`storyboard/`)    | `productSheetRef`, `personSheetRef?`                               | `userPrompt`, `critique?`, `directive?`   | `StoryboardSheet` — labelled 2×2 keyframe PNG (badges 01–04 + caption bars) + 4 `scenes[]` meta                     |
+| `generatePersonImage` (`person-image/`)  | `baseRef?` (uploaded photo OR prior person sheet; absent ⇒ invent) | `personBrief`, `userPrompt`, `directive?` | `PersonReferenceSheet` — 8-panel person sheet PNG (top: 4 full-body angles; bottom: 4 face close-ups) + `personDetails` meta |
+| `storyboardGenerator` (`storyboard/`) — **15s** | `productSheetRef`, `personSheetRef?`                        | `userPrompt`, `critique?`, `directive?`   | `StoryboardSheet` — labelled 2×2 keyframe PNG (badges 01–04 + caption bars) + 4 `scenes[]` meta; persists `storyboard_sheet` |
+| `generateMaster` (`storyboard/`, `full60s`) — **60s** | `productSheetRef`, `personSheetRef?`               | `userPrompt`, `directive?`, `segments[]` (4 narrative beats) | `{ bytes, mime, scenes[16], imagePrompt }` — a SINGLE 16-panel 4×4 PNG (badges 01–16, all distinct), **NOT persisted** (the orchestrator persists it as `storyboard_master` and crops it into 4 `storyboard_sheet` row strips via `lib/image/crop.ts`) |
 
 **Person agent has three modes**, keyed on `baseRef` + `directive` — and the
 product image **never reaches it** (only a product-derived text brief):
@@ -129,7 +142,15 @@ Each `issues[]` entry = `{ severity: minor|major|blocking, region, problem, fixH
 
 | Skill                       | Image in                               | Prompt / text in                             | Other                                                        | Output                                                                                                   |
 | --------------------------- | -------------------------------------- | -------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `videoBuilder` (`index.ts`) | `storyboardSheetRef`, `personFaceRef?` | `scenes[]` (incl. transcripts), `userPrompt` | `hasPerson`, `durationSec?` (=15), `critique?` (reserved/F7) | `Video` — final MP4 + `durationSec`, `hasAudio`, `providerMeta { provider, model, taskId, videoPrompt }` |
+| `videoBuilder` (`index.ts`) | `storyboardSheetRef` (15s: the 2×2 sheet; **60s:** one cropped 1×4 **row strip**), `personFaceRef?`, `productSheetRef?` | `scenes[]` (incl. transcripts), `userPrompt`, `characterAnchor?`, **(60s)** `otherSummaries[]` | `hasPerson`, `durationSec?` (=15), `critique?`, **(60s)** `segmentIndex` | `Video` — MP4 + `durationSec`, `hasAudio`, `providerMeta { provider, model, taskId, videoPrompt }`. 15s → `final_video`; **(60s)** → `segment_video` with `segment_index` |
+
+`videoBuilder`'s prompt is a SIMPLE timestamped Seedance shot list
+(`buildVideoPrompt` → `Generate a scene using shots in the uploaded film
+storyboard [0:00-0:04]: …`), one slice per panel, with the `@Image` legend, ONE
+audio line (UGC lip-sync / inspirational VO) and the leak-guard;
+`buildDeterministicVideoPrompt` is the no-LLM fallback. 60s segments register the
+face asset under a per-segment `referenceTag` so the four near-identical strips
+don't collide.
 
 - The **labelled storyboard sheet is the sole shot guide** — the product/person
   _reference sheets_ are **not** sent to Seedance. Identity + framing + shot order
@@ -145,6 +166,20 @@ Each `issues[]` entry = `{ severity: minor|major|blocking, region, problem, fixH
   for UGC both prompt builders push real-phone-footage cues (true skin texture,
   mild sensor grain, handheld micro-shake, lived-in settings) and explicitly ban
   waxy/airbrushed skin, uncanny AI faces and HDR sheen.
+
+---
+
+## Merge Agent — `agents/merge/` (60s only, **no AI**)
+
+| Skill | Image/video in | Params in | Output |
+| --- | --- | --- | --- |
+| `mergeSegments` (`index.ts`) | the four `segment_video` clips (loaded by `segment_index`) | — | merged ~60s MP4 → `assets` (kind `final_video`) + `videos` row (`segment_index = null`, `durationSec` = 4×15) |
+
+The heavy lifting is `lib/video/merge.ts` `mergeSegmentUrls`: `ffmpeg-static` via
+`spawn` with the `concat` filter (re-encode to normalize, **per-segment audio
+preserved**, `libx264`/`aac`, `+faststart`), guarded by a process-wide semaphore
+(concurrency 1) + `-threads 2`. The merged clip is the run's `final_video` — the
+same surface the 15s clip uses, so the UI/API treat both identically.
 
 ---
 
@@ -167,3 +202,10 @@ images? }`; image URLs are fetched and inlined as base64 data URIs before the
   `video.pollVideo(task)` until `completed` → `{ videoUrl, hasAudio, downloadHeaders }`.
 - **`ensureFaceAsset(url, name)`** (BytePlus, `assets.ts`) → registers/reuses a
   face asset (V4-signed) and returns the `assetId` used as `asset://<id>`.
+- **`fetchWithRetry(url, init?, opts?)`** (`lib/http.ts`) → wraps every raw
+  `fetch` (reference-image downloads in the OpenAI provider, segment-clip
+  downloads in merge) with retry on network errors + 429/5xx (backoff+jitter).
+  Plus: the OpenAI client uses `maxRetries: 4`. This is what keeps the 60s
+  fan-outs (where many segments fetch the same sheets at once) from dying on a
+  transient "fetch failed". Fan-out concurrency is capped by
+  `SEGMENT_STORYBOARD_CONCURRENCY` (3) and `SEGMENT_VIDEO_CONCURRENCY` (4).
