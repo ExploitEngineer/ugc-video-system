@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunDetail } from "@ugc/shared";
+import { isMultiSegment, type RunDetail, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   CheckCircle2Icon,
@@ -152,11 +152,13 @@ export function RunView({ runId }: { runId: string }) {
   }
 
   const finalVideo = run.assets.find((a) => a.kind === "final_video");
-  // 60s: the four 15s segment clips + the four segment storyboard sheets. Segments
-  // finish in parallel (random order), so order by the `segmentIndex` stamped on
-  // each asset's meta — 1,2 / 3,4 — falling back to original order if absent.
-  const is60s = run.duration === "60s";
-  const segmentClips = is60s
+  // Multi-segment: the N 15s segment clips + the N segment storyboard rows.
+  // Segments finish in parallel (random order), so order by the `segmentIndex`
+  // stamped on each asset's meta, falling back to original order if absent.
+  const isMulti = isMultiSegment(run.duration);
+  const segCount = segmentCountFor(run.duration);
+  const masterPanels = segCount * 4;
+  const segmentClips = isMulti
     ? run.assets
         .filter((a) => a.kind === "segment_video")
         .sort(
@@ -165,10 +167,10 @@ export function RunView({ runId }: { runId: string }) {
             Number(b.meta?.segmentIndex ?? Number.POSITIVE_INFINITY),
         )
     : [];
-  // 60s: the ONE 16-panel master storyboard (all four segments × four panels in a
-  // single 4×4 sheet). The four cropped row strips (`storyboard_sheet`) are an
-  // internal step input — the master is what's shown.
-  const masterSheet = is60s
+  // Multi-segment: the ONE N×4-panel master storyboard (all N segments × four
+  // panels in a single sheet). The N cropped row strips (`storyboard_sheet`) are
+  // an internal step input — the master is what's shown.
+  const masterSheet = isMulti
     ? run.assets.find((a) => a.kind === "storyboard_master")
     : undefined;
   const pending = mutation.isPending || feedbackMutation.isPending;
@@ -200,7 +202,7 @@ export function RunView({ runId }: { runId: string }) {
         </motion.div>
       )}
 
-      {is60s && (segmentClips.length > 0 || masterSheet) && (
+      {isMulti && (segmentClips.length > 0 || masterSheet) && (
         <Card>
           <CardContent className="flex flex-col gap-6 py-6">
             {masterSheet && (
@@ -208,12 +210,12 @@ export function RunView({ runId }: { runId: string }) {
                 <h2 className="mb-3 text-sm font-semibold">
                   Storyboard{" "}
                   <span className="text-muted-foreground font-normal">
-                    — 16 panels (4 segments × 4)
+                    — {masterPanels} panels ({segCount} segments × 4)
                   </span>
                 </h2>
                 <ArtifactCard
                   asset={masterSheet}
-                  title="Storyboard (16 panels)"
+                  title={`Storyboard (${masterPanels} panels)`}
                 />
               </div>
             )}
@@ -222,7 +224,7 @@ export function RunView({ runId }: { runId: string }) {
                 <h2 className="mb-3 text-sm font-semibold">
                   15-second segments{" "}
                   <span className="text-muted-foreground font-normal">
-                    — {segmentClips.length} of 4
+                    — {segmentClips.length} of {segCount}
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -270,12 +272,12 @@ export function RunView({ runId }: { runId: string }) {
               ? `Paused — review below, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
               : "Paused — awaiting your feedback before the next step."}
           </div>
-          {is60s && awaitingGate === "storyboard" && (
+          {isMulti && awaitingGate === "storyboard" && (
             <p className="text-brand/80 pl-6 text-xs font-normal">
               Spot an issue? Describe what to change — e.g.{" "}
               <span className="font-medium">“make the lighting warmer”</span> —
-              and we’ll regenerate the whole 16-panel storyboard. Or say{" "}
-              <span className="font-medium">“looks good”</span> to continue.
+              and we’ll regenerate the whole {masterPanels}-panel storyboard. Or
+              say <span className="font-medium">“looks good”</span> to continue.
             </p>
           )}
         </div>

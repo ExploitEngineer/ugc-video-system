@@ -28,9 +28,9 @@ const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
   person_sheet: "person_sheet",
   storyboard: "storyboard_sheet",
   video: "final_video",
-  // 60s: segment_storyboard's artifact is the single 16-panel master sheet; the
-  // merge step's is the final 60s clip. The four segment clips are shown in their
-  // own gallery in the run view.
+  // Multi-segment: segment_storyboard's artifact is the single N×4-panel master
+  // sheet; the merge step's is the final merged clip. The N segment clips are
+  // shown in their own gallery in the run view.
   segment_storyboard: "storyboard_master",
   merge: "final_video",
 };

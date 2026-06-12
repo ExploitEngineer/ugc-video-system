@@ -359,10 +359,22 @@ function DurationToggle({
       icon: ClockIcon,
     },
     {
+      value: "30s",
+      label: "30s",
+      title: "Two storyboard rows → two 15s clips merged into one 30s ad",
+      icon: FilmIcon,
+    },
+    {
+      value: "45s",
+      label: "45s",
+      title: "Three storyboard rows → three 15s clips merged into one 45s ad",
+      icon: FilmIcon,
+    },
+    {
       value: "60s",
       label: "60s",
       title:
-        "Four storyboards → four 15s clips merged into one 60s ad (longer render)",
+        "Four storyboard rows → four 15s clips merged into one 60s ad (longer render)",
       icon: FilmIcon,
     },
   ];

@@ -8,12 +8,12 @@ import { Card, CardContent } from "@/components/ui/card";
 
 /**
  * Readable layout of the generated script. For a 15s run it's one 4-scene list;
- * for a 60s run it's four labelled segments (16 scenes total) from
+ * for a multi-segment run it's N labelled segments (N×4 scenes total) from
  * `segmentScenes`. Each scene shows its description + spoken line (a UGC review
  * line or inspirational voiceover, per the run's ad type).
  */
 export function ScriptPanel({ run }: { run: RunDetail }) {
-  // 60s: prefer the per-segment grouping; fall back to the flat scene list.
+  // Multi-segment: prefer the per-segment grouping; fall back to the flat list.
   const segments =
     run.segmentScenes && run.segmentScenes.length > 0
       ? run.segmentScenes
@@ -37,7 +37,7 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
           </span>
           {grouped && (
             <span className="border-brand/40 text-brand rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-              60s · {segments.length} segments
+              {segments.length * 15}s · {segments.length} segments
             </span>
           )}
         </div>

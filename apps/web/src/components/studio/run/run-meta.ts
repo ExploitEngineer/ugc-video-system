@@ -1,6 +1,11 @@
 // Shared display metadata for run steps + statuses. Pure data/helpers, no JSX.
 
-import type { RunDetail, RunStatus, Step } from "@ugc/shared";
+import {
+  isMultiSegment,
+  type RunDetail,
+  type RunStatus,
+  type Step,
+} from "@ugc/shared";
 
 // Critic inspection steps (product_inspection / storyboard_inspection) are
 // intentionally omitted — the Critic is parked (off by default), so they never
@@ -13,8 +18,8 @@ export const STEP_ORDER: Step[] = [
   "video",
 ];
 
-/** The 60s pipeline timeline — master storyboard → four clips → merge. */
-export const STEP_ORDER_60: Step[] = [
+/** The multi-segment pipeline timeline — master storyboard → N clips → merge. */
+export const STEP_ORDER_MULTI: Step[] = [
   "product_sheet",
   "person_sheet",
   "segment_storyboard",
@@ -24,7 +29,7 @@ export const STEP_ORDER_60: Step[] = [
 
 /** The timeline steps for a run, by its duration. */
 export function stepOrderFor(duration: RunDetail["duration"]): Step[] {
-  return duration === "60s" ? STEP_ORDER_60 : STEP_ORDER;
+  return isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
 }
 
 /**
@@ -47,7 +52,7 @@ export const STEP_LABEL: Record<Step, string> = {
   narrative_outline: "Story outline",
   segment_storyboard: "Storyboard sheets",
   segment_video: "Segment videos",
-  merge: "Final 60s video",
+  merge: "Final merged video",
 };
 
 /** The skill + agent responsible for each step — surfaced live in the UI. */
@@ -110,7 +115,7 @@ export function gateStartsStep(
   gate: Gate,
   duration: RunDetail["duration"] = "15s",
 ): Step {
-  if (duration === "60s") {
+  if (isMultiSegment(duration)) {
     return gate === "reference" ? "segment_storyboard" : "segment_video";
   }
   return gate === "reference" ? "storyboard" : "video";
