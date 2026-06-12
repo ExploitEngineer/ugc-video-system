@@ -26,6 +26,12 @@ export function SiteFooter() {
             How it works
           </Link>
           <Link
+            href="/#faq"
+            className="hover:text-foreground transition-colors"
+          >
+            FAQ
+          </Link>
+          <Link
             href="/studio"
             className="hover:text-foreground transition-colors"
           >
@@ -34,7 +40,7 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="text-muted-foreground border-t py-4 text-center text-xs">
-        © 2026 Adverra. A demo build of the F2 frontend shell.
+        © 2026 Adverra. One product image in, a finished ad video out.
       </div>
     </footer>
   );

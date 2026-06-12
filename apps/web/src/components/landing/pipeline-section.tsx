@@ -16,7 +16,7 @@ const STAGES = [
   {
     icon: VideoIcon,
     title: "Video",
-    body: "The full storyboard sheet becomes one ~15s ad with native audio. No merge step.",
+    body: "The storyboard becomes your ad with native audio — one 15s clip, or 2–4 segments merged into a 30/45/60s cut.",
   },
 ];
 
@@ -33,15 +33,15 @@ export function PipelineSection() {
           </h2>
           <p className="text-muted-foreground mt-4 text-pretty">
             A Creative Direction agent interprets your style and drives every
-            step. A Critic agent validates each artifact and regenerates on
-            issues — in both run modes.
+            step — image and video agents do the rendering, and your run state
+            survives any refresh.
           </p>
         </Reveal>
 
         <RevealGroup className="mt-14 grid gap-5 md:grid-cols-3">
           {STAGES.map((stage, i) => (
             <RevealItem key={stage.title}>
-              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.6_0.16_250/0.4)]">
+              <div className="group bg-card relative h-full overflow-hidden rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_color-mix(in_oklch,var(--brand)_40%,transparent)]">
                 <div
                   aria-hidden
                   className="bg-brand/10 pointer-events-none absolute -top-16 -right-16 size-40 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-100"

@@ -8,18 +8,18 @@ const STEPS = [
   },
   {
     n: "02",
-    title: "Pick a run mode",
-    body: "Automatic runs end-to-end. Step-by-step pauses after each artifact so you give feedback to approve or revise.",
+    title: "Pick your options",
+    body: "Choose a length (15–60s), an aspect ratio, and a run mode — automatic end-to-end, or step-by-step with your feedback at each gate.",
   },
   {
     n: "03",
     title: "Agents build artifacts",
-    body: "Reference sheets → storyboard sheet, each auto-checked by the Critic agent and regenerated when needed.",
+    body: "Reference sheets → a scene script → the storyboard sheet, each step visible live as the pipeline advances.",
   },
   {
     n: "04",
     title: "Get your ad video",
-    body: "The storyboard goes to the video agent and returns one ~15s ad with audio. Runs survive a refresh.",
+    body: "The storyboard becomes your finished ad with native audio. Tweak the cut afterwards in the built-in editor.",
   },
 ];
 
@@ -46,7 +46,7 @@ export function HowItWorks() {
         <RevealGroup className="mt-14 grid gap-5 sm:grid-cols-2">
           {STEPS.map((step) => (
             <RevealItem key={step.n}>
-              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_oklch(0.6_0.16_250/0.35)]">
+              <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_color-mix(in_oklch,var(--brand)_35%,transparent)]">
                 <span className="text-brand-gradient text-display text-5xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
                   {step.n}
                 </span>
