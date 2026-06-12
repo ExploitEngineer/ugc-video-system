@@ -5,6 +5,7 @@ import { isMultiSegment, type RunDetail, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   CheckCircle2Icon,
+  PencilIcon,
   SparklesIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -151,7 +152,13 @@ export function RunView({ runId }: { runId: string }) {
     );
   }
 
-  const finalVideo = run.assets.find((a) => a.kind === "final_video");
+  // Prefer the user's latest CE.SDK edit (newest `edited_video`) over the
+  // originally generated `final_video`; the original is always kept.
+  const editedVideo = run.assets
+    .filter((a) => a.kind === "edited_video")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const finalVideo =
+    editedVideo ?? run.assets.find((a) => a.kind === "final_video");
   // Multi-segment: the N 15s segment clips + the N segment storyboard rows.
   // Segments finish in parallel (random order), so order by the `segmentIndex`
   // stamped on each asset's meta, falling back to original order if absent.
@@ -190,14 +197,23 @@ export function RunView({ runId }: { runId: string }) {
           animate={{ opacity: 1, y: 0 }}
           className="ring-glow bg-card overflow-hidden rounded-2xl border"
         >
-          <div className="border-b p-4">
+          <div className="flex items-center justify-between gap-2 border-b p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <CheckCircle2Icon className="size-4 text-success" />
-              Your ad video is ready
+              {editedVideo ? "Your edited ad video" : "Your ad video is ready"}
             </div>
+            <Button asChild variant="brand" size="sm">
+              <Link href={`/studio/${run.id}/edit`}>
+                <PencilIcon className="size-4" />
+                Edit video
+              </Link>
+            </Button>
           </div>
           <div className="p-4">
-            <ArtifactCard asset={finalVideo} title="Final ad video" />
+            <ArtifactCard
+              asset={finalVideo}
+              title={editedVideo ? "Edited ad video" : "Final ad video"}
+            />
           </div>
         </motion.div>
       )}
