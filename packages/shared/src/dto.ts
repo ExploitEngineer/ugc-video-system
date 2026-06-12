@@ -9,6 +9,7 @@ import {
   adTypeSchema,
   aspectRatioSchema,
   assetKindSchema,
+  durationSchema,
   modeSchema,
   runStatusSchema,
   stepSchema,
@@ -54,6 +55,8 @@ export const runSchema = z.object({
   adType: adTypeSchema,
   mode: modeSchema,
   aspectRatio: aspectRatioSchema,
+  /** Target ad length — `15s` (single clip) or `60s` (four merged clips). */
+  duration: durationSchema,
   criticEnabled: z.boolean(),
   status: runStatusSchema,
   /**
@@ -93,12 +96,50 @@ export const sceneSchema = z.object({
 });
 export type Scene = z.infer<typeof sceneSchema>;
 
+/**
+ * One segment of the 60s narrative arc, planned up front by the
+ * `narrative_outline` step. `beat` names the act (e.g. "hook"); `summary` is the
+ * 2–3 sentence brief that drives that segment's storyboard + video.
+ */
+export const narrativeSegmentSchema = z.object({
+  index: z.number().catch(0),
+  beat: z.string().catch(""),
+  summary: z.string().catch(""),
+});
+export type NarrativeSegment = z.infer<typeof narrativeSegmentSchema>;
+
+export const narrativeOutlineSchema = z.object({
+  segments: z.array(narrativeSegmentSchema),
+});
+export type NarrativeOutline = z.infer<typeof narrativeOutlineSchema>;
+
 /** Shape returned by `GET /runs/:id` — run + its artifacts + audit trail. */
 export const runDetailSchema = runSchema.extend({
   assets: z.array(assetSchema),
   stepEvents: z.array(stepEventSchema),
-  /** Storyboard scenes + transcripts, null until the storyboard step lands. */
+  /**
+   * Storyboard scenes + transcripts, null until the storyboard step lands.
+   * For 15s runs this is the single storyboard's four scenes. For 60s runs it
+   * is the concatenation of all four sheets' scenes (16), in segment order;
+   * `segmentScenes` carries the same scenes grouped by segment for the UI.
+   */
   scenes: z.array(sceneSchema).nullable(),
+  /**
+   * 60s runs only: the 16 scenes grouped by segment (`[seg0[], seg1[], …]`),
+   * in `segment_index` order. Null for 15s runs (use `scenes`).
+   */
+  segmentScenes: z.array(z.array(sceneSchema)).nullable(),
+  /**
+   * 60s runs only: the planned narrative arc (four segment summaries), null
+   * until the `narrative_outline` step lands (and always null for 15s).
+   */
+  narrativeOutline: narrativeOutlineSchema.nullable(),
+  /**
+   * 60s runs only: the locked visual-style bible (grade/lens/lighting/palette/
+   * time-of-day arc) injected into all eight downstream prompts. Null until the
+   * `narrative_outline` step lands (and always null for 15s).
+   */
+  visualStyle: z.string().nullable(),
 });
 export type RunDetail = z.infer<typeof runDetailSchema>;
 
@@ -111,6 +152,8 @@ export const createRunInputSchema = z.object({
   prompt: z.string().trim().min(1, "Prompt is required").max(2000),
   mode: modeSchema,
   aspectRatio: aspectRatioSchema,
+  /** `15s` (default) or `60s`. FormData omits it on legacy clients → 15s. */
+  duration: durationSchema.default("15s"),
   criticEnabled: z.boolean(),
   hasPersonImage: z.boolean(),
 });

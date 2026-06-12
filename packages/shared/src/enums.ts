@@ -15,7 +15,16 @@ export const runStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
-/** Discrete pipeline units (`runs.currentStep`, `step_events.step`). */
+/**
+ * Discrete pipeline units (`runs.currentStep`, `step_events.step`).
+ *
+ * The first six are the ~15s pipeline. The last four are the 60s pipeline
+ * (`duration === "60s"`): `narrative_outline` plans the four segment summaries,
+ * then `segment_storyboard`/`segment_video` are single steps that fan out over
+ * the four segments internally (the "which segment" dimension lives in the
+ * `segment_index` artifact columns, not in this enum), and `merge` concatenates
+ * the four clips into the final 60s video. A 15s run never emits the last four.
+ */
 export const stepSchema = z.enum([
   "product_sheet",
   "person_sheet",
@@ -23,17 +32,29 @@ export const stepSchema = z.enum([
   "storyboard",
   "storyboard_inspection",
   "video",
+  "narrative_outline",
+  "segment_storyboard",
+  "segment_video",
+  "merge",
 ]);
 export type Step = z.infer<typeof stepSchema>;
 
-/** Kind of stored file (`assets.kind`). */
+/**
+ * Kind of stored file (`assets.kind`). `final_video` is the single ~15s clip
+ * AND the merged 60s output; `segment_video` is one of the four 15s segment
+ * clips of a 60s run. `storyboard_master` is the 60s single 16-panel (4×4)
+ * sheet; its four cropped row strips are persisted as `storyboard_sheet`
+ * (`segment_index` 0..3), the same kind a 15s run's single sheet uses.
+ */
 export const assetKindSchema = z.enum([
   "product_upload",
   "person_upload",
   "product_sheet",
   "person_sheet",
   "storyboard_sheet",
+  "storyboard_master",
   "final_video",
+  "segment_video",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 
@@ -60,3 +81,11 @@ export type AdType = z.infer<typeof adTypeSchema>;
 /** Approval state of a generated artifact (sheets, video). */
 export const artifactStatusSchema = z.enum(["draft", "approved", "rejected"]);
 export type ArtifactStatus = z.infer<typeof artifactStatusSchema>;
+
+/**
+ * Target length of the final ad, chosen by the user at run creation.
+ * `15s` (default) — the original single-storyboard, single-clip pipeline.
+ * `60s` — four storyboard sheets → four 15s clips → merged into one 60s video.
+ */
+export const durationSchema = z.enum(["15s", "60s"]);
+export type Duration = z.infer<typeof durationSchema>;
