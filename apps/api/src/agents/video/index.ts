@@ -7,6 +7,7 @@ import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { createLogger } from "../../lib/log.js";
+import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
 export interface VideoBuilderInput {
@@ -332,19 +333,23 @@ export async function videoBuilder(
       promptUsed: JSON.stringify({ messages, videoPrompt }),
     };
   } catch (err) {
-    log.error("✗ video failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    // Classify here so raw provider text (BytePlus task errors, download
+    // failures) never propagates as the failure message — only as `detail`.
+    const failure = classifyRunError(err, "VIDEO_GENERATION_FAILED");
+    const raw = err instanceof Error ? err.message : String(err);
+    log.error("✗ video failed", { code: failure.code, err: failure.detail ?? raw });
     await writeStepEvent({
       runId: ctx.runId,
       step,
       status: "failed",
       payload: {
-        error: err instanceof Error ? err.message : String(err),
+        error: failure.userMessage,
+        code: failure.code,
+        detail: truncateDetail(failure.detail ?? raw),
         ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
       },
     });
-    throw err;
+    throw failure;
   }
 }
 

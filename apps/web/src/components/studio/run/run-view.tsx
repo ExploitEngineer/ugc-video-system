@@ -348,9 +348,16 @@ export function RunView({ runId }: { runId: string }) {
         <AgentMessage label="Run ended">
           <div className="border-destructive/40 bg-destructive/5 flex items-center gap-3 rounded-xl border px-4 py-3">
             <TriangleAlertIcon className="text-destructive size-5 shrink-0" />
-            <p className="text-muted-foreground text-sm">
-              {run.error ?? "The run was stopped."}
-            </p>
+            <div className="flex flex-col gap-0.5">
+              <p className="text-muted-foreground text-sm">
+                {run.error ?? "The run was stopped."}
+              </p>
+              {run.errorCode && run.errorCode !== "RUN_CANCELLED" && (
+                <p className="text-muted-foreground/60 text-xs">
+                  Error code: {run.errorCode}
+                </p>
+              )}
+            </div>
           </div>
         </AgentMessage>
       )}

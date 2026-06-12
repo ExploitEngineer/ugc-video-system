@@ -1,13 +1,22 @@
-// Video concatenation for the 60s pipeline — merge four ~15s Seedance clips
-// into one continuous 60s mp4, preserving each segment's native audio.
+// Video concatenation for the multi-segment pipeline — merge N ~15s Seedance
+// clips into one continuous mp4, preserving each segment's native audio.
 //
-// There is no streaming concat we can trust here: the four clips come back from
-// Seedance and, while usually uniform, can differ in exact fps/SAR/audio rate.
-// The fast concat demuxer breaks on any mismatch (A/V drift), so we NORMALIZE +
-// re-encode via the concat filter, which is robust at the cost of CPU. ffmpeg
-// runs as a child process (does NOT block the event loop), but libx264 on 60s of
-// 1080p spikes CPU — so a process-wide semaphore caps how many merges run at
-// once across all in-flight runs.
+// Memory is the binding constraint here, not CPU: the old single-pass concat
+// FILTER graph held N h264 decoders + one libx264 encoder open at once and got
+// OOM-killed on small hosts (ffmpeg dies by signal → exit code null). So the
+// merge now runs in three cheap passes, each holding at most ONE decoder and
+// ONE encoder:
+//   A. per segment, sequentially: normalize to pinned params (resolution, SAR,
+//      fps, pix_fmt, audio rate/channels) + the shared grade + loudnorm,
+//      encoded with libx264 veryfast.
+//   B. concat DEMUXER with `-c copy` — safe because pass A makes the streams
+//      uniform by construction; this pass is pure remuxing (trivial memory).
+//   C. only with a music bed: mix the (looped) ducked music under the native
+//      audio; video is stream-copied, so only audio re-encodes.
+// A process-wide semaphore still caps how many merges run at once, ffmpeg gets
+// a hard timeout + signal-aware exit handling, and a signal/timeout kill is
+// retried once (memory pressure is often transient). Raw stderr never leaves
+// `FfmpegError.detail` — it must not end up in `runs.error`.
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -20,19 +29,27 @@ import { createLogger } from "../log.js";
 
 const log = createLogger("merge");
 
-/** Cap concurrent re-encodes across the process (libx264 is CPU-heavy). */
+/** Cap concurrent merges across the process (each is one active encode). */
 const MAX_CONCURRENT_MERGES = 1;
 /** Per-ffmpeg thread cap so one merge can't monopolise every core. */
 const FFMPEG_THREADS = 2;
+/** Hard backstop per ffmpeg invocation — a pass that runs this long is hung. */
+const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * Pinned output fps. Seedance clips are 24fps; pinning makes every pass-A
+ * intermediate identical (a hard requirement for the `-c copy` concat) and is
+ * a no-op when the source already matches.
+ */
+const TARGET_FPS = 24;
 
-// ── Continuity normalization (60s only — this module is never on the 15s path) ──
+// ── Continuity normalization (multi-segment only — never on the 15s path) ──
 // Per-segment loudness normalization to ONE target so audio levels match across
 // the cuts (no volume jump at each seam). Single-pass loudnorm is enough here:
-// the four clips come from the same Seedance settings, so they start close.
+// the clips come from the same Seedance settings, so they start close.
 const LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11";
-// ONE shared, mild grade applied to the whole concatenated video so the four
-// clips sit in a single look across the cuts. Deliberately gentle — the clips
-// already share the locked visual-style bible; this just removes residual drift.
+// ONE shared, mild grade so the clips sit in a single look across the cuts.
+// Per-frame deterministic, so applying it per segment (pass A) is identical to
+// grading the concatenated video.
 const GRADE_EQ = "eq=contrast=1.03:saturation=1.05:gamma=1.0";
 // Music-bed loudness (quieter than dialogue) + the sidechain ducker: the music
 // dips whenever the native audio (dialogue) is present, so on-camera UGC speech
@@ -48,6 +65,31 @@ export interface MergeOptions {
    * loudnorm + grade normalization.
    */
   musicBedUrl?: string;
+  /**
+   * Expected output resolution (from the run's aspect ratio + the provider
+   * resolution setting). Segments are letterboxed/scaled to exactly this size in
+   * pass A so the `-c copy` concat can never hit a resolution mismatch. When
+   * absent, segments keep their native size (fine in practice — one run's clips
+   * share generation settings).
+   */
+  targetSize?: { width: number; height: number };
+}
+
+/**
+ * A failed/killed/hung ffmpeg invocation. `message` is short and clean (safe
+ * to surface); the stderr tail rides in `detail` for logs + step_events only.
+ */
+export class FfmpegError extends Error {
+  readonly kind: "signal" | "timeout" | "exit";
+  /** Last ~1200 chars of ffmpeg stderr — NEVER for `runs.error`. */
+  readonly detail: string;
+
+  constructor(kind: "signal" | "timeout" | "exit", message: string, detail: string) {
+    super(message);
+    this.name = "FfmpegError";
+    this.kind = kind;
+    this.detail = detail;
+  }
 }
 
 let active = 0;
@@ -74,7 +116,7 @@ async function fetchToFile(url: string, dest: string): Promise<void> {
   await writeFile(dest, new Uint8Array(await res.arrayBuffer()));
 }
 
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], label: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
       reject(new Error("ffmpeg-static binary path is null"));
@@ -82,65 +124,81 @@ function runFfmpeg(args: string[]): Promise<void> {
     }
     const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, FFMPEG_TIMEOUT_MS);
     proc.stderr.on("data", (d) => {
       stderr += String(d);
       if (stderr.length > 8000) stderr = stderr.slice(-8000);
     });
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-1200)}`));
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    proc.on("close", (code, signal) => {
+      clearTimeout(timer);
+      const tail = stderr.slice(-1200);
+      if (timedOut) {
+        reject(
+          new FfmpegError(
+            "timeout",
+            `ffmpeg (${label}) timed out after ${FFMPEG_TIMEOUT_MS}ms and was killed`,
+            tail,
+          ),
+        );
+      } else if (code === 0) {
+        resolve();
+      } else if (signal != null || code == null) {
+        // Killed by a signal (close reports code=null) — on a busy/small host
+        // this is almost always the kernel OOM killer.
+        reject(
+          new FfmpegError(
+            "signal",
+            `ffmpeg (${label}) was killed by ${signal ?? "a signal"} — likely out of memory`,
+            tail,
+          ),
+        );
+      } else {
+        reject(new FfmpegError("exit", `ffmpeg (${label}) exited with code ${code}`, tail));
+      }
     });
   });
 }
 
 /**
- * Build the `-filter_complex` graph + output maps for the merge.
- *
- * Always: per-segment loudnorm (matched levels across cuts) → concat (in order,
- * per-segment audio preserved) → one shared grade on the whole video.
- *
- * With a music bed (`musicInputIdx` set): the native concatenated audio is split;
- * one copy is the sidechain key that ducks the (looped) music, then the music is
- * mixed back under the native audio so dialogue always reads on top.
+ * Run ffmpeg, retrying ONCE if it was killed (signal/timeout) — transient
+ * memory pressure usually clears. Real encode failures (nonzero exit) are
+ * deterministic and not retried.
  */
-function buildFilter(
-  n: number,
-  musicInputIdx: number | null,
-): { filter: string; vLabel: string; aLabel: string } {
-  const norm = Array.from(
-    { length: n },
-    (_, i) => `[${i}:a]${LOUDNORM}[a${i}]`,
-  ).join(";");
-  const concatIn = Array.from(
-    { length: n },
-    (_, i) => `[${i}:v][a${i}]`,
-  ).join("");
-  const concat = `${concatIn}concat=n=${n}:v=1:a=1[vc][ac]`;
-  const grade = `[vc]${GRADE_EQ}[v]`;
-
-  if (musicInputIdx == null) {
-    return { filter: `${norm};${concat};${grade}`, vLabel: "[v]", aLabel: "[ac]" };
+async function runFfmpegWithRetry(args: string[], label: string): Promise<void> {
+  try {
+    await runFfmpeg(args, label);
+  } catch (err) {
+    if (err instanceof FfmpegError && err.kind !== "exit") {
+      log.warn(`ffmpeg (${label}) ${err.kind} — retrying once`, { err: err.message });
+      await runFfmpeg(args, label);
+      return;
+    }
+    throw err;
   }
+}
 
-  // Split the native audio: one branch is the sidechain key (ducks the music),
-  // the other is mixed with the ducked music. `amix duration=first` ends with
-  // the (finite) native audio so the infinite looped music can't run on.
-  const music =
-    `[ac]asplit=2[ack][acm];` +
-    `[${musicInputIdx}:a]${MUSIC_LOUDNORM}[mraw];` +
-    `[mraw][ack]${MUSIC_DUCK}[mduck];` +
-    `[acm][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`;
-  return { filter: `${norm};${concat};${grade};${music}`, vLabel: "[v]", aLabel: "[a]" };
+/** Pass-A video filter: optional letterbox to the target size, pinned SAR/fps, shared grade. */
+function normalizeVf(targetSize?: { width: number; height: number }): string {
+  const scalePad = targetSize
+    ? `scale=${targetSize.width}:${targetSize.height}:force_original_aspect_ratio=decrease,` +
+      `pad=${targetSize.width}:${targetSize.height}:(ow-iw)/2:(oh-ih)/2,`
+    : "";
+  return `${scalePad}setsar=1,fps=${TARGET_FPS},${GRADE_EQ}`;
 }
 
 /**
- * Download `urls` (ordered segment clips), concatenate them into one mp4 with
- * the concat filter (re-encoded, in order), and return the merged bytes. The
- * four clips' native audio is normalized to one loudness target (matched levels
- * across the cuts) and the video gets one shared grade so it reads as a single
- * look. When `opts.musicBedUrl` is set, one continuous track is mixed under the
- * whole video and ducked beneath the native audio. Temp files live under the OS
+ * Download `urls` (ordered segment clips), normalize each to uniform stream
+ * parameters (pass A, one at a time), concatenate them losslessly with the
+ * concat demuxer (pass B), optionally mix a ducked music bed under the native
+ * audio (pass C), and return the merged bytes. Temp files live under the OS
  * tmp dir and are removed in a `finally`. Throttled by the module semaphore.
  */
 export async function mergeSegmentUrls(
@@ -162,8 +220,7 @@ export async function mergeSegmentUrls(
         return dest;
       }),
     );
-    // Optional music bed → its own local file, added as the LAST input so it
-    // sits at index `n` (after the n segments) for the filtergraph.
+    // Optional music bed → its own local file.
     let musicFile: string | null = null;
     if (opts.musicBedUrl) {
       musicFile = join(dir, "music.bin");
@@ -177,39 +234,101 @@ export async function mergeSegmentUrls(
         musicFile = null;
       }
     }
-    const out = join(dir, "merged.mp4");
 
     const n = inputs.length;
-    const musicIdx = musicFile ? n : null;
-    const { filter, vLabel, aLabel } = buildFilter(n, musicIdx);
-    const args = [
-      "-y",
-      ...inputs.flatMap((f) => ["-i", f]),
-      // Loop the music to cover the full video; `-shortest` trims it to length.
-      ...(musicFile ? ["-stream_loop", "-1", "-i", musicFile] : []),
-      "-filter_complex",
-      filter,
-      "-map",
-      vLabel,
-      "-map",
-      aLabel,
-      "-c:v",
-      "libx264",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-threads",
-      String(FFMPEG_THREADS),
-      "-movflags",
-      "+faststart",
-      ...(musicFile ? ["-shortest"] : []),
-      out,
-    ];
+    log.info("▶ merging segments", {
+      count: n,
+      music: Boolean(musicFile),
+      targetSize: opts.targetSize
+        ? `${opts.targetSize.width}x${opts.targetSize.height}`
+        : null,
+    });
 
-    log.info("▶ merging segments", { count: n, music: Boolean(musicFile) });
-    await runFfmpeg(args);
-    const bytes = await readFile(out);
+    // Pass A — normalize each segment SEQUENTIALLY (one decoder + one encoder
+    // alive at a time; this is what keeps peak memory flat regardless of N).
+    const vf = normalizeVf(opts.targetSize);
+    const normalized: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const out = join(dir, `norm-${i}.mp4`);
+      await runFfmpegWithRetry(
+        [
+          "-y",
+          "-i", inputs[i],
+          "-vf", vf,
+          "-af", `${LOUDNORM},aresample=48000`,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "20",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac",
+          "-ar", "48000",
+          "-ac", "2",
+          "-threads", String(FFMPEG_THREADS),
+          out,
+        ],
+        `normalize-seg-${i}`,
+      );
+      normalized.push(out);
+      log.info(`✓ normalized segment ${i + 1}/${n}`);
+    }
+
+    // Pass B — pure remux: every intermediate has identical stream parameters
+    // by construction, so the concat demuxer can stream-copy safely.
+    const listFile = join(dir, "list.txt");
+    // concat-demuxer quoting: a `'` inside the path (possible via TMPDIR) ends
+    // the quoted string and must be spliced back in escaped, ffmpeg-style.
+    await writeFile(
+      listFile,
+      normalized.map((f) => `file '${f.replaceAll("'", "'\\''")}'`).join("\n"),
+    );
+    const merged = join(dir, "merged.mp4");
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listFile,
+        "-c", "copy",
+        "-movflags", "+faststart",
+        merged,
+      ],
+      "concat",
+    );
+
+    // Pass C — mix the (looped, loudness-matched, ducked) music bed under the
+    // native audio. Video is stream-copied; only audio re-encodes.
+    let finalFile = merged;
+    if (musicFile) {
+      const withMusic = join(dir, "final.mp4");
+      const filter =
+        `[0:a]asplit=2[ack][acm];` +
+        `[1:a]${MUSIC_LOUDNORM}[mraw];` +
+        `[mraw][ack]${MUSIC_DUCK}[mduck];` +
+        `[acm][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`;
+      await runFfmpegWithRetry(
+        [
+          "-y",
+          "-i", merged,
+          // Loop the music to cover the full video; `-shortest` trims it.
+          "-stream_loop", "-1",
+          "-i", musicFile,
+          "-filter_complex", filter,
+          "-map", "0:v",
+          "-map", "[a]",
+          "-c:v", "copy",
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-threads", String(FFMPEG_THREADS),
+          "-shortest",
+          "-movflags", "+faststart",
+          withMusic,
+        ],
+        "music-mix",
+      );
+      finalFile = withMusic;
+    }
+
+    const bytes = await readFile(finalFile);
     log.info("✓ merge complete", { bytes: bytes.length });
     return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
   } finally {

@@ -11,6 +11,7 @@ import type { Run } from "@ugc/shared";
 import {
   isMultiSegment,
   narrativeOutlineSchema,
+  runErrorCodeSchema,
   sceneSchema,
   stepEventStatusSchema,
 } from "@ugc/shared";
@@ -86,6 +87,9 @@ export function toRunDto(row: RunRow): Run {
     // completed step, so the timeline showed it "passed" before it ever ran.
     currentStep: row.currentStep,
     error: row.error ?? null,
+    // `error_code` is plain text in the DB — validate at the wire boundary and
+    // degrade an unknown value to null rather than 500-ing the poll.
+    errorCode: runErrorCodeSchema.nullable().catch(null).parse(row.errorCode ?? null),
     feedback: row.feedback ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

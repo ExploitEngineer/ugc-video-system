@@ -6,10 +6,12 @@
 // surface it the same way. The heavy lifting (download + ffmpeg re-encode)
 // lives in lib/video/merge.
 
+import type { AspectRatio } from "@ugc/shared";
 import { schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
 import { createLogger } from "../../lib/log.js";
-import { mergeSegmentUrls } from "../../lib/video/merge.js";
+import { classifyRunError, RunFailure, truncateDetail } from "../../lib/run-failure.js";
+import { FfmpegError, mergeSegmentUrls } from "../../lib/video/merge.js";
 import { segmentVideos } from "../creative-direction/inputs.js";
 import { writeStepEvent } from "../events.js";
 import { persistSheet } from "../persist.js";
@@ -19,6 +21,28 @@ type Video = typeof schema.videos.$inferSelect;
 
 /** Nominal length of one segment clip (~15s), used for the merged duration. */
 const SEGMENT_DURATION_SEC = 15;
+
+/** Long/short edge per provider resolution setting. */
+const RESOLUTION_EDGES: Record<string, { long: number; short: number }> = {
+  "1080p": { long: 1920, short: 1080 },
+  "720p": { long: 1280, short: 720 },
+  "480p": { long: 864, short: 480 },
+};
+
+/**
+ * The expected segment frame size for this run — pins the merge's pass-A
+ * letterbox so the lossless concat can never hit a resolution mismatch.
+ * Unrecognized resolution settings fall back to native-size segments.
+ */
+function targetSizeFor(
+  aspectRatio: AspectRatio,
+): { width: number; height: number } | undefined {
+  const edges = RESOLUTION_EDGES[env.BYTEPLUS_VIDEO_RESOLUTION];
+  if (!edges) return undefined;
+  return aspectRatio === "9:16"
+    ? { width: edges.short, height: edges.long }
+    : { width: edges.long, height: edges.short };
+}
 
 /**
  * Merge the run's N segment clips into the final merged video. Idempotent at the
@@ -43,7 +67,10 @@ export async function mergeSegments(
 
     const { bytes, mime } = await mergeSegmentUrls(
       segments.map((s) => s.assetUrl),
-      { musicBedUrl: env.MUSIC_BED_URL },
+      {
+        musicBedUrl: env.MUSIC_BED_URL,
+        targetSize: targetSizeFor(ctx.aspectRatio),
+      },
     );
     const durationSec = segments.length * SEGMENT_DURATION_SEC;
 
@@ -86,13 +113,25 @@ export async function mergeSegments(
     });
     return { ...persisted, promptUsed: "" };
   } catch (err) {
+    // Classify here so ffmpeg stderr only ever reaches logs + the step_event
+    // `detail`, never the failure message itself.
+    const failure = classifyRunError(err, "VIDEO_MERGE_FAILED");
+    const raw = err instanceof Error ? err.message : String(err);
+    const detail = err instanceof FfmpegError ? `${raw}\n${err.detail}` : (failure.detail ?? raw);
+    log.error("✗ merge failed", { code: failure.code, err: detail });
     await writeStepEvent({
       runId,
       step: "merge",
       status: "failed",
-      payload: { error: err instanceof Error ? err.message : String(err) },
+      payload: {
+        error: failure.userMessage,
+        code: failure.code,
+        detail: truncateDetail(detail),
+      },
     });
-    throw err;
+    // Re-wrap with the full detail (incl. the ffmpeg stderr tail) so failRun's
+    // server log carries it too.
+    throw new RunFailure(failure.code, failure.userMessage, detail, { cause: err });
   }
 }
 
