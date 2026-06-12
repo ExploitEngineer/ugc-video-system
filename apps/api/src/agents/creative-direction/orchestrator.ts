@@ -15,7 +15,7 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import type { Step } from "@ugc/shared";
+import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
 import { eq } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
@@ -40,7 +40,10 @@ import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { describeProduct } from "./describe-product/index.js";
-import { narrativeOutline, SEGMENT_COUNT } from "./narrative-outline/index.js";
+import {
+  narrativeOutline,
+  PANELS_PER_SEGMENT,
+} from "./narrative-outline/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
 import { derivePersonBrief } from "./derive-person-brief/index.js";
 import {
@@ -119,11 +122,13 @@ function buildCtx(run: RunRow): SkillContext {
     productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
-    // 60s only — the locked visual-style bible (set once by narrative_outline).
-    // Each driveRun loop iteration re-reads the run and rebuilds ctx, so by the
-    // time segment_storyboard/segment_video run it is populated.
-    visualStyle:
-      run.duration === "60s" ? (run.visualStyle ?? undefined) : undefined,
+    duration: run.duration,
+    // Multi-segment only — the locked visual-style bible. Each driveRun loop
+    // iteration re-reads the run and rebuilds ctx, so by the time
+    // segment_storyboard/segment_video run it is populated.
+    visualStyle: isMultiSegment(run.duration)
+      ? (run.visualStyle ?? undefined)
+      : undefined,
     openai,
     video,
   };
@@ -334,14 +339,15 @@ async function executeStep(
     }
 
     case "segment_storyboard": {
-      // 60s ONE-MASTER: generate a SINGLE 16-panel (4×4) storyboard sheet, then
-      // crop it into four row strips — one per segment — that the video step
+      // MULTI-SEGMENT ONE-MASTER: generate a SINGLE N×4-panel storyboard sheet,
+      // then crop it into N row strips — one per segment — that the video step
       // animates. Consistency is inherent (it is ONE image), so there is no
       // per-segment image fan-out here. Idempotent / resume:
-      //   • plain resume → skip if the master + all four crops already exist;
+      //   • plain resume → skip if the master + all N crops already exist;
       //     else reload/regenerate the master and fill only the MISSING crops.
-      //   • revise (directive) → rebuild the whole master and re-crop ALL four
+      //   • revise (directive) → rebuild the whole master and re-crop ALL N
       //     (newest-per-index supersedes the old crop rows; no deletes).
+      const segCount = segmentCountFor(ctx.duration);
       const product = await latestProductSheet(runId);
       if (!product) throw new Error("no product sheet before segment storyboards");
       const personSheetRef = await resolvePersonRef(runId, personUpload);
@@ -354,13 +360,13 @@ async function executeStep(
       const crops = await persistedSegmentStoryboardIndices(runId);
       const isRevise = Boolean(directive);
 
-      // Plain resume with the master + all four crops already persisted → done.
-      if (!isRevise && haveMaster && crops.size >= SEGMENT_COUNT) return {};
+      // Plain resume with the master + all N crops already persisted → done.
+      if (!isRevise && haveMaster && crops.size >= segCount) return {};
 
       await writeStepEvent({ runId, step, status: "started" });
 
-      // 1. The 16-panel master sheet. Generate fresh on a first run / revise; on a
-      //    mid-step resume reload the persisted master's bytes + 16 scenes so the
+      // 1. The N×4-panel master sheet. Generate fresh on a first run / revise; on
+      //    a mid-step resume reload the persisted master's bytes + scenes so the
       //    one paid image gen is never repeated.
       let masterBytes: Uint8Array;
       let masterScenes: StoryboardScene[];
@@ -371,6 +377,7 @@ async function executeStep(
           personSheetRef,
           userPrompt,
           directive,
+          segmentCount: segCount,
         });
         masterBytes = master.bytes;
         masterScenes = master.scenes;
@@ -409,14 +416,17 @@ async function executeStep(
         masterBytes = new Uint8Array(await res.arrayBuffer());
       }
 
-      // 2. Crop the master into four per-segment guides — each row re-tiled into a
+      // 2. Crop the master into N per-segment guides — each row re-tiled into a
       //    2×2 block (BytePlus rejects the ~7:1 row strip) — and persist any missing
-      //    crop as a `storyboard_sheet` (segment_index 0..3) carrying that row's 4
+      //    crop as a `storyboard_sheet` (segment_index 0..N-1) carrying that row's 4
       //    scenes — exactly the shape segment_video reads via segmentStoryboards().
-      const strips = await cropRowsAs2x2(masterBytes, SEGMENT_COUNT);
-      for (let i = 0; i < SEGMENT_COUNT; i++) {
+      const strips = await cropRowsAs2x2(masterBytes, segCount);
+      for (let i = 0; i < segCount; i++) {
         if (!isRevise && crops.has(i)) continue;
-        const stripScenes = masterScenes.slice(i * 4, i * 4 + 4);
+        const stripScenes = masterScenes.slice(
+          i * PANELS_PER_SEGMENT,
+          i * PANELS_PER_SEGMENT + PANELS_PER_SEGMENT,
+        );
         await persistSheet({
           runId,
           kind: "storyboard_sheet",
@@ -443,19 +453,20 @@ async function executeStep(
         runId,
         step,
         status: "passed",
-        payload: { segments: SEGMENT_COUNT },
+        payload: { segments: segCount },
       });
       return {};
     }
 
     case "segment_video": {
-      // Fan out the four 15s clips, one per row strip, throttled to
+      // Fan out the N 15s clips, one per row strip, throttled to
       // SEGMENT_VIDEO_CONCURRENCY against BytePlus task limits. videoBuilder writes
       // its own per-segment step events. Idempotent: skip segments already built.
+      const segCount = segmentCountFor(ctx.duration);
       const sheets = await segmentStoryboards(runId);
-      if (sheets.length < SEGMENT_COUNT) {
+      if (sheets.length < segCount) {
         throw new Error(
-          `segment_video: expected ${SEGMENT_COUNT} storyboards, found ${sheets.length}`,
+          `segment_video: expected ${segCount} storyboards, found ${sheets.length}`,
         );
       }
       const done = await persistedSegmentVideoIndices(runId);
@@ -482,6 +493,7 @@ async function executeStep(
             characterAnchor: ctx.personBrief,
             userPrompt,
             segmentIndex: sheet.segmentIndex,
+            segmentCount: segCount,
           });
         },
       );
@@ -491,7 +503,7 @@ async function executeStep(
     }
 
     case "merge": {
-      // Concatenate the four clips into the final 60s video. Writes its own
+      // Concatenate the N clips into the final merged video. Writes its own
       // started/passed/failed events and persists the merged final_video.
       await mergeAgent.mergeSegments(ctx);
       return {};
@@ -705,12 +717,11 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         let currentArtifact: ImageRef | undefined;
         if (gate === "storyboard") {
           // Ground the revise on the WHOLE current storyboard the user rejected:
-          // the 60s 16-panel master sheet (one image now, no per-segment target),
-          // else the 15s single sheet.
-          const master =
-            run.duration === "60s"
-              ? await latestMasterStoryboard(runId)
-              : undefined;
+          // the multi-segment N×4-panel master sheet (one image now, no
+          // per-segment target), else the 15s single sheet.
+          const master = isMultiSegment(run.duration)
+            ? await latestMasterStoryboard(runId)
+            : undefined;
           const sb = master ?? (await latestStoryboardSheet(runId));
           if (sb) currentArtifact = { source: sb.assetUrl, mime: "image/png" };
         } else {

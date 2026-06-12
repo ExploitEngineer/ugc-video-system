@@ -54,15 +54,17 @@ export interface VideoBuilderInput {
   durationSec?: number;
   /** Optional critique to steer a regen (reserved for F7). */
   critique?: string;
-  // ── 60s segment fields (absent ⇒ the original single 15s final_video) ──
+  // ── Multi-segment fields (absent ⇒ the original single 15s final_video) ──
   /**
-   * This clip's segment position in a 60s run (0..3). When set, the clip is
-   * persisted as a `segment_video` asset with this `segmentIndex` and its step
-   * events are written under the `segment_video` step; the merge step later
-   * concatenates the four segments into the `final_video`.
+   * This clip's segment position in a multi-segment run (0..N-1). When set, the
+   * clip is persisted as a `segment_video` asset with this `segmentIndex` and its
+   * step events are written under the `segment_video` step; the merge step later
+   * concatenates the N segments into the `final_video`.
    */
   segmentIndex?: number;
-  /** The OTHER three segments' summaries — continuity context for the prompt. */
+  /** Total segment count (N) of the run — for accurate "part X of N" prompt wording. */
+  segmentCount?: number;
+  /** The OTHER segments' summaries — continuity context for the prompt. */
   otherSummaries?: string[];
 }
 
@@ -125,6 +127,7 @@ export async function videoBuilder(
       characterAnchor: input.characterAnchor,
       critique: input.critique,
       segmentIndex: input.segmentIndex,
+      segmentCount: input.segmentCount,
       otherSummaries: input.otherSummaries,
       visualStyle: ctx.visualStyle,
       hasProductSheet: Boolean(input.productSheetRef?.source),

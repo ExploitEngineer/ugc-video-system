@@ -1,9 +1,10 @@
-// Merge Agent — 60s pipeline final step.
+// Merge Agent — multi-segment pipeline final step.
 //
-// Concatenates the four persisted ~15s segment clips (in segment order) into one
-// continuous 60s mp4 and persists it as the run's `final_video` (segmentIndex
-// null), mirroring the single-clip 15s output so the API/UI surface it the same
-// way. The heavy lifting (download + ffmpeg re-encode) lives in lib/video/merge.
+// Concatenates the N persisted ~15s segment clips (in segment order) into one
+// continuous mp4 (~30/45/60s) and persists it as the run's `final_video`
+// (segmentIndex null), mirroring the single-clip 15s output so the API/UI
+// surface it the same way. The heavy lifting (download + ffmpeg re-encode)
+// lives in lib/video/merge.
 
 import { schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
@@ -20,7 +21,7 @@ type Video = typeof schema.videos.$inferSelect;
 const SEGMENT_DURATION_SEC = 15;
 
 /**
- * Merge the run's four segment clips into the final 60s video. Idempotent at the
+ * Merge the run's N segment clips into the final merged video. Idempotent at the
  * step level: if a `final_video` already exists (resume after a crash post-merge)
  * the orchestrator skips this step; here we just (re)build from the segments.
  */
@@ -58,7 +59,7 @@ export async function mergeSegments(
             runId,
             assetId,
             durationSec: String(durationSec),
-            segmentIndex: null, // the merged 60s output
+            segmentIndex: null, // the merged output
             hasAudio: true,
             providerMeta: {
               provider: "ffmpeg",
@@ -79,7 +80,7 @@ export async function mergeSegments(
       status: "passed",
       payload: { durationSec, segments: segments.length },
     });
-    log.info("✓ final 60s video persisted", {
+    log.info("✓ final merged video persisted", {
       assetId: persisted.assetId,
       durationSec,
     });

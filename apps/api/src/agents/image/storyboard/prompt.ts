@@ -59,17 +59,23 @@ export interface StoryboardPromptInput {
   /** The OTHER three segments' summaries, for cross-segment continuity. */
   otherSummaries?: string[];
   /**
-   * 60s ONE-MASTER mode. When true, this single sheet IS the whole 60s
-   * storyboard: SIXTEEN panels in a 4×4 grid (row-major 01–16) of ONE continuous
-   * coherent scene, not the 4-panel 15s sheet. The 16-panel arc is authored from
-   * the user prompt + briefs directly (no per-segment summaries). `segmentIndex`
-   * / `segmentSummary` / `otherSummaries` are NOT used. Falsy ⇒ the 15s sheet.
+   * MULTI-SEGMENT ONE-MASTER mode. When true, this single sheet IS the whole
+   * multi-segment storyboard: N×4 panels in an N-row grid (row-major) of ONE
+   * continuous coherent scene, not the 4-panel 15s sheet. The arc is authored
+   * from the user prompt + briefs directly (no per-segment summaries).
+   * `segmentIndex` / `segmentSummary` / `otherSummaries` are NOT used. Falsy ⇒
+   * the 15s sheet. Pair with `segmentCount` (rows) to size the grid.
    */
   full60s?: boolean;
   /**
-   * 60s only — the locked visual-style bible (`runs.visual_style`). Injected
-   * VERBATIM (identical string across all four segment storyboards AND the four
-   * video prompts) so the whole 60s ad shares one grade/lens/lighting/palette.
+   * Master-mode segment rows (2/3/4 for 30/45/60s) → an N×4 master grid
+   * (8/12/16 panels). Ignored when `full60s` is falsy. Defaults to 4.
+   */
+  segmentCount?: number;
+  /**
+   * Multi-segment only — the locked visual-style bible (`runs.visual_style`).
+   * Injected VERBATIM (identical string across all segment storyboards AND video
+   * prompts) so the whole ad shares one grade/lens/lighting/palette.
    */
   visualStyle?: string;
 }
@@ -131,26 +137,61 @@ export function buildStoryboardPrompt({
   otherSummaries,
   visualStyle,
   full60s,
+  segmentCount,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
 
-  // ── 60s ONE-MASTER mode (full60s): this single sheet is the WHOLE 60s
-  // storyboard — SIXTEEN panels in a 4×4 grid of ONE continuous coherent scene.
-  // The 15s path (full60s falsy) keeps its 4-panel 2×2 sheet byte-for-byte;
-  // every 60s-master divergence is isolated in the fragments below. ──
+  // ── MULTI-SEGMENT ONE-MASTER mode (full60s): this single sheet is the WHOLE
+  // multi-segment storyboard — N×4 panels in an N-row grid of ONE continuous
+  // coherent scene. The 15s path (full60s falsy) keeps its 4-panel 2×2 sheet
+  // byte-for-byte; every master divergence is isolated in the fragments below. ──
   const isMaster = Boolean(full60s);
 
-  // STEP 2 opener — 16 scenes of ONE continuous scene vs the 15s 4.
+  // Master grid geometry, sized by the run's segment count (rows × 4 panels).
+  const rows = segmentCount ?? 4;
+  const totalPanels = rows * 4; // PANELS_PER_SEGMENT = 4
+  const totalSec = rows * 15;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const lastBadge = pad2(totalPanels);
+  const NUM_WORD: Record<number, string> = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    8: "eight",
+    12: "twelve",
+    16: "sixteen",
+  };
+  const rowsWord = NUM_WORD[rows] ?? String(rows);
+  const totalWordLower = NUM_WORD[totalPanels] ?? String(totalPanels);
+  const totalWordUpper = totalWordLower.toUpperCase();
+  // "row 1 = panels 01-04 left→right, row 2 = 05-08, …" — the master's row map.
+  const rowMap = Array.from({ length: rows }, (_, r) => {
+    const span = `${pad2(r * 4 + 1)}-${pad2(r * 4 + 4)}`;
+    return r === 0 ? `row 1 = panels ${span} left→right` : `row ${r + 1} = ${span}`;
+  }).join(", ");
+  // "panels 1-4, 5-8, …" — the per-segment ~15s timing stretches.
+  const stretchMap = Array.from(
+    { length: rows },
+    (_, r) => `${r * 4 + 1}-${r * 4 + 4}`,
+  ).join(", ");
+  // Word budget scales with panel count (~16-20 words/panel).
+  const masterWords =
+    ({ 8: "140-200", 12: "190-260", 16: "240-320" } as Record<number, string>)[
+      totalPanels
+    ] ?? "240-320";
+
+  // STEP 2 opener — N×4 scenes of ONE continuous scene vs the 15s 4.
   const scriptStep = isMaster
     ? [
-        "STEP 2 — SCRIPT. Produce exactly SIXTEEN scenes, no more, no less. `index`",
-        "runs 1..16 in play order — ONE continuous ~60-second take of a SINGLE",
+        `STEP 2 — SCRIPT. Produce exactly ${totalWordUpper} scenes, no more, no less. \`index\``,
+        `runs 1..${totalPanels} in play order — ONE continuous ~${totalSec}-second take of a SINGLE`,
         "coherent scene (see ONE CONTINUOUS SCENE below), split only for timing into",
-        "four ~15s stretches (panels 1-4, 5-8, 9-12, 13-16), each panel ~3-4s. Keep",
-        "the SAME place, person, wardrobe, product and look across all sixteen; only",
+        `${rowsWord} ~15s stretches (panels ${stretchMap}), each panel ~3-4s. Keep`,
+        `the SAME place, person, wardrobe, product and look across all ${totalWordLower}; only`,
         "the SHOT and the small moment change. For each scene give: a `cameraAngle`,",
         "the `actionMovement` (what moves / how the camera moves), a DETAILED",
         "`sceneDescription`, the spoken `transcript` line described above, and a short",
@@ -165,12 +206,11 @@ export function buildStoryboardPrompt({
         "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
       ];
 
-  // STEP 3 layout — 4×4 sixteen-panel grid vs the 15s 2×2.
+  // STEP 3 layout — N×4 grid vs the 15s 2×2.
   const gridLayout = isMaster
     ? [
-        "- ONE single image, exactly SIXTEEN equal-size panels in a clean 4×4 grid",
-        "  (4 rows × 4 columns), ROW-MAJOR reading order: row 1 = panels 01-04",
-        "  left→right, row 2 = 05-08, row 3 = 09-12, row 4 = 13-16 — with only thin,",
+        `- ONE single image, exactly ${totalWordUpper} equal-size panels in a clean ${rows}×4 grid`,
+        `  (${rows} rows × 4 columns), ROW-MAJOR reading order: ${rowMap} — with only thin,`,
         "  uniform plain separator borders between panels.",
       ]
     : [
@@ -192,10 +232,10 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // PANEL LABELS badge range — 01..16 vs 01..04.
+  // PANEL LABELS badge range — 01..N×4 vs 01..04.
   const labelBadge = isMaster
     ? [
-        "- A scene-number BADGE in a top corner of each panel: 01 through 16, in",
+        `- A scene-number BADGE in a top corner of each panel: 01 through ${lastBadge}, in`,
         "  ROW-MAJOR reading order. Small, clean, legible.",
       ]
     : [
@@ -204,34 +244,34 @@ export function buildStoryboardPrompt({
       ];
 
   // Closing JSON-spec fragments (word budget, layout phrase, badge range, count).
-  const imagePromptWords = isMaster ? "240-320" : "150-200";
+  const imagePromptWords = isMaster ? masterWords : "150-200";
   const layoutPhrase = isMaster
-    ? "the 4×4 sixteen-panel layout (row-major 01-16, all panels visually distinct) with thin"
+    ? `the ${rows}×4 ${totalWordLower}-panel layout (row-major 01-${lastBadge}, all panels visually distinct) with thin`
     : "the 2×2 four-panel layout with thin";
-  const badgeRangePhrase = isMaster ? "(01–16, in order)" : "(01–04, in order)";
+  const badgeRangePhrase = isMaster ? `(01–${lastBadge}, in order)` : "(01–04, in order)";
   const scenesCountLine = isMaster
-    ? "`scenes` MUST have exactly 16 entries, in order. Set every scene's `adStyle`"
+    ? `\`scenes\` MUST have exactly ${totalPanels} entries, in order. Set every scene's \`adStyle\``
     : "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`";
 
-  // 60s master: the sixteen panels are ONE coherent continuous scene (no
-  // per-segment summaries — the arc is authored from the user prompt + briefs).
+  // Master: the N×4 panels are ONE coherent continuous scene (no per-segment
+  // summaries — the arc is authored from the user prompt + briefs).
   const coherentSceneBlock = isMaster
     ? [
         "",
-        "ONE CONTINUOUS SCENE — these sixteen panels are a SINGLE ~60-second take of",
-        "ONE coherent scene, NOT sixteen different scenes. Across ALL sixteen keep the",
+        `ONE CONTINUOUS SCENE — these ${totalWordLower} panels are a SINGLE ~${totalSec}-second take of`,
+        `ONE coherent scene, NOT ${totalWordLower} different scenes. Across ALL ${totalWordLower} keep the`,
         "SAME person, the SAME wardrobe and hair, the SAME product, the SAME location",
         "and the SAME lighting/look. A gentle, natural progression is fine (one real",
         "moment unfolding in one place — e.g. the same room as the light shifts a",
         "little), but NEVER cut to a different place, outfit, time-of-day or set",
-        "between panels. Panels 1→16 flow as ONE continuous shoot of the SAME scene;",
+        `between panels. Panels 1→${totalPanels} flow as ONE continuous shoot of the SAME scene;`,
         "only the CAMERA (shot type, angle, distance) and the small moment/action move",
         "from panel to panel. Build this arc from the user's prompt and the product —",
         "do NOT split it into separate vignettes.",
         ...(adType === "ugc"
           ? [
               "Because this is UGC, the continuous action IS the person presenting the",
-              "product to camera in that one spot — across the sixteen panels they keep",
+              `product to camera in that one spot — across the ${totalWordLower} panels they keep`,
               "showing and handling it to the lens (hold it up, take it off / put it on,",
               "rotate it, point at a detail, demonstrate it), addressing the camera; the",
               "product is clearly visible and the focus, never passive background.",
@@ -240,13 +280,13 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // User-block "produce the script" line — 16 vs 4.
+  // User-block "produce the script" line — N×4 vs 4.
   const produceLine = isMaster
     ? [
-        "Review them, then produce the 16-scene script (with spoken transcripts and",
+        `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
         "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
-        "exactly 16 keyframe panels in a 4×4 grid, each LABELLED with its number",
-        "badge (01–16) and its panelCaption bar, in row-major order; no other text",
+        `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
+        `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
         "and no arrows.",
       ]
     : [
@@ -590,7 +630,7 @@ export function buildStoryboardPrompt({
       ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
       : "the polished cinematic keyframe look.",
     hasPerson
-      ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? "sixteen" : "four"} panels, faithful to the person sheet.`
+      ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? totalWordLower : "four"} panels, faithful to the person sheet.`
       : "",
     scenesCountLine,
     `to "${style}".`,

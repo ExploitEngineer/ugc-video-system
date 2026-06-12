@@ -5,7 +5,7 @@
 // modes; confirm-mode gating pauses after each VALIDATED stage — i.e. after
 // `product_inspection` and after `storyboard_inspection` (SPEC §4 mermaid).
 
-import type { Duration, Step } from "@ugc/shared";
+import { type Duration, isMultiSegment, type Step } from "@ugc/shared";
 
 /** The first step of every run. */
 export function firstStep(): Step {
@@ -27,17 +27,18 @@ export function nextStep(
   criticEnabled: boolean,
   duration: Duration = "15s",
 ): Step | null {
-  const sixty = duration === "60s";
-  // What follows the reference phase: inspection (critic on), else the 60s
-  // single 16-panel master storyboard or the 15s single storyboard. (The 60s
-  // `narrative_outline` step is retired — the master is authored as ONE coherent
-  // scene from the prompt, so there are no per-segment summaries to plan.)
+  const multi = isMultiSegment(duration);
+  // What follows the reference phase: inspection (critic on), else the
+  // multi-segment N×4-panel master storyboard (30/45/60s) or the 15s single
+  // storyboard. (The `narrative_outline` step is retired — the master is
+  // authored as ONE coherent scene from the prompt, so there are no per-segment
+  // summaries to plan.)
   const afterReference: Step = criticEnabled
     ? "product_inspection"
-    : sixty
+    : multi
       ? "segment_storyboard"
       : "storyboard";
-  const afterProductInspection: Step = sixty
+  const afterProductInspection: Step = multi
     ? "segment_storyboard"
     : "storyboard";
   switch (step) {
@@ -53,7 +54,7 @@ export function nextStep(
       return "video";
     case "video":
       return null;
-    // 60s pipeline: master storyboard (+ row crops) → four videos → merge.
+    // Multi-segment pipeline: master storyboard (+ row crops) → N videos → merge.
     // `narrative_outline` is dormant (never sequenced) but kept in the enum.
     case "narrative_outline":
       return "segment_storyboard";
@@ -79,9 +80,9 @@ export type Gate = "reference" | "storyboard";
 /**
  * The gate we land at by completing the step whose next step is `next`.
  *   - reference gate  → right before the storyboard work (both ref sheets ready):
- *     15s `storyboard`, 60s `segment_storyboard` (the first post-reference step).
+ *     15s `storyboard`, multi `segment_storyboard` (the first post-reference step).
  *   - storyboard gate → right before the video work (storyboard ready):
- *     15s `video`, 60s `segment_video` (after the master + its row crops).
+ *     15s `video`, multi `segment_video` (after the master + its row crops).
  */
 export function gateForNext(next: Step | null): Gate | null {
   if (next === "storyboard" || next === "segment_storyboard") return "reference";
@@ -91,8 +92,8 @@ export function gateForNext(next: Step | null): Gate | null {
 
 /**
  * Recover the gate of a paused run from its `currentStep` (= last completed
- * step). Mirrors `gateForNext` for every step that can sit at a gate. For 60s
- * the storyboard gate is sat at `segment_storyboard` (all four sheets done).
+ * step). Mirrors `gateForNext` for every step that can sit at a gate. For
+ * multi-segment the storyboard gate is sat at `segment_storyboard` (all N sheets done).
  */
 export function gateForCurrentStep(step: Step): Gate | null {
   switch (step) {
@@ -114,7 +115,7 @@ export function gateForCurrentStep(step: Step): Gate | null {
  * (status `regenerating`). The reference gate always re-runs `person_sheet`
  * (the product sheet is hidden from the user, so `target` "product" is ignored).
  * The storyboard gate re-runs the single `storyboard` (15s) or the segment
- * storyboards (60s — narrowed to the targeted segment in the orchestrator).
+ * storyboards (multi — narrowed to the targeted segment in the orchestrator).
  */
 export function genStepForRevise(
   gate: Gate,
@@ -122,5 +123,5 @@ export function genStepForRevise(
   duration: Duration = "15s",
 ): Step {
   if (gate !== "storyboard") return "person_sheet";
-  return duration === "60s" ? "segment_storyboard" : "storyboard";
+  return isMultiSegment(duration) ? "segment_storyboard" : "storyboard";
 }

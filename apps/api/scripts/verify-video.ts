@@ -63,6 +63,7 @@ async function main() {
     productBrief: run.productBrief ?? "",
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
+    duration: run.duration,
     openai: createOpenAIProvider(),
     video: createVideoProvider(),
   };

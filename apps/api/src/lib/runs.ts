@@ -1,6 +1,6 @@
 // Shared run query helpers used across the /runs routes.
 
-import type { RunDetail, RunStatus } from "@ugc/shared";
+import { isMultiSegment, type RunDetail, type RunStatus } from "@ugc/shared";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
@@ -77,10 +77,10 @@ export async function loadRunDetail(runId: string): Promise<RunDetail> {
     run,
     assetRows,
     eventRows,
-    // 60s flattens its scenes from the four crop strips (below); the single-sheet
-    // arg is for the 15s path only — never pass a 60s crop here.
-    run.duration === "60s" ? undefined : storyboard[0]?.sheet,
-    run.duration === "60s" ? segmentSheets.map((s) => s.sheet) : null,
+    // Multi-segment flattens its scenes from the crop strips (below); the
+    // single-sheet arg is for the 15s path only — never pass a crop here.
+    isMultiSegment(run.duration) ? undefined : storyboard[0]?.sheet,
+    isMultiSegment(run.duration) ? segmentSheets.map((s) => s.sheet) : null,
   );
 }
 

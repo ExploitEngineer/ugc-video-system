@@ -10,6 +10,7 @@ import { createLogger } from "../../../lib/log.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
 import { IMAGE_SIZE_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
+import { PANELS_PER_SEGMENT } from "../../creative-direction/narrative-outline/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
@@ -49,17 +50,19 @@ interface RenderedStoryboard {
 
 /**
  * Plan (LLM) + render (gpt-image-2) a storyboard sheet WITHOUT persisting.
- * Shared by the 15s `storyboardGenerator` (4-panel 2×2) and the 60s
- * `generateMaster` (16-panel 4×4). `opts.full60s` switches the panel count, the
- * token ceiling, and the prompt's layout/scene-count mode.
+ * Shared by the 15s `storyboardGenerator` (4-panel 2×2) and the multi-segment
+ * `generateMaster` (N×4-panel grid — 8/12/16 panels for 30/45/60s).
+ * `opts.full60s` switches into master mode; `opts.segmentCount` (rows) sizes the
+ * panel count, the token ceiling, and the prompt's layout/scene-count mode.
  */
 async function renderStoryboard(
   ctx: SkillContext,
   input: StoryboardInput,
-  opts: { full60s?: boolean } = {},
+  opts: { full60s?: boolean; segmentCount?: number } = {},
 ): Promise<RenderedStoryboard> {
   const full60s = Boolean(opts.full60s);
-  const panelCount = full60s ? 16 : 4;
+  const segmentCount = opts.segmentCount ?? 4;
+  const panelCount = full60s ? segmentCount * PANELS_PER_SEGMENT : 4;
   const log = createLogger("image", {
     run: ctx.runId,
     skill: full60s ? "storyboard-master" : "storyboard",
@@ -87,10 +90,11 @@ async function renderStoryboard(
     otherSummaries: input.otherSummaries,
     visualStyle: ctx.visualStyle,
     full60s,
+    segmentCount,
   });
   // The storyboard plan is the longest LLM output in the pipeline, so JSON mode
   // + a generous token ceiling are essential (a truncated reply = invalid JSON).
-  // The 16-panel master carries 4× the scenes of a 15s sheet, so it needs a far
+  // The master carries up to 4× the scenes of a 15s sheet, so it needs a far
   // larger ceiling. Retry ONCE with an even larger ceiling before failing.
   const ceilings = full60s ? [12288, 16384] : [5120, 8192];
   let plan: StoryboardPlan | undefined;
@@ -176,16 +180,18 @@ export async function storyboardGenerator(
   return { assetId, assetUrl, artifact, promptUsed: imagePrompt };
 }
 
-/** Input for the 60s master sheet — one coherent 16-panel scene from the prompt. */
+/** Input for the multi-segment master sheet — one coherent N×4-panel scene. */
 export interface GenerateMasterInput {
   productSheetRef: ImageRef;
   personSheetRef?: ImageRef;
   userPrompt: string;
-  /** Confirm-mode storyboard-gate revise — applies to the whole 16-panel sheet. */
+  /** Confirm-mode storyboard-gate revise — applies to the whole master sheet. */
   directive?: RevisionDirective;
+  /** Segment rows (2/3/4 for 30/45/60s) — sizes the master grid to N×4 panels. */
+  segmentCount: number;
 }
 
-/** A 60s 16-panel master storyboard — raw bytes + 16 scenes, NOT persisted. */
+/** A multi-segment N×4-panel master storyboard — raw bytes + scenes, NOT persisted. */
 export interface MasterStoryboard {
   bytes: Uint8Array;
   mime: string;
@@ -194,10 +200,11 @@ export interface MasterStoryboard {
 }
 
 /**
- * 60s ONE-MASTER: plan + render the single 16-panel (4×4) storyboard sheet as ONE
- * continuous coherent scene, authored from the user prompt + briefs (no per-segment
- * summaries). Returns the raw image bytes + all 16 scenes so the orchestrator can
- * crop the sheet into row strips and own persistence. Does NOT persist.
+ * MULTI-SEGMENT ONE-MASTER: plan + render the single N×4-panel storyboard sheet
+ * as ONE continuous coherent scene, authored from the user prompt + briefs (no
+ * per-segment summaries). Returns the raw image bytes + all N×4 scenes so the
+ * orchestrator can crop the sheet into row strips and own persistence. Does NOT
+ * persist.
  */
 export async function generateMaster(
   ctx: SkillContext,
@@ -211,6 +218,6 @@ export async function generateMaster(
       userPrompt: input.userPrompt,
       directive: input.directive,
     },
-    { full60s: true },
+    { full60s: true, segmentCount: input.segmentCount },
   );
 }

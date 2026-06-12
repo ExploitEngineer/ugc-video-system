@@ -4,7 +4,7 @@
 // The OpenAI provider is injected on `ctx` (dependency injection) so skills
 // never import the adapter directly and stay unit-testable with a fake.
 
-import type { AdType, AspectRatio } from "@ugc/shared";
+import type { AdType, AspectRatio, Duration } from "@ugc/shared";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
 
@@ -61,10 +61,14 @@ export interface SkillContext {
   /** User-chosen output shape — sizes the image sheets and the final video. */
   aspectRatio: AspectRatio;
   /**
-   * 60s only — the locked visual-style bible from `runs.visual_style` (planned
-   * by `narrativeOutline`). Injected VERBATIM into every segment storyboard +
-   * video prompt so all four clips share one grade/lighting/palette. Undefined
-   * for 15s runs and before the `narrative_outline` step lands.
+   * Target ad length (`15s`/`30s`/`45s`/`60s`). Drives the segment count
+   * (`segmentCountFor`) for the master storyboard crop + per-segment video fan-out.
+   */
+  duration: Duration;
+  /**
+   * Multi-segment only — the locked visual-style bible from `runs.visual_style`.
+   * Injected VERBATIM into every segment storyboard + video prompt so all clips
+   * share one grade/lighting/palette. Undefined for 15s runs.
    */
   visualStyle?: string;
   openai: OpenAIProvider;

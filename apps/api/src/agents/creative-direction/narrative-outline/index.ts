@@ -13,8 +13,19 @@ export interface NarrativeOutlineInput {
   userPrompt: string;
 }
 
-/** The fixed number of segments in a 60s ad (4 × ~15s). */
+/**
+ * Default segment cap for the (dormant) narrative-outline planner. Live segment
+ * counts are duration-driven via `segmentCountFor(run.duration)` (1/2/3/4).
+ */
 export const SEGMENT_COUNT = 4;
+
+/**
+ * Panels per ~15s segment row in a multi-segment master sheet. Each row's four
+ * panels (`4i+1 … 4i+4`) are re-tiled into a 2×2 block by `cropRowsAs2x2`, so a
+ * segment clip carries the SAME four-panel shot guide a 15s run uses. A run with
+ * N segments has an N×4 master (8/12/16 panels for 30/45/60s).
+ */
+export const PANELS_PER_SEGMENT = 4;
 
 const FALLBACK_BEATS = ["hook", "product in use", "benefit", "close"];
 

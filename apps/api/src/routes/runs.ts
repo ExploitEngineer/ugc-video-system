@@ -6,7 +6,11 @@
 // `awaiting_confirmation`. Cancel works from any non-terminal status.
 
 import type { AssetKind } from "@ugc/shared";
-import { createRunInputSchema, feedbackInputSchema } from "@ugc/shared";
+import {
+  createRunInputSchema,
+  feedbackInputSchema,
+  isMultiSegment,
+} from "@ugc/shared";
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import {
@@ -248,11 +252,12 @@ runs.get("/:id/artifacts", async (c) => {
     runId: id,
     productSheet: byKind("product_sheet"),
     personSheet: byKind("person_sheet"),
-    // 15s: the single labelled sheet. 60s: the four crops live in
+    // 15s: the single labelled sheet. Multi-segment: the crops live in
     // `segmentStoryboards`; the whole-grid sheet is `storyboardMaster`, so the
     // singular field is null (it would otherwise return an arbitrary crop).
-    storyboardSheet:
-      run.duration === "60s" ? null : byKind("storyboard_sheet"),
+    storyboardSheet: isMultiSegment(run.duration)
+      ? null
+      : byKind("storyboard_sheet"),
     storyboardMaster: byKind("storyboard_master"),
     finalVideo: finalVideoRow ? assetById(finalVideoRow.assetId) : null,
     // `duration_sec` is `numeric` → Drizzle returns a string; coerce.

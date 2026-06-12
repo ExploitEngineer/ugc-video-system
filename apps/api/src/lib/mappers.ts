@@ -9,6 +9,7 @@
 import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
+  isMultiSegment,
   narrativeOutlineSchema,
   sceneSchema,
   stepEventStatusSchema,
@@ -98,12 +99,16 @@ export function toRunDetailDto(
   storyboard?: StoryboardRow | null,
   segmentStoryboards?: StoryboardRow[] | null,
 ): RunDetail {
-  // 60s: group the four segment sheets' scenes by segment, in `segmentIndex`
+  // Multi-segment: group the segment sheets' scenes by segment, in `segmentIndex`
   // order, and flatten into `scenes` for back-compat. 15s leaves both as the
   // single storyboard (`segmentScenes` null).
   let scenes = parseScenes(storyboard?.scenes);
   let segmentScenes: Scene[][] | null = null;
-  if (run.duration === "60s" && segmentStoryboards && segmentStoryboards.length) {
+  if (
+    isMultiSegment(run.duration) &&
+    segmentStoryboards &&
+    segmentStoryboards.length
+  ) {
     // Rows arrive oldest→newest; keep the LAST (newest) per segment index so a
     // targeted regen's fresh sheet wins, then order by segment index.
     const byIndex = new Map<number, StoryboardRow>();
@@ -116,9 +121,9 @@ export function toRunDetailDto(
     segmentScenes = ordered.map((s) => parseScenes(s.scenes) ?? []);
     scenes = segmentScenes.flat();
   }
-  // The planned 60s arc (jsonb). Validate at the wire boundary; drop on drift.
+  // The planned narrative arc (jsonb). Validate at the wire boundary; drop on drift.
   const outline =
-    run.duration === "60s" && run.narrativeOutline != null
+    isMultiSegment(run.duration) && run.narrativeOutline != null
       ? (narrativeOutlineSchema.safeParse(run.narrativeOutline).data ?? null)
       : null;
   return {
@@ -128,8 +133,7 @@ export function toRunDetailDto(
     scenes,
     segmentScenes,
     narrativeOutline: outline,
-    // The locked visual-style bible (60s only; null for 15s or pre-outline).
-    visualStyle:
-      run.duration === "60s" ? (run.visualStyle ?? null) : null,
+    // The locked visual-style bible (multi-segment only; null for 15s/pre-outline).
+    visualStyle: isMultiSegment(run.duration) ? (run.visualStyle ?? null) : null,
   };
 }

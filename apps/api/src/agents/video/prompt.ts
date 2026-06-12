@@ -73,13 +73,15 @@ export function buildVideoPrompt(input: {
    */
   characterAnchor?: string;
   critique?: string;
-  /** 60s: this clip's segment index (0..3). Adds a short continuity preamble. */
+  /** Multi-segment: this clip's segment index (0..N-1). Adds a continuity preamble. */
   segmentIndex?: number;
-  /** 60s: the OTHER three segments' summaries, for tone/motion continuity. */
+  /** Multi-segment: total segment count (N) for accurate "part X of N" wording. */
+  segmentCount?: number;
+  /** Multi-segment: the OTHER segments' summaries, for tone/motion continuity. */
   otherSummaries?: string[];
   /**
    * 60s: the locked visual-style bible (`runs.visual_style`), injected VERBATIM
-   * — the SAME string used in the storyboard prompts — so all four clips share
+   * — the SAME string used in the storyboard prompts — so all clips share
    * one grade/lens/lighting/palette.
    */
   visualStyle?: string;
@@ -139,8 +141,9 @@ export function buildVideoPrompt(input: {
   const lockedStyle =
     isSegment && visualStyle?.trim() ? visualStyle.trim() : "";
   const others = (otherSummaries ?? []).filter((s) => s?.trim());
+  const segCount = input.segmentCount ?? 4;
   const continuity = isSegment
-    ? `This is part ${segmentIndex + 1} of 4 of one continuous 60-second ad; keep the SAME person, wardrobe, product state, lighting and energy as the other parts so the four clips cut together seamlessly.`
+    ? `This is part ${segmentIndex + 1} of ${segCount} of one continuous ${segCount * 15}-second ad; keep the SAME person, wardrobe, product state, lighting and energy as the other parts so the ${segCount} clips cut together seamlessly.`
     : "";
 
   // The example slice layout for the literal format line (panel-count aware).
@@ -154,7 +157,7 @@ export function buildVideoPrompt(input: {
     `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4). Panel N is the keyframe for time slice N — follow them in order. Render ONE continuous live-action shot; NEVER show the grid, panel borders, badges or caption text — they are direction only.`,
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
-      ? `Locked visual style — match this EXACTLY (identical across all four clips of the 60s ad; do not reinterpret it): ${lockedStyle}`
+      ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
       : "",
     "FORMAT — return EXACTLY this shape as ONE single-line string:",
     `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
