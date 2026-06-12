@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeftIcon,
   MenuIcon,
+  MessageSquareIcon,
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -259,12 +260,12 @@ function SidebarInner({
       {/* Chat list */}
       <div
         className={cn(
-          "min-h-0 flex-1 overflow-y-auto py-2",
+          "scroll-slim min-h-0 flex-1 overflow-y-auto py-2",
           collapsed ? "px-0" : "px-2",
         )}
       >
         {!collapsed && (
-          <p className="text-muted-foreground px-2 pb-1.5 font-mono text-[10px] font-medium tracking-[0.14em] uppercase">
+          <p className="text-muted-foreground/70 px-2.5 pb-2 font-mono text-[10px] font-medium tracking-[0.16em] uppercase">
             Recent chats
           </p>
         )}
@@ -368,11 +369,9 @@ function RunListItem({
   }
 
   const status = data?.status;
-  const dot = isError
-    ? "bg-muted-foreground/40"
-    : status
-      ? STATUS_DOT[status]
-      : "bg-muted-foreground/40 animate-pulse";
+  // Status dot only while a run is actually alive — a column of identical
+  // dots next to finished chats is pure noise. Finished chats are plain text.
+  const live = !isError && !!status && !isTerminal(status);
 
   const title = entry.prompt.trim() || "Untitled chat";
 
@@ -382,14 +381,24 @@ function RunListItem({
         href={`/studio/${entry.id}`}
         title={title}
         className={cn(
-          "flex items-center gap-2.5 rounded-lg py-2 text-sm transition-colors duration-200",
-          collapsed ? "justify-center px-0" : "pr-9 pl-2.5",
+          "flex items-center gap-2 rounded-lg py-1.5 text-[13px] transition-colors duration-150",
+          collapsed ? "justify-center px-0 py-2" : "pr-8 pl-2.5",
           active
-            ? "bg-accent text-accent-foreground font-medium ring-1 ring-brand/20"
-            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            ? "bg-accent/70 text-foreground font-medium"
+            : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
         )}
       >
-        <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
+        {live ? (
+          <span
+            className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[status])}
+            aria-hidden
+          />
+        ) : collapsed ? (
+          <MessageSquareIcon
+            className="size-3.5 shrink-0 opacity-50"
+            aria-hidden
+          />
+        ) : null}
         {!collapsed && <span className="truncate">{title}</span>}
       </Link>
       {!collapsed && (
@@ -398,9 +407,9 @@ function RunListItem({
             <button
               type="button"
               aria-label="Chat options"
-              className="text-muted-foreground hover:bg-muted hover:text-foreground absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-md opacity-0 transition-opacity duration-200 group-hover/item:opacity-100 focus-visible:opacity-100 data-[state=open]:bg-muted data-[state=open]:opacity-100"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md opacity-0 transition-opacity duration-150 group-hover/item:opacity-100 focus-visible:opacity-100 data-[state=open]:bg-muted data-[state=open]:opacity-100"
             >
-              <MoreHorizontalIcon className="size-4" />
+              <MoreHorizontalIcon className="size-3.5" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" sideOffset={6} className="w-40">

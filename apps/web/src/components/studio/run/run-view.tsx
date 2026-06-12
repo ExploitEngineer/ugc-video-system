@@ -5,11 +5,20 @@ import { isMultiSegment, type RunDetail, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   CheckCircle2Icon,
+  ClapperboardIcon,
+  ClockIcon,
+  FilmIcon,
+  GaugeIcon,
+  ListChecksIcon,
   PencilIcon,
+  RectangleHorizontalIcon,
+  RectangleVerticalIcon,
   SparklesIcon,
   TriangleAlertIcon,
+  UserIcon,
 } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
@@ -17,8 +26,8 @@ import { cancelRunAction, submitFeedbackAction } from "@/app/studio/actions";
 import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { FeedbackBar } from "@/components/studio/run/feedback-bar";
+import { AgentMessage, UserMessage } from "@/components/studio/run/message";
 import { NowRunning } from "@/components/studio/run/now-running";
-import { RunHeader } from "@/components/studio/run/run-header";
 import {
   GATE_NEXT_LABEL,
   gateOf,
@@ -31,6 +40,32 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
+
+/** A small option pill shown in the user's message bubble. */
+function Chip({
+  icon: Icon,
+  children,
+}: {
+  icon: typeof ClockIcon;
+  children: ReactNode;
+}) {
+  return (
+    <span className="border-border/60 bg-background/50 text-foreground/80 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">
+      <Icon className="size-3" />
+      {children}
+    </span>
+  );
+}
+
+/** Small thumbnail of an uploaded image in the user's message bubble. */
+function Thumb({ url, label }: { url: string; label: string }) {
+  return (
+    <span className="border-border/60 block size-12 overflow-hidden rounded-lg border">
+      {/* biome-ignore lint/performance/noImgElement: small upload preview, not a remote CDN asset */}
+      <img src={url} alt={label} className="size-full object-cover" />
+    </span>
+  );
+}
 
 const POLL_MS = 1500;
 
@@ -184,121 +219,175 @@ export function RunView({ runId }: { runId: string }) {
   // The gate a paused run sits at — names the agent its approval will start.
   const awaitingGate =
     run.status === "awaiting_confirmation" ? gateOf(run.currentStep) : null;
+  // Uploaded inputs (shown as thumbnails in the user's message bubble).
+  const productUpload = run.assets.find((a) => a.kind === "product_upload");
+  const personUpload = run.assets.find((a) => a.kind === "person_upload");
+  const hasScript =
+    (run.segmentScenes?.length ?? 0) > 0 || (run.scenes?.length ?? 0) > 0;
+  const running = run.status === "running" || run.status === "regenerating";
 
   return (
-    <div className="flex flex-col gap-8">
-      <RunHeader run={run} />
-
-      <NowRunning run={run} />
-
-      {run.status === "completed" && finalVideo && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="ring-glow bg-card overflow-hidden rounded-2xl border"
-        >
-          <div className="flex items-center justify-between gap-2 border-b p-4">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <CheckCircle2Icon className="size-4 text-success" />
-              {editedVideo ? "Your edited ad video" : "Your ad video is ready"}
-            </div>
-            <Button asChild variant="brand" size="sm">
-              <Link href={`/studio/${run.id}/edit`}>
-                <PencilIcon className="size-4" />
-                Edit video
-              </Link>
-            </Button>
-          </div>
-          <div className="p-4">
-            <ArtifactCard
-              asset={finalVideo}
-              title={editedVideo ? "Edited ad video" : "Final ad video"}
-            />
-          </div>
-        </motion.div>
-      )}
-
-      {isMulti && (segmentClips.length > 0 || masterSheet) && (
-        <Card>
-          <CardContent className="flex flex-col gap-6 py-6">
-            {masterSheet && (
-              <div>
-                <h2 className="mb-3 text-sm font-semibold">
-                  Storyboard{" "}
-                  <span className="text-muted-foreground font-normal">
-                    — {masterPanels} panels ({segCount} segments × 4)
-                  </span>
-                </h2>
-                <ArtifactCard
-                  asset={masterSheet}
-                  title={`Storyboard (${masterPanels} panels)`}
-                />
-              </div>
+    <div className="flex flex-col gap-6 pb-4">
+      {/* The user's "message" — their prompt plus every option they picked. */}
+      <UserMessage>
+        <p className="leading-relaxed text-pretty">{run.prompt}</p>
+        {(productUpload || personUpload) && (
+          <div className="mt-3 flex gap-2">
+            {productUpload && (
+              <Thumb url={productUpload.url} label="Product image" />
             )}
-            {segmentClips.length > 0 && (
-              <div>
-                <h2 className="mb-3 text-sm font-semibold">
-                  15-second segments{" "}
-                  <span className="text-muted-foreground font-normal">
-                    — {segmentClips.length} of {segCount}
-                  </span>
-                </h2>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {segmentClips.map((asset, i) => (
-                    <ArtifactCard
-                      key={asset.id}
-                      asset={asset}
-                      title={`Segment ${i + 1}`}
-                    />
-                  ))}
-                </div>
-              </div>
+            {personUpload && (
+              <Thumb url={personUpload.url} label="Person image" />
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {run.status === "failed" && (
-        <Card className="border-destructive/40">
-          <CardContent className="flex items-center gap-3 py-5">
-            <TriangleAlertIcon className="text-destructive size-5 shrink-0" />
-            <div>
-              <p className="text-sm font-medium">Run ended</p>
-              <p className="text-muted-foreground text-sm">
-                {run.error ?? "The run was stopped."}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardContent className="py-6">
-          <StepTimeline run={run} />
-        </CardContent>
-      </Card>
-
-      <ScriptPanel run={run} />
-
-      {run.status === "awaiting_confirmation" && (
-        <div className="border-brand/40 bg-brand/10 text-brand flex flex-col gap-1.5 rounded-xl border px-4 py-3 text-sm font-medium">
-          <div className="flex items-center gap-2">
-            <SparklesIcon className="size-4 shrink-0" />
-            {awaitingGate
-              ? `Paused — review below, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
-              : "Paused — awaiting your feedback before the next step."}
           </div>
-          {isMulti && awaitingGate === "storyboard" && (
-            <p className="text-brand/80 pl-6 text-xs font-normal">
-              Spot an issue? Describe what to change — e.g.{" "}
-              <span className="font-medium">“make the lighting warmer”</span> —
-              and we’ll regenerate the whole {masterPanels}-panel storyboard. Or
-              say <span className="font-medium">“looks good”</span> to continue.
-            </p>
-          )}
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <Chip icon={ClapperboardIcon}>{run.adStyle}</Chip>
+          <Chip icon={run.adType === "ugc" ? UserIcon : SparklesIcon}>
+            {run.adType === "ugc" ? "UGC" : "Inspirational"}
+          </Chip>
+          <Chip icon={isMulti ? FilmIcon : ClockIcon}>
+            {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
+          </Chip>
+          <Chip
+            icon={
+              run.aspectRatio === "16:9"
+                ? RectangleHorizontalIcon
+                : RectangleVerticalIcon
+            }
+          >
+            {run.aspectRatio}
+          </Chip>
+          <Chip icon={run.mode === "automatic" ? GaugeIcon : ListChecksIcon}>
+            {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
+          </Chip>
         </div>
+      </UserMessage>
+
+      {/* Agent — live progress + the pipeline timeline. */}
+      <AgentMessage label="Pipeline">
+        {running && <NowRunning run={run} />}
+        <Card>
+          <CardContent className="py-6">
+            <StepTimeline run={run} />
+          </CardContent>
+        </Card>
+      </AgentMessage>
+
+      {/* Agent — the generated scene script, once it exists. */}
+      {hasScript && (
+        <AgentMessage label="Scene script">
+          <ScriptPanel run={run} />
+        </AgentMessage>
       )}
 
+      {/* Agent — multi-segment storyboard master + the segment clips. */}
+      {isMulti && (segmentClips.length > 0 || masterSheet) && (
+        <AgentMessage label="Storyboard & segments">
+          {masterSheet && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold">
+                Storyboard{" "}
+                <span className="text-muted-foreground font-normal">
+                  — {masterPanels} panels ({segCount} segments × 4)
+                </span>
+              </h3>
+              <ArtifactCard
+                asset={masterSheet}
+                title={`Storyboard (${masterPanels} panels)`}
+              />
+            </div>
+          )}
+          {segmentClips.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold">
+                15-second segments{" "}
+                <span className="text-muted-foreground font-normal">
+                  — {segmentClips.length} of {segCount}
+                </span>
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {segmentClips.map((asset, i) => (
+                  <ArtifactCard
+                    key={asset.id}
+                    asset={asset}
+                    title={`Segment ${i + 1}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </AgentMessage>
+      )}
+
+      {/* Agent — paused, waiting for the user's go-ahead. */}
+      {run.status === "awaiting_confirmation" && (
+        <AgentMessage label="Waiting for you">
+          <div className="border-brand/40 bg-brand/10 text-brand flex flex-col gap-1.5 rounded-xl border px-4 py-3 text-sm font-medium">
+            <div className="flex items-center gap-2">
+              <SparklesIcon className="size-4 shrink-0" />
+              {awaitingGate
+                ? `Paused — review above, then approve to start the ${GATE_NEXT_LABEL[awaitingGate]} agent.`
+                : "Paused — awaiting your feedback before the next step."}
+            </div>
+            {isMulti && awaitingGate === "storyboard" && (
+              <p className="text-brand/80 pl-6 text-xs font-normal">
+                Spot an issue? Describe what to change — e.g.{" "}
+                <span className="font-medium">“make the lighting warmer”</span>{" "}
+                — and we’ll regenerate the whole {masterPanels}-panel
+                storyboard. Or say{" "}
+                <span className="font-medium">“looks good”</span> to continue.
+              </p>
+            )}
+          </div>
+        </AgentMessage>
+      )}
+
+      {/* Agent — the run failed. */}
+      {run.status === "failed" && (
+        <AgentMessage label="Run ended">
+          <div className="border-destructive/40 bg-destructive/5 flex items-center gap-3 rounded-xl border px-4 py-3">
+            <TriangleAlertIcon className="text-destructive size-5 shrink-0" />
+            <p className="text-muted-foreground text-sm">
+              {run.error ?? "The run was stopped."}
+            </p>
+          </div>
+        </AgentMessage>
+      )}
+
+      {/* Agent — the finished video, the closing reply of the thread. */}
+      {run.status === "completed" && finalVideo && (
+        <AgentMessage label="Your ad video">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="ring-glow bg-card overflow-hidden rounded-2xl border"
+          >
+            <div className="flex items-center justify-between gap-2 border-b p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <CheckCircle2Icon className="size-4 text-success" />
+                {editedVideo
+                  ? "Your edited ad video"
+                  : "Your ad video is ready"}
+              </div>
+              <Button asChild variant="brand" size="sm">
+                <Link href={`/studio/${run.id}/edit`}>
+                  <PencilIcon className="size-4" />
+                  Edit video
+                </Link>
+              </Button>
+            </div>
+            <div className="p-4">
+              <ArtifactCard
+                asset={finalVideo}
+                title={editedVideo ? "Edited ad video" : "Final ad video"}
+              />
+            </div>
+          </motion.div>
+        </AgentMessage>
+      )}
+
+      {/* Reply composer (step-by-step) / cancel (automatic) / new chat. */}
       {run.mode === "confirm" && !isTerminal(run.status) && (
         <FeedbackBar
           run={run}
@@ -322,21 +411,20 @@ export function RunView({ runId }: { runId: string }) {
       )}
 
       {isTerminal(run.status) && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-          className="border-border/60 bg-card/40 rounded-2xl border p-4 backdrop-blur sm:p-5"
-        >
-          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <SparklesIcon className="text-brand size-4 shrink-0" />
-            <span className="font-medium">Start a new chat</span>
-            <span className="text-muted-foreground">
-              — tweak your prompt or try a new idea. Each run makes one video.
-            </span>
+        <AgentMessage label="Start a new chat">
+          <div className="border-border/60 bg-card/40 rounded-2xl border p-4 backdrop-blur sm:p-5">
+            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <SparklesIcon className="text-brand size-4 shrink-0" />
+              <span className="font-medium">
+                Tweak your prompt or try a new idea
+              </span>
+              <span className="text-muted-foreground">
+                — each run makes one video.
+              </span>
+            </div>
+            <CreateRunForm />
           </div>
-          <CreateRunForm />
-        </motion.div>
+        </AgentMessage>
       )}
     </div>
   );
