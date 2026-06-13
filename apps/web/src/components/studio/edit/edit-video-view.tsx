@@ -9,7 +9,7 @@ import { type ReactNode, useCallback } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { fetchRun, uploadEditedVideo } from "@/lib/api";
+import { ensureAudioTrack, fetchRun, uploadEditedVideo } from "@/lib/api";
 import type { OnSaved } from "@/lib/cesdk";
 
 // Heavy, browser-only WASM editor — loaded lazily and never server-rendered, so
@@ -60,6 +60,20 @@ export function EditVideoView({ runId }: { runId: string }) {
     .filter((a) => a.kind === "editor_scene")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
+  // Fresh edits get the audio on its own timeline lane: ask the API to extract
+  // it (lazy, idempotent) before mounting the editor. Skipped when resuming a
+  // saved scene (it already encodes the split). On failure we mount anyway and
+  // fall back to the video's baked-in audio.
+  const needsAudio =
+    run?.status === "completed" && !!finalVideo && !latestScene;
+  const audioQuery = useQuery({
+    queryKey: ["run-audio", runId] as const,
+    queryFn: () => ensureAudioTrack(runId),
+    enabled: needsAudio,
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
   let content: ReactNode;
   if (isError && (error as Error).message === "not-found") {
     content = (
@@ -77,11 +91,18 @@ export function EditVideoView({ runId }: { runId: string }) {
         This chat’s video isn’t ready to edit yet.
       </EditorMessage>
     );
+  } else if (needsAudio && audioQuery.isPending) {
+    // Hold the mount until the audio track is ready, so the editor builds the
+    // scene once with a stable audioUrl rather than re-creating when it arrives.
+    content = <EditorMessage>Preparing audio track…</EditorMessage>;
   } else {
     content = (
       <CesdkEditor
         sourceVideoUrl={finalVideo.url}
         sceneUrl={latestScene?.url ?? null}
+        // Null when resuming a saved scene (split already baked in) or if
+        // extraction failed — the editor then keeps the video's native audio.
+        audioUrl={latestScene ? null : (audioQuery.data?.url ?? null)}
         onSaved={onSaved}
       />
     );
