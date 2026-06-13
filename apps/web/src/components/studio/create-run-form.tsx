@@ -300,7 +300,7 @@ function AttachButton({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-accent/40 inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium transition-colors"
+        className="border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium transition-colors"
       >
         <Icon className="size-3.5" />
         {label}
@@ -333,7 +333,7 @@ function OptionsMenu({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="border-border/60 bg-background/40 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-accent/40 data-[state=open]:border-brand/50 data-[state=open]:text-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors"
+          className="border-border/60 bg-background/40 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 data-[state=open]:border-brand/50 data-[state=open]:text-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors"
         >
           <SlidersHorizontalIcon className="size-3.5" />
           Options
@@ -407,14 +407,16 @@ function ModeToggle({
                 : "Pause after each artifact for your feedback to approve or revise"
             }
             className={cn(
-              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-              selected ? "text-foreground" : "text-muted-foreground",
+              "relative isolate inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected
+                ? "text-foreground"
+                : "text-muted-foreground hover:bg-brand/10 hover:text-foreground",
             )}
           >
             {selected && (
               <motion.span
                 layoutId="mode-pill"
-                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                className="bg-brand/20 ring-1 ring-inset ring-brand/30 absolute inset-0 -z-10 rounded-full"
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
               />
             )}
@@ -479,14 +481,16 @@ function DurationToggle({
             aria-pressed={selected}
             title={opt.title}
             className={cn(
-              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors",
-              selected ? "text-foreground" : "text-muted-foreground",
+              "relative isolate inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors",
+              selected
+                ? "text-foreground"
+                : "text-muted-foreground hover:bg-brand/10 hover:text-foreground",
             )}
           >
             {selected && (
               <motion.span
                 layoutId="duration-pill"
-                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                className="bg-brand/20 ring-1 ring-inset ring-brand/30 absolute inset-0 -z-10 rounded-full"
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
               />
             )}
@@ -538,14 +542,16 @@ function AspectRatioToggle({
             aria-pressed={selected}
             title={opt.title}
             className={cn(
-              "relative inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-              selected ? "text-foreground" : "text-muted-foreground",
+              "relative isolate inline-flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected
+                ? "text-foreground"
+                : "text-muted-foreground hover:bg-brand/10 hover:text-foreground",
             )}
           >
             {selected && (
               <motion.span
                 layoutId="ratio-pill"
-                className="bg-accent absolute inset-0 -z-10 rounded-full"
+                className="bg-brand/20 ring-1 ring-inset ring-brand/30 absolute inset-0 -z-10 rounded-full"
                 transition={{ type: "spring", stiffness: 420, damping: 34 }}
               />
             )}
