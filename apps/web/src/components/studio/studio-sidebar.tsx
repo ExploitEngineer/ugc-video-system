@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { deleteRunAction } from "@/app/studio/actions";
 import { BrandGlyph, BrandMark } from "@/components/brand-mark";
-import { isTerminal, STATUS_DOT } from "@/components/studio/run/run-meta";
+import { isTerminal } from "@/components/studio/run/run-meta";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -247,8 +247,11 @@ function SidebarInner({
       >
         <Button
           asChild
-          variant="brand"
-          className={cn("group w-full", collapsed && "size-10 w-10 p-0")}
+          variant="outline"
+          className={cn(
+            "border-brand/30 bg-brand/10 text-brand hover:border-brand/50 hover:bg-brand/15 hover:text-brand group w-full",
+            collapsed && "size-10 w-10 p-0",
+          )}
         >
           <Link href="/studio" aria-label="New chat" title="New chat">
             <PlusIcon className="size-4" />
@@ -329,8 +332,9 @@ function RunListItem({
   const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState(false);
 
-  // Lightweight live status — polls slowly, stops at terminal states.
-  const { data, isError, error } = useQuery({
+  // Poll the per-id endpoint so the run-view cache stays warm and confirmed-
+  // missing orphans (404) can be pruned below.
+  const { isError, error } = useQuery({
     queryKey: ["run", entry.id],
     queryFn: () => fetchRun(entry.id),
     refetchInterval: runItemPollInterval,
@@ -368,11 +372,6 @@ function RunListItem({
     if (active) router.push("/studio");
   }
 
-  const status = data?.status;
-  // Status dot only while a run is actually alive — a column of identical
-  // dots next to finished chats is pure noise. Finished chats are plain text.
-  const live = !isError && !!status && !isTerminal(status);
-
   const title = entry.prompt.trim() || "Untitled chat";
 
   return (
@@ -384,22 +383,18 @@ function RunListItem({
           "flex items-center gap-2 rounded-lg py-1.5 text-[13px] transition-colors duration-150",
           collapsed ? "justify-center px-0 py-2" : "pr-8 pl-2.5",
           active
-            ? "bg-accent/70 text-foreground font-medium"
-            : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+            ? "bg-brand/15 text-foreground font-medium"
+            : "text-muted-foreground hover:bg-brand/10 hover:text-foreground",
         )}
       >
-        {live ? (
-          <span
-            className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[status])}
-            aria-hidden
-          />
-        ) : collapsed ? (
+        {collapsed ? (
           <MessageSquareIcon
             className="size-3.5 shrink-0 opacity-50"
             aria-hidden
           />
-        ) : null}
-        {!collapsed && <span className="truncate">{title}</span>}
+        ) : (
+          <span className="truncate">{title}</span>
+        )}
       </Link>
       {!collapsed && (
         <DropdownMenu>

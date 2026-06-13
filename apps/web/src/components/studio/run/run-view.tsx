@@ -7,6 +7,7 @@ import {
   CheckCircle2Icon,
   ClapperboardIcon,
   ClockIcon,
+  ExpandIcon,
   FilmIcon,
   GaugeIcon,
   ListChecksIcon,
@@ -37,6 +38,12 @@ import { ScriptPanel } from "@/components/studio/run/script-panel";
 import { StepTimeline } from "@/components/studio/run/step-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
@@ -57,13 +64,34 @@ function Chip({
   );
 }
 
-/** Small thumbnail of an uploaded image in the user's message bubble. */
+/** Thumbnail of an uploaded image in the user's message bubble. Click opens a
+ *  full-size lightbox — the same panel used to view generated artifacts. */
 function Thumb({ url, label }: { url: string; label: string }) {
   return (
-    <span className="border-border/60 block size-12 overflow-hidden rounded-lg border">
-      {/* biome-ignore lint/performance/noImgElement: small upload preview, not a remote CDN asset */}
-      <img src={url} alt={label} className="size-full object-cover" />
-    </span>
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          aria-label={`View ${label}`}
+          className="group border-border/60 relative block size-12 overflow-hidden rounded-lg border"
+        >
+          {/* biome-ignore lint/performance/noImgElement: small upload preview, not a remote CDN asset */}
+          <img src={url} alt={label} className="size-full object-cover" />
+          <span className="bg-background/0 group-hover:bg-background/40 absolute inset-0 flex items-center justify-center transition-colors">
+            <ExpandIcon className="size-4 opacity-0 transition-opacity group-hover:opacity-100" />
+          </span>
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-w-3xl">
+        <DialogTitle className="sr-only">{label}</DialogTitle>
+        {/* biome-ignore lint/performance/noImgElement: upload preview, not a remote CDN asset */}
+        <img
+          src={url}
+          alt={label}
+          className="max-h-[75vh] w-full rounded-lg object-contain"
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 
