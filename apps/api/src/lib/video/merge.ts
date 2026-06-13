@@ -336,3 +336,45 @@ export async function mergeSegmentUrls(
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+/**
+ * Extract the audio track of a video as a standalone AAC/m4a file. Used by the
+ * editor's "separate audio lane" feature: the baked-in audio (Seedance-native,
+ * or the merged multi-segment mix) can't be detached inside CE.SDK, so the API
+ * pulls it out once and serves it as its own asset. Reuses the same semaphore,
+ * download, and signal/timeout-aware ffmpeg runner as `mergeSegmentUrls` —
+ * `-vn` drops the video so this is a cheap, audio-only re-encode.
+ */
+export async function extractAudio(
+  videoUrl: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-audio-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.m4a");
+    log.info("▶ extracting audio");
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-vn", // drop video — audio-only output
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "extract-audio",
+    );
+    const bytes = await readFile(out);
+    log.info("✓ audio extracted", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "audio/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

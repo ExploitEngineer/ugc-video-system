@@ -25,6 +25,7 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "video/mp4": "mp4",
+  "audio/mp4": "m4a", // audio track extracted from the final video (AAC in MP4)
   "application/json": "json", // serialized CE.SDK editor scene
 };
 

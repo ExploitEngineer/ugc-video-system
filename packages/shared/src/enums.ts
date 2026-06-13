@@ -47,10 +47,12 @@ export type Step = z.infer<typeof stepSchema>;
  * `storyboard_sheet` (`segment_index` 0..N-1), the same kind a 15s run's
  * single sheet uses.
  *
- * Post-generation editing (img.ly CE.SDK) adds two kinds, both attached to a
+ * Post-generation editing (img.ly CE.SDK) adds three kinds, all attached to a
  * `completed` run alongside the original `final_video` (never replacing it):
- * `edited_video` is the user's MP4 export from the editor, and `editor_scene`
- * is the serialized CE.SDK scene (so reopening the editor resumes the edit).
+ * `edited_video` is the user's MP4 export from the editor, `editor_scene`
+ * is the serialized CE.SDK scene (so reopening the editor resumes the edit), and
+ * `final_audio` is the audio track extracted from `final_video` (ffmpeg, lazily
+ * on first editor open) so the editor can show it as its own timeline lane.
  */
 export const assetKindSchema = z.enum([
   "product_upload",
@@ -63,6 +65,7 @@ export const assetKindSchema = z.enum([
   "segment_video",
   "edited_video",
   "editor_scene",
+  "final_audio",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 

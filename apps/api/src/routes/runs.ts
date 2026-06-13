@@ -26,6 +26,7 @@ import { createLogger } from "../lib/log.js";
 import { toAssetDto, toRunDto } from "../lib/mappers.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
 import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
+import { extractAudio } from "../lib/video/merge.js";
 
 const ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -351,6 +352,46 @@ runs.post("/:id/edited-video", async (c) => {
 
   log.info("edited-video saved", { run: id, withScene: scene !== null });
   return c.json(await loadRunDetail(id), 201);
+});
+
+// ── GET /runs/:id/audio-track — ensure a standalone audio asset exists ────
+// The CE.SDK editor can't detach a video's baked-in audio, so to show audio as
+// its own timeline lane we extract it (ffmpeg, `-vn`) into a separate
+// `final_audio` asset. Lazy + idempotent: the editor calls this on a fresh open
+// — if the asset already exists we return its URL, otherwise we extract it from
+// `final_video` once and persist it. Safe on completed runs (the worker never
+// touches them), so no locking is needed.
+runs.get("/:id/audio-track", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["completed"], "Run is not completed.");
+
+  const findAsset = (kind: AssetKind) =>
+    db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.runId, id), eq(schema.assets.kind, kind)))
+      .orderBy(desc(schema.assets.createdAt))
+      .limit(1);
+
+  // Already extracted (re-open or concurrent open) — return the existing one.
+  const [existing] = await findAsset("final_audio");
+  if (existing?.url) return c.json({ url: existing.url });
+
+  const [video] = await findAsset("final_video");
+  if (!video?.url) throw unprocessable("This run has no final video to extract audio from.");
+
+  const { bytes, mime } = await extractAudio(video.url);
+  const { assetUrl } = await persistAsset({
+    runId: id,
+    kind: "final_audio",
+    bytes,
+    mime,
+    meta: { source: "ffmpeg-extract" },
+  });
+
+  log.info("audio-track extracted", { run: id });
+  return c.json({ url: assetUrl }, 201);
 });
 
 // ── POST /runs/:id/feedback — the SINGLE step-by-step gate action ─────

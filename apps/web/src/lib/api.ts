@@ -80,3 +80,26 @@ export async function uploadEditedVideo(
   }
   return res.json() as Promise<RunDetail>;
 }
+
+/**
+ * Ensure the run's audio track exists as a standalone file and return its URL.
+ * The editor can't detach a video's baked-in audio, so the API extracts it into
+ * a separate `final_audio` asset (lazily, idempotently) — the editor then loads
+ * it as its own timeline lane. Hits the same-origin Next proxy
+ * (`/api/runs/:id/audio-track`). Throws a readable error on failure so the
+ * editor can fall back to the baked-in audio.
+ */
+export async function ensureAudioTrack(
+  runId: string,
+): Promise<{ url: string }> {
+  const res = await fetch(`/api/runs/${runId}/audio-track`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to prepare the audio track.");
+  }
+  return res.json() as Promise<{ url: string }>;
+}

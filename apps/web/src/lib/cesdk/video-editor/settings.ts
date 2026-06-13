@@ -33,8 +33,10 @@ export function setupSettings(engine: CreativeEngine): void {
   // Re-enable on an SDK version that types this key.
   // engine.editor.setSetting("features/videoCaptionsEnabled", true);
 
-  // Only show the active track in the timeline (hides inactive tracks)
-  engine.editor.setSetting("timeline/trackVisibility", "active");
+  // Show all timeline tracks at once (matches CE.SDK's own video preset) so the
+  // video clip and the separate audio lane are visible together. "active" would
+  // hide the audio track unless it were selected.
+  engine.editor.setSetting("timeline/trackVisibility", "all");
   // #endregion
 
   // ============================================================================

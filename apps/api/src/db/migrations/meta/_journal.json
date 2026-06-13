@@ -120,6 +120,13 @@
       "when": 1781278043880,
       "tag": "0016_youthful_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781358088305,
+      "tag": "0017_bright_blacklash",
+      "breakpoints": true
     }
   ]
 }
