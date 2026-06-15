@@ -1,6 +1,12 @@
 "use client";
 
-import type { AssetKind, RunDetail, Step } from "@ugc/shared";
+import {
+  type AssetKind,
+  isMultiSegment,
+  type RunDetail,
+  type Step,
+  segmentCountFor,
+} from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   CheckIcon,
@@ -74,7 +80,7 @@ const PILL: Record<StepState, { label: string; cls: string; dot: string }> = {
   },
 };
 
-function StatusPill({ state }: { state: StepState }) {
+function StatusPill({ state, note }: { state: StepState; note?: string }) {
   const p = PILL[state];
   return (
     <span
@@ -85,6 +91,7 @@ function StatusPill({ state }: { state: StepState }) {
     >
       <span className={cn("size-1.5 rounded-full", p.dot)} />
       {p.label}
+      {note && <span className="tabular-nums opacity-70">· {note}</span>}
     </span>
   );
 }
@@ -219,6 +226,15 @@ export function StepTimeline({ run }: { run: RunDetail }) {
           ? run.assets.findLast((a) => a.kind === assetKind)
           : undefined;
         const showAsset = asset && (state === "done" || state === "awaiting");
+        // Multi-segment video fan-out: surface live "done/total" progress while
+        // the N clips render in parallel, so a minutes-long "Generating" visibly
+        // advances as each segment lands (every passed event pushes a snapshot).
+        const segNote =
+          step === "segment_video" &&
+          isMultiSegment(run.duration) &&
+          (state === "active" || state === "regenerating")
+            ? `${run.stepEvents.filter((e) => e.step === "segment_video" && e.status === "passed").length}/${segmentCountFor(run.duration)}`
+            : undefined;
         const last = i === order.length - 1;
         const dim = (state === "pending" || state === "skipped") && !upNext;
         const live =
@@ -267,7 +283,11 @@ export function StepTimeline({ run }: { run: RunDetail }) {
                 >
                   {STEP_LABEL[step]}
                 </h3>
-                {upNext ? <UpNextPill /> : <StatusPill state={state} />}
+                {upNext ? (
+                  <UpNextPill />
+                ) : (
+                  <StatusPill state={state} note={segNote} />
+                )}
               </div>
               <p className="text-muted-foreground mt-1 text-xs">
                 {stepSublabel(step)}

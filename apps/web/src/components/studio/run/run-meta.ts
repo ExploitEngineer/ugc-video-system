@@ -5,6 +5,7 @@ import {
   type RunDetail,
   type RunStatus,
   type Step,
+  segmentCountFor,
 } from "@ugc/shared";
 
 // Critic inspection steps (product_inspection / storyboard_inspection) are
@@ -151,15 +152,30 @@ export type StepState =
  */
 export function activeSteps(run: RunDetail): Step[] {
   if (run.status !== "running" && run.status !== "regenerating") return [];
+  const segCount = segmentCountFor(run.duration);
   const active: Step[] = [];
   for (const step of stepOrderFor(run.duration)) {
     const events = run.stepEvents.filter((e) => e.step === step);
     if (events.length === 0) continue;
     const started = events.some((e) => e.status === "started");
-    const ended = events.some(
-      (e) => e.status === "passed" || e.status === "failed",
-    );
-    if (started && !ended) active.push(step);
+    if (step === "segment_video") {
+      // Parallel fan-out: N segment clips render concurrently, each writing its
+      // own started→passed/failed pair under this same step. The step is in
+      // flight until ALL N have settled — NOT the moment the first one does
+      // (the bug that flipped the pill back to "Pending" mid-render). A failed
+      // segment fails the whole run only after runBounded waits for every
+      // segment, so we keep showing "Generating" while the rest finish; the
+      // run-status flip then resolves it to Failed.
+      const settled = events.filter(
+        (e) => e.status === "passed" || e.status === "failed",
+      ).length;
+      if (started && settled < segCount) active.push(step);
+    } else {
+      const ended = events.some(
+        (e) => e.status === "passed" || e.status === "failed",
+      );
+      if (started && !ended) active.push(step);
+    }
   }
   return active;
 }

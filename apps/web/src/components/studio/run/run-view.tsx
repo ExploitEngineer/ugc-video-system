@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isMultiSegment, type RunDetail, segmentCountFor } from "@ugc/shared";
+import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
   CheckCircle2Icon,
@@ -47,6 +47,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
+import { useRunStream } from "@/lib/use-run-stream";
 
 /** A small option pill shown in the user's message bubble. */
 function Chip({
@@ -95,32 +96,6 @@ function Thumb({ url, label }: { url: string; label: string }) {
   );
 }
 
-const POLL_MS = 1500;
-
-// Stable module-level poller — poll while active; stop at terminal states
-// and while awaiting the user's gate feedback (a mutation resumes it by
-// writing fresh data). Hoisted so its identity is stable across renders
-// (React Compiler does not memoize query-option closures).
-function runPollInterval(query: {
-  state: { data?: RunDetail; status?: string };
-}): number | false {
-  // Missing/failed fetch (e.g. a 404'd run) — stop, don't hammer the endpoint.
-  if (query.state.status === "error") return false;
-  const data = query.state.data;
-  const status = data?.status;
-  if (!status) return POLL_MS;
-  // Keep polling if the run reports completed but the final video asset hasn't
-  // surfaced in this response yet — otherwise the clip would only appear on a
-  // manual refresh. Stops as soon as the asset lands.
-  if (status === "completed") {
-    const hasVideo = data?.assets.some((a) => a.kind === "final_video");
-    return hasVideo ? false : POLL_MS;
-  }
-  if (isTerminal(status)) return false;
-  if (status === "awaiting_confirmation") return false;
-  return POLL_MS;
-}
-
 export function RunView({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
   const queryKey = ["run", runId] as const;
@@ -133,12 +108,16 @@ export function RunView({ runId }: { runId: string }) {
   } = useQuery({
     queryKey,
     queryFn: () => fetchRun(runId),
-    refetchInterval: runPollInterval,
-    // Retry up to 2× on ANY error — including a transient/stale 404 — so one bad
-    // poll doesn't instantly show "Chat not found"; a genuinely missing run still
-    // 404s on every attempt and surfaces after the retries.
+    // No polling — live updates arrive over SSE (useRunStream below), which
+    // writes each pushed RunDetail straight into this query's cache. The
+    // one-shot fetch here is the initial load + the not-found path.
     retry: (count) => count < 2,
   });
+
+  // Confirmed-missing run → stop the SSE stream so it can't reconnect-loop on a
+  // 404 (the not-found UI is driven by the query error below).
+  const notFound = isError && (error as Error).message === "not-found";
+  useRunStream(runId, !notFound);
 
   const mutation = useMutation({
     mutationFn: (_action: "cancel") => cancelRunAction(runId),

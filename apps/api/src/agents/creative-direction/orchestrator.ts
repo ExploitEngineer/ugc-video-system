@@ -31,6 +31,7 @@ import { persistSheet } from "../persist.js";
 import { cropRowsAs2x2 } from "../../lib/image/crop.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { logRun, logRunError } from "../../lib/log.js";
+import { notifyRunChanged } from "../../lib/run-events.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
@@ -93,6 +94,8 @@ async function setRun(runId: string, fields: Partial<RunRow>): Promise<void> {
     .update(schema.runs)
     .set({ ...fields, updatedAt: new Date() })
     .where(eq(schema.runs.id, runId));
+  // Push the status/step change to any connected SSE stream for this run.
+  notifyRunChanged(runId);
 }
 
 /** True if a concurrent cancel flipped the run to a terminal status. */

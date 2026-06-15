@@ -6,7 +6,7 @@ import { Loader2Icon } from "lucide-react";
 
 import {
   STEP_AGENT,
-  STEP_ORDER,
+  stepOrderFor,
   stepState,
 } from "@/components/studio/run/run-meta";
 
@@ -18,7 +18,9 @@ import {
  * Hidden when no step is actively in flight.
  */
 export function NowRunning({ run }: { run: RunDetail }) {
-  const steps = STEP_ORDER.filter((step) => {
+  // Use the run's REAL step order (15s vs multi-segment) — otherwise a 60s run's
+  // in-flight steps (segment_storyboard / segment_video / merge) are never named.
+  const steps = stepOrderFor(run.duration).filter((step) => {
     const state = stepState(run, step);
     return state === "active" || state === "regenerating";
   });
