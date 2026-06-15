@@ -1,25 +1,17 @@
-// OpenAI provider adapter — GPT Image 2 (images) + LLM reasoning/critique.
+// OpenAI provider adapter — GPT Image 2 image generation.
 //
-// Adapter boundary: agent/skill code depends on these interfaces only,
-// never on the `openai` SDK directly, so the model is swappable.
-// Chat is vision-capable (used by F5 Critic); generateImage branches
-// text-to-image vs reference edit.
+// Adapter boundary: agent/skill code depends on these interfaces only, never on
+// the `openai` SDK directly, so the model is swappable. `generateImage` branches
+// text-to-image vs reference edit. The chat/reasoning contract (`ChatMessage`,
+// `ChatOptions`, `OpenAIProvider.chat`) is declared here but IMPLEMENTED by the
+// OpenRouter adapter (providers/openrouter) — Claude Sonnet 4.6.
 
 import OpenAI, { toFile } from "openai";
-import type {
-  ChatCompletionContentPart,
-  ChatCompletionMessageParam,
-} from "openai/resources/chat/completions";
 import { env } from "../../config/index.js";
 import { internal } from "../../lib/errors.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
-import {
-  DEFAULT_CHAT_MAX_TOKENS,
-  DEFAULT_IMAGE_SIZE,
-  OPENAI_CHAT_MODEL,
-  OPENAI_IMAGE_MODEL,
-} from "./constants.js";
+import { DEFAULT_IMAGE_SIZE, OPENAI_IMAGE_MODEL } from "./constants.js";
 
 const log = createLogger("openai");
 
@@ -52,18 +44,21 @@ export interface ChatMessage {
 
 /** Per-call tuning for `chat()`. */
 export interface ChatOptions {
-  /** Output-token ceiling. Defaults to `DEFAULT_CHAT_MAX_TOKENS` (4096). */
+  /** Output-token ceiling for the JSON body. Defaults to 4096 (see openrouter constants). */
   maxTokens?: number;
   /**
-   * Force `response_format: json_object` — the model must emit a single JSON
-   * object. Use for every strict-JSON skill; it also hardens against mid-string
-   * truncation. Safe only when the prompt asks for JSON (all our skills do).
+   * Instruct the model to emit a single JSON object. Use for every strict-JSON
+   * skill; it also hardens against mid-string truncation. Safe only when the
+   * prompt asks for JSON (all our skills do).
    */
   jsonMode?: boolean;
 }
 
 export interface OpenAIProvider {
-  /** LLM reasoning / prompt building (and vision when `images` present). */
+  /**
+   * LLM reasoning / prompt building (and vision when `images` present).
+   * Implemented by the OpenRouter adapter (Claude Sonnet 4.6), not OpenAI.
+   */
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<string>;
   /** GPT Image 2 generation → composite reference/storyboard sheet. */
   generateImage(input: GenerateImageInput): Promise<GenerateImageResult>;
@@ -96,43 +91,6 @@ const IMAGE_MAX_ATTEMPTS = 5;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Resolve an `ImageRef` to a base64 data URI. We fetch the bytes ourselves and
- * inline them rather than handing OpenAI a URL to download — OpenAI's server
- * times out fetching large images from Supabase Storage ("400 Timeout while
- * downloading …"). Already-inline data URIs pass through untouched.
- */
-async function imageRefToDataUri(ref: ImageRef): Promise<string> {
-  if (ref.source.startsWith("data:")) return ref.source;
-  const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
-  if (!res.ok) {
-    throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  const mime = ref.mime ?? res.headers.get("content-type") ?? "image/png";
-  return `data:${mime};base64,${buf.toString("base64")}`;
-}
-
-/** Map our `ChatMessage` (+ optional images) to the SDK's message shape. */
-async function toChatMessage(m: ChatMessage): Promise<ChatCompletionMessageParam> {
-  if (!m.images?.length) {
-    return { role: m.role, content: m.content };
-  }
-  // Vision parts ride on a user turn (system/assistant stay text-only). Inline
-  // each image as a data URI so OpenAI never reaches back to Supabase.
-  const dataUris = await Promise.all(m.images.map(imageRefToDataUri));
-  const parts: ChatCompletionContentPart[] = [
-    { type: "text", text: m.content },
-    ...dataUris.map(
-      (url): ChatCompletionContentPart => ({
-        type: "image_url",
-        image_url: { url },
-      }),
-    ),
-  ];
-  return { role: "user", content: parts };
-}
-
 /** Fetch an `ImageRef` (URL or data URI) into an Uploadable file for edits. */
 async function imageRefToFile(ref: ImageRef): Promise<File> {
   const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
@@ -145,37 +103,9 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
   return toFile(buf, `ref.${ext}`, { type: mime });
 }
 
-export function createOpenAIProvider(): OpenAIProvider {
+/** Image half of the provider: `generateImage()` only. */
+export function createOpenAIProvider(): Pick<OpenAIProvider, "generateImage"> {
   return {
-    async chat(messages, opts) {
-      const sdkMessages = await Promise.all(messages.map(toChatMessage));
-      const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
-      const t0 = Date.now();
-      log.debug("chat →", {
-        model: OPENAI_CHAT_MODEL,
-        msgs: sdkMessages.length,
-        maxTokens,
-        jsonMode: Boolean(opts?.jsonMode),
-      });
-      const completion = await getClient().chat.completions.create({
-        model: OPENAI_CHAT_MODEL,
-        messages: sdkMessages,
-        max_completion_tokens: maxTokens,
-        ...(opts?.jsonMode
-          ? { response_format: { type: "json_object" as const } }
-          : {}),
-      });
-      const choice = completion.choices[0];
-      const content = choice?.message?.content ?? "";
-      // A truncated response (hit the token ceiling) yields invalid JSON
-      // downstream — surface it as a clear, actionable error here.
-      if (choice?.finish_reason === "length") {
-        log.warn("chat truncated at token ceiling", { maxTokens });
-      }
-      log.debug("chat ✓", { ms: Date.now() - t0, chars: content.length });
-      return content;
-    },
-
     async generateImage(input) {
       const size = input.size ?? DEFAULT_IMAGE_SIZE;
       const mode = input.refs?.length ? "edit" : "generate";

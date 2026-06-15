@@ -19,12 +19,8 @@ import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
 import { eq } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
-import {
-  createOpenAIProvider,
-  type ImageRef,
-  type OpenAIProvider,
-} from "../../providers/openai/index.js";
-import { createVideoProvider } from "../../providers/index.js";
+import type { ImageRef, OpenAIProvider } from "../../providers/openai/index.js";
+import { createAiProvider, createVideoProvider } from "../../providers/index.js";
 import type { VideoProvider } from "../../providers/video.js";
 import { writeStepEvent } from "../events.js";
 import { persistSheet } from "../persist.js";
@@ -74,16 +70,19 @@ type RunRow = typeof schema.runs.$inferSelect;
 const FALLBACK_AD_STYLE = "clean, neutral commercial";
 
 // Shared provider singletons — the adapters are stateless and config-driven.
+// `openai` is a composite: reasoning/vision via OpenRouter (Claude Sonnet 4.6),
+// image generation via the OpenAI adapter (GPT Image 2). Agents call
+// `ctx.openai.chat` / `ctx.openai.generateImage` without knowing either.
 let openai: OpenAIProvider | null = null;
 let video: VideoProvider | null = null;
 const providers = () => {
-  openai ??= createOpenAIProvider();
+  openai ??= createAiProvider();
   video ??= createVideoProvider();
   return { openai, video };
 };
 
-/** Shared OpenAI singleton for callers outside the worker (e.g. the /feedback route). */
-export const getOpenAI = (): OpenAIProvider => (openai ??= createOpenAIProvider());
+/** Shared reasoning+image provider for callers outside the worker (e.g. the /feedback route). */
+export const getOpenAI = (): OpenAIProvider => (openai ??= createAiProvider());
 
 const readRun = (runId: string): Promise<RunRow | undefined> =>
   db.query.runs.findFirst({ where: eq(schema.runs.id, runId) });

@@ -1,20 +1,10 @@
-// OpenAI model ids + defaults, isolated here so they swap without touching
-// provider or agent logic.
+// OpenAI image model id + defaults, isolated here so they swap without touching
+// provider or agent logic. (LLM reasoning lives in providers/openrouter.)
 
 import type { AspectRatio } from "@ugc/shared";
 
-/** LLM used for prompt-building / reasoning (and vision in F5). */
-export const OPENAI_CHAT_MODEL = "gpt-4.1";
-
 /** GPT Image 2. Generate + edit (reference-image) capable. */
 export const OPENAI_IMAGE_MODEL = "gpt-image-2";
-
-/**
- * Default output-token budget for `chat()`. The API's implicit default cap
- * truncated the long storyboard `imagePrompt` mid-string (→ JSON parse failure),
- * so every chat call gets a generous explicit ceiling; callers can override.
- */
-export const DEFAULT_CHAT_MAX_TOKENS = 4096;
 
 /**
  * Composite-sheet pixel size per output aspect ratio. The sheets only GUIDE the

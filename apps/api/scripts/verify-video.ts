@@ -12,8 +12,7 @@
  */
 import { db, schema } from "../src/db/index.js";
 import { eq, asc, desc } from "drizzle-orm";
-import { createOpenAIProvider } from "../src/providers/openai/index.js";
-import { createVideoProvider } from "../src/providers/index.js";
+import { createAiProvider, createVideoProvider } from "../src/providers/index.js";
 import type { SkillContext } from "../src/agents/types.js";
 import type { StoryboardScene } from "../src/agents/image/storyboard/prompt.js";
 import { videoAgent } from "../src/agents/video/index.js";
@@ -64,7 +63,7 @@ async function main() {
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     duration: run.duration,
-    openai: createOpenAIProvider(),
+    openai: createAiProvider(),
     video: createVideoProvider(),
   };
 

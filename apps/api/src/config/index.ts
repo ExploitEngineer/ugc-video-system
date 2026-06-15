@@ -12,7 +12,11 @@ import "dotenv/config";
 import { z } from "zod";
 
 const serverEnvSchema = z.object({
-  // OpenAI — GPT Image 2 + LLM reasoning/critique
+  // OpenRouter — Claude Sonnet 4.6 (anthropic/claude-sonnet-4.6) for LLM
+  // reasoning / prompt-building / vision, via the OpenAI-compatible API.
+  OPENROUTER_API_KEY: z.string().min(1),
+
+  // OpenAI — GPT Image 2 (image generation) only.
   OPENAI_API_KEY: z.string().min(1),
 
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).

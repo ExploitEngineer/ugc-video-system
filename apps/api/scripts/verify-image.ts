@@ -11,8 +11,7 @@
 
 import { eq } from "drizzle-orm";
 import { db, schema } from "../src/db/index.js";
-import { createOpenAIProvider } from "../src/providers/openai/index.js";
-import { createVideoProvider } from "../src/providers/index.js";
+import { createAiProvider, createVideoProvider } from "../src/providers/index.js";
 import type { ImageRef } from "../src/providers/openai/index.js";
 import type { SkillContext } from "../src/agents/types.js";
 import { imageAgent } from "../src/agents/image/index.js";
@@ -52,7 +51,7 @@ async function main() {
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     duration: run.duration,
-    openai: createOpenAIProvider(),
+    openai: createAiProvider(),
     video: createVideoProvider(),
   };
   const userPrompt = run.prompt;
