@@ -1,0 +1,1897 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ad Video Pipeline — I/O Spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ============ theme tokens ============ */
+      :root {
+        --bg: #f5f6f3;
+        --bg-dots: #e2e5e0;
+        --card: #ffffff;
+        --card-soft: #fafbf9;
+        --ink: #181d1c;
+        --ink2: #535b59;
+        --ink3: #8a918e;
+        --line: #e2e5e1;
+        --line2: #c9cec9;
+        --blue: #185fa5;
+        --blue-bg: #eaf2fa;
+        --blue-tx: #0c447c;
+        --teal: #0f6e56;
+        --teal-bg: #e3f3ec;
+        --teal-tx: #085041;
+        --amber: #95590a;
+        --amber-bg: #faf0db;
+        --amber-tx: #633806;
+        --gray: #6b6a66;
+        --gray-bg: #eeeee8;
+        --gray-tx: #3b3b38;
+        --purple: #5348b5;
+        --purple-bg: #eeedfb;
+        --purple-tx: #3c3489;
+        --coral: #97391b;
+        --coral-bg: #faede6;
+        --coral-tx: #712b13;
+        --new: #a32d2d;
+        --new-bg: #fbeaea;
+        --focus: #5348b5;
+        --shadow:
+          0 1px 2px rgba(20, 25, 24, 0.06), 0 4px 14px rgba(20, 25, 24, 0.04);
+        --shadow-pop: 0 6px 24px rgba(20, 25, 24, 0.1);
+        --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+        --disp: "Space Grotesk", system-ui, sans-serif;
+      }
+      html[data-theme="dark"] {
+        --bg: #101415;
+        --bg-dots: #1b2122;
+        --card: #191f21;
+        --card-soft: #161c1e;
+        --ink: #e9ece8;
+        --ink2: #aab2ae;
+        --ink3: #6f7773;
+        --line: #262d2e;
+        --line2: #3a433f;
+        --blue: #4d8fcb;
+        --blue-bg: #152939;
+        --blue-tx: #abcff0;
+        --teal: #34a381;
+        --teal-bg: #102a22;
+        --teal-tx: #9cdec5;
+        --amber: #c9892b;
+        --amber-bg: #2f2412;
+        --amber-tx: #f2c684;
+        --gray: #7b847f;
+        --gray-bg: #21262a;
+        --gray-tx: #c9cec9;
+        --purple: #867ee3;
+        --purple-bg: #222041;
+        --purple-tx: #c8c3f5;
+        --coral: #d8703f;
+        --coral-bg: #301b11;
+        --coral-tx: #f2b49b;
+        --new: #e25656;
+        --new-bg: #331616;
+        --focus: #867ee3;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.25);
+        --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      /* ============ base ============ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 13.5px;
+        line-height: 1.6;
+        background-image: radial-gradient(var(--bg-dots) 1px, transparent 1px);
+        background-size: 26px 26px;
+        transition:
+          background-color 0.25s,
+          color 0.25s;
+      }
+      ::selection {
+        background: var(--purple-bg);
+        color: var(--ink);
+      }
+      button {
+        font-family: var(--mono);
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+        border-radius: 6px;
+      }
+
+      /* ============ header ============ */
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        background: var(--bg);
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--line);
+        padding: 12px 26px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .brand h1 {
+        font-family: var(--disp);
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .brand .ver {
+        font-size: 10.5px;
+        color: var(--ink3);
+        letter-spacing: 0.08em;
+      }
+      .dirty-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--amber);
+        display: none;
+        align-self: center;
+      }
+      body.dirty .dirty-dot {
+        display: block;
+      }
+      .search {
+        position: relative;
+        flex: 1;
+        min-width: 170px;
+        max-width: 320px;
+      }
+      .search input {
+        width: 100%;
+        background: var(--card);
+        border: 1px solid var(--line2);
+        border-radius: 9px;
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 12.5px;
+        padding: 7px 30px 7px 32px;
+        transition: border-color 0.15s;
+      }
+      .search input::placeholder {
+        color: var(--ink3);
+      }
+      .search input:focus {
+        outline: none;
+        border-color: var(--focus);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+      }
+      .search .ic {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--ink3);
+        pointer-events: none;
+      }
+      .search .clr {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: none;
+        background: none;
+        color: var(--ink3);
+        cursor: pointer;
+        font-size: 14px;
+        padding: 2px 5px;
+        display: none;
+        border-radius: 6px;
+      }
+      .search.has .clr {
+        display: block;
+      }
+      .toolbar {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+        margin-left: auto;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 12px;
+        border-radius: 9px;
+        cursor: pointer;
+        border: 1px solid var(--line2);
+        background: var(--card);
+        color: var(--ink2);
+        transition: 0.15s;
+      }
+      .btn:hover {
+        border-color: var(--ink3);
+        color: var(--ink);
+      }
+      .btn.primary {
+        background: var(--ink);
+        color: var(--bg);
+        border-color: var(--ink);
+      }
+      .btn.primary:hover {
+        opacity: 0.88;
+      }
+      .btn svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .btn.icon-only {
+        padding: 7px 9px;
+      }
+
+      /* ============ legend ============ */
+      .legend {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+        padding: 18px 26px 2px;
+        max-width: 1060px;
+        margin: 0 auto;
+      }
+      .chip {
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 4px 11px;
+        border-radius: 99px;
+        border: 1px solid;
+        letter-spacing: 0.02em;
+      }
+      .chip.blue {
+        background: var(--blue-bg);
+        color: var(--blue-tx);
+        border-color: var(--blue);
+      }
+      .chip.teal {
+        background: var(--teal-bg);
+        color: var(--teal-tx);
+        border-color: var(--teal);
+      }
+      .chip.amber {
+        background: var(--amber-bg);
+        color: var(--amber-tx);
+        border-color: var(--amber);
+      }
+      .chip.gray {
+        background: var(--gray-bg);
+        color: var(--gray-tx);
+        border-color: var(--gray);
+      }
+      .chip.purple {
+        background: var(--purple-bg);
+        color: var(--purple-tx);
+        border-color: var(--purple);
+      }
+      .chip.coral {
+        background: var(--coral-bg);
+        color: var(--coral-tx);
+        border-color: var(--coral);
+      }
+      .chip.new {
+        background: var(--new-bg);
+        color: var(--new);
+        border-color: var(--new);
+      }
+
+      /* ============ pipeline ============ */
+      main {
+        max-width: 1060px;
+        margin: 0 auto;
+        padding: 20px 26px 80px;
+        position: relative;
+      }
+      .spine {
+        position: absolute;
+        left: calc(26px + 33px);
+        top: 10px;
+        bottom: 30px;
+        width: 2px;
+        background: repeating-linear-gradient(
+          to bottom,
+          var(--line2) 0 7px,
+          transparent 7px 13px
+        );
+        z-index: 0;
+      }
+      .stage {
+        position: relative;
+        padding-left: 76px;
+        margin-bottom: 6px;
+        z-index: 1;
+      }
+      .stage .num {
+        position: absolute;
+        left: 16px;
+        top: 10px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--card);
+        border: 2px solid var(--ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--disp);
+        font-weight: 700;
+        font-size: 13px;
+        z-index: 2;
+        box-shadow: var(--shadow);
+      }
+      .stage.gatey .num {
+        border-color: var(--purple);
+        color: var(--purple-tx);
+      }
+      .stage.endy .num {
+        border-color: var(--coral);
+        color: var(--coral-tx);
+      }
+      .phase-label {
+        font-family: var(--disp);
+        font-size: 11.5px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        padding-left: 76px;
+        margin: 18px 0 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .phase-label::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--line);
+      }
+      .par-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .flow {
+        display: flex;
+        justify-content: center;
+        padding: 6px 0 6px 76px;
+        color: var(--ink3);
+      }
+      .flow svg {
+        height: 36px;
+        display: block;
+      }
+      @media (max-width: 860px) {
+        .par-grid {
+          grid-template-columns: 1fr;
+        }
+        .stage,
+        .phase-label,
+        .flow {
+          padding-left: 54px;
+        }
+        .stage .num {
+          left: 2px;
+          width: 32px;
+          height: 32px;
+          font-size: 12px;
+        }
+        .spine {
+          left: calc(26px + 17px);
+        }
+      }
+
+      /* ============ cards ============ */
+      .card {
+        background: var(--card);
+        border: 1.5px solid var(--line2);
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        transition:
+          box-shadow 0.2s,
+          border-color 0.2s;
+      }
+      .card:hover {
+        box-shadow: var(--shadow-pop);
+      }
+      .card[data-c="blue"] {
+        border-color: var(--blue);
+      }
+      .card[data-c="teal"] {
+        border-color: var(--teal);
+      }
+      .card[data-c="amber"] {
+        border-color: var(--amber);
+      }
+      .card[data-c="gray"] {
+        border-color: var(--gray);
+      }
+      .card[data-c="purple"] {
+        border-color: var(--purple);
+      }
+      .card[data-c="coral"] {
+        border-color: var(--coral);
+      }
+      .card-h {
+        padding: 13px 16px 11px;
+        cursor: pointer;
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        user-select: none;
+      }
+      .card[data-c="blue"] .card-h {
+        background: var(--blue-bg);
+      }
+      .card[data-c="teal"] .card-h {
+        background: var(--teal-bg);
+      }
+      .card[data-c="amber"] .card-h {
+        background: var(--amber-bg);
+      }
+      .card[data-c="gray"] .card-h {
+        background: var(--gray-bg);
+      }
+      .card[data-c="purple"] .card-h {
+        background: var(--purple-bg);
+      }
+      .card[data-c="coral"] .card-h {
+        background: var(--coral-bg);
+      }
+      .card-h .tt {
+        flex: 1;
+        min-width: 0;
+      }
+      .card-h h2 {
+        font-family: var(--disp);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        border-radius: 5px;
+        padding: 1px 4px;
+        margin: -1px -4px;
+      }
+      .card[data-c="blue"] h2 {
+        color: var(--blue-tx);
+      }
+      .card[data-c="teal"] h2 {
+        color: var(--teal-tx);
+      }
+      .card[data-c="amber"] h2 {
+        color: var(--amber-tx);
+      }
+      .card[data-c="gray"] h2 {
+        color: var(--gray-tx);
+      }
+      .card[data-c="purple"] h2 {
+        color: var(--purple-tx);
+      }
+      .card[data-c="coral"] h2 {
+        color: var(--coral-tx);
+      }
+      .card-h .sub {
+        font-size: 11px;
+        margin-top: 3px;
+        color: var(--ink2);
+        border-radius: 5px;
+        padding: 1px 4px;
+        margin-left: -4px;
+      }
+      .card-h h2:hover,
+      .card-h .sub:hover {
+        background: color-mix(in srgb, var(--card) 55%, transparent);
+      }
+      .tag {
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        padding: 3px 9px;
+        border-radius: 99px;
+        white-space: nowrap;
+        align-self: center;
+        border: 1px solid;
+        flex-shrink: 0;
+      }
+      .tag.blue {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: var(--card);
+      }
+      .tag.teal {
+        background: var(--teal);
+        border-color: var(--teal);
+        color: var(--card);
+      }
+      .tag.amber {
+        background: var(--amber);
+        border-color: var(--amber);
+        color: var(--card);
+      }
+      .tag.gray {
+        background: var(--gray);
+        border-color: var(--gray);
+        color: var(--card);
+      }
+      .tag.purple {
+        background: var(--purple);
+        border-color: var(--purple);
+        color: var(--card);
+      }
+      .tag.coral {
+        background: var(--coral);
+        border-color: var(--coral);
+        color: var(--card);
+      }
+      .caret {
+        align-self: center;
+        color: var(--ink3);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+      }
+      .caret svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        display: block;
+      }
+      .card.closed .caret {
+        transform: rotate(-90deg);
+      }
+      .card-b {
+        padding: 6px 16px 14px;
+        border-top: 1px solid var(--line);
+      }
+      .card.closed .card-b {
+        display: none;
+      }
+
+      /* ============ rows ============ */
+      .sec {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        margin: 13px 0 4px;
+      }
+      .sec .secname {
+        outline: none;
+        border-radius: 4px;
+        padding: 1px 5px;
+        margin-left: -5px;
+        border: 1px dashed transparent;
+      }
+      .sec .secname:hover {
+        border-color: var(--line2);
+      }
+      .sec .secname:focus {
+        border-color: var(--focus);
+        background: var(--card-soft);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        padding: 3px 2px 3px 5px;
+        border-radius: 8px;
+        position: relative;
+      }
+      .row:hover {
+        background: var(--card-soft);
+      }
+      .row .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--ink3);
+        margin-top: 9px;
+        flex-shrink: 0;
+      }
+      .row.is-new .dot {
+        background: var(--new);
+      }
+      .field {
+        flex: 1;
+        outline: none;
+        border-radius: 6px;
+        padding: 2px 7px;
+        min-height: 23px;
+        border: 1px dashed transparent;
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+        word-break: break-word;
+        color: var(--ink2);
+      }
+      .field:hover {
+        border-color: var(--line2);
+      }
+      .field:focus {
+        border-style: solid;
+        border-color: var(--focus);
+        background: var(--card-soft);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 15%, transparent);
+      }
+      .row.is-new .field {
+        color: var(--new);
+        font-weight: 600;
+      }
+      .newpill {
+        font-size: 8.5px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        border-radius: 99px;
+        padding: 2px 8px;
+        margin-top: 4px;
+        cursor: pointer;
+        flex-shrink: 0;
+        user-select: none;
+        border: 1px solid var(--line2);
+        color: var(--ink3);
+        background: transparent;
+        transition: 0.15s;
+      }
+      .row.is-new .newpill {
+        background: var(--new-bg);
+        color: var(--new);
+        border-color: var(--new);
+      }
+      .newpill:hover {
+        border-color: var(--new);
+        color: var(--new);
+      }
+      .ctl {
+        display: flex;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      .row:hover .ctl,
+      .row:focus-within .ctl {
+        opacity: 1;
+      }
+      .ictl {
+        width: 23px;
+        height: 23px;
+        border-radius: 6px;
+        border: 1px solid var(--line2);
+        background: var(--card);
+        color: var(--ink3);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: 0.12s;
+        margin-top: 1px;
+      }
+      .ictl svg {
+        width: 11px;
+        height: 11px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .ictl:hover {
+        color: var(--ink);
+        border-color: var(--ink3);
+      }
+      .ictl.del:hover {
+        color: var(--new);
+        border-color: var(--new);
+      }
+      .addrow {
+        font-size: 10.5px;
+        color: var(--ink3);
+        background: none;
+        border: 1px dashed var(--line2);
+        border-radius: 8px;
+        padding: 4px 12px;
+        cursor: pointer;
+        margin-top: 7px;
+        transition: 0.15s;
+      }
+      .addrow:hover {
+        color: var(--ink);
+        border-color: var(--ink3);
+      }
+
+      /* search dimming */
+      body.searching .row {
+        display: none;
+      }
+      body.searching .row.hit {
+        display: flex;
+      }
+      body.searching .sec.nohits,
+      body.searching .addrow {
+        display: none;
+      }
+      body.searching .card.nohits {
+        opacity: 0.32;
+      }
+      .match-count {
+        font-size: 11px;
+        color: var(--ink3);
+        padding: 0 26px;
+        max-width: 1060px;
+        margin: 8px auto -6px;
+        display: none;
+      }
+      body.searching .match-count {
+        display: block;
+      }
+
+      footer {
+        max-width: 1060px;
+        margin: 0 auto;
+        padding: 0 26px 56px;
+        color: var(--ink3);
+        font-size: 11px;
+        line-height: 1.7;
+      }
+      .toast {
+        position: fixed;
+        bottom: 22px;
+        left: 50%;
+        transform: translateX(-50%) translateY(80px);
+        background: var(--ink);
+        color: var(--bg);
+        padding: 10px 20px;
+        border-radius: 10px;
+        font-size: 12.5px;
+        opacity: 0;
+        transition: 0.25s;
+        z-index: 99;
+        pointer-events: none;
+        box-shadow: var(--shadow-pop);
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media print {
+        header,
+        .ctl,
+        .addrow,
+        .match-count {
+          display: none !important;
+        }
+        body {
+          background: #fff !important;
+          color: #111 !important;
+        }
+        .card {
+          break-inside: avoid;
+          box-shadow: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+          animation: none !important;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <h1>Ad Video Pipeline</h1>
+        <span class="ver">I/O SPEC · multi-duration + editor</span>
+      </div>
+      <span class="dirty-dot" title="Unsaved edits"></span>
+      <div class="search" id="searchWrap">
+        <span class="ic"
+          ><svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" /></svg
+        ></span>
+        <input
+          id="searchBox"
+          type="search"
+          placeholder="Filter fields… e.g. visual_style"
+          aria-label="Filter fields"
+        />
+        <button
+          class="clr"
+          id="searchClr"
+          title="Clear"
+          aria-label="Clear search"
+        >
+          ×
+        </button>
+      </div>
+      <div class="toolbar">
+        <button
+          class="btn icon-only"
+          id="btnTheme"
+          title="Toggle dark / light"
+          aria-label="Toggle theme"
+        ></button>
+        <button class="btn" id="btnFold" data-state="open"></button>
+        <button class="btn" id="btnReset">
+          <svg viewBox="0 0 24 24">
+            <path d="M3 12a9 9 0 1 0 3-6.7" />
+            <path d="M3 4v5h5" /></svg
+          >Reset
+        </button>
+        <button class="btn" id="btnJson">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3v12" />
+            <path d="m7 11 5 5 5-5" />
+            <path d="M5 21h14" /></svg
+          >JSON
+        </button>
+        <button class="btn" id="btnMd">
+          <svg viewBox="0 0 24 24">
+            <rect x="8" y="8" width="13" height="13" rx="2" />
+            <path
+              d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
+            /></svg
+          >Markdown
+        </button>
+        <button class="btn primary" id="btnPrint">
+          <svg viewBox="0 0 24 24">
+            <path d="M6 9V3h12v6" />
+            <rect x="3" y="9" width="18" height="8" rx="2" />
+            <path d="M6 14h12v7H6z" /></svg
+          >Print / PDF
+        </button>
+      </div>
+    </header>
+
+    <div class="legend">
+      <span class="chip blue">gpt-4.1 · reason / vision</span>
+      <span class="chip teal">gpt-image-2 · images</span>
+      <span class="chip amber">Seedance 2.0 / BytePlus · video</span>
+      <span class="chip gray">ffmpeg · merge / extract, no AI</span>
+      <span class="chip purple">CE.SDK · client editor</span>
+      <span class="chip purple">gate</span>
+      <span class="chip coral">endpoint</span>
+      <span class="chip new">NEW = recent build change</span>
+    </div>
+
+    <div class="match-count" id="matchCount"></div>
+    <main id="app"></main>
+
+    <footer>
+      Click any title, subtitle, section name or field to edit it in place ·
+      hover a row for move / add / delete · click a row's NEW pill to toggle
+      change-tagging.<br />
+      Edits live in this page until exported — use JSON / Markdown / Print
+      before closing. Duration chosen per run (15s single clip · 30/45/60s
+      merge) · state machine is DB-authoritative and idempotent on resume ·
+      editor is post-completion, non-destructive.
+    </footer>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script>
+      "use strict";
+      /* ================= data ================= */
+      const SPEC_DEFAULT = {
+        title: "UGC / Inspirational Ad Pipeline",
+        stages: [
+          {
+            n: "IN",
+            color: "coral",
+            kind: "endy",
+            title: "INPUT · POST /runs",
+            sub: "multipart create-run request → inserts a queued run + uploads",
+            tag: "ENDPOINT",
+            tagc: "coral",
+            secs: [
+              {
+                name: "REQUEST (multipart/form-data)",
+                rows: [
+                  {
+                    t: "productImage (required) · personImage (optional) — PNG / JPEG / WebP ≤ 10MB",
+                  },
+                  {
+                    t: "prompt (1–2000) · mode (automatic | confirm) · aspectRatio (16:9 | 9:16)",
+                  },
+                  {
+                    t: "duration (15s default | 30s | 45s | 60s) · criticEnabled (default false) · hasPersonImage",
+                    isNew: true,
+                  },
+                ],
+              },
+              {
+                name: "WRITES",
+                rows: [
+                  {
+                    t: "inserts project + runs row (status = queued); persists product_upload / person_upload assets → 201 RunDetail",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "1",
+            color: "blue",
+            title: "interpretAdStyle",
+            sub: "gpt-4.1 · chat (JSON) · first tick of a queued run",
+            tag: "gpt-4.1",
+            tagc: "blue",
+            secs: [
+              { name: "IN", rows: [{ t: "userPrompt" }] },
+              {
+                name: "OUT → runs.ad_style / runs.ad_type",
+                rows: [
+                  {
+                    t: "adStyle (text) · adType: ugc | inspirational — then status → running, current_step = null",
+                  },
+                ],
+              },
+            ],
+          },
+
+          { phase: "Reference phase — runs concurrently (Promise.allSettled)" },
+
+          {
+            parallel: [
+              {
+                n: "2",
+                color: "blue",
+                title: "describeProduct",
+                sub: "gpt-4.1 · chat · VISION · best-effort (non-fatal)",
+                tag: "gpt-4.1",
+                tagc: "blue",
+                secs: [
+                  {
+                    name: "IN",
+                    rows: [{ t: "productUpload (vision) · userPrompt" }],
+                  },
+                  {
+                    name: "OUT → runs.product_brief / runs.product_use",
+                    rows: [
+                      {
+                        t: "productBrief (category / materials / colors / markings)",
+                      },
+                      {
+                        t: "productUse { accessVerb, changedState, persistenceCue, functionSignal, useVerb }",
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                n: "",
+                color: "blue",
+                title: "planPersonBrief / derivePersonBrief",
+                sub: "gpt-4.1 · chat · VISION",
+                tag: "gpt-4.1",
+                tagc: "blue",
+                secs: [
+                  {
+                    name: "IN",
+                    rows: [
+                      {
+                        t: "product-only: vision over productUpload → invent presenter brief",
+                      },
+                      {
+                        t: "person uploaded: vision over personUpload → identity anchor brief",
+                      },
+                    ],
+                  },
+                  {
+                    name: "OUT → runs.person_brief",
+                    rows: [
+                      { t: "personBrief (demographics / wardrobe / palette)" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            parallel: [
+              {
+                n: "3",
+                color: "teal",
+                title: "productSheetBuilder",
+                sub: "gpt-4.1 plan → gpt-image-2 · images.edit",
+                tag: "gpt-image-2",
+                tagc: "teal",
+                secs: [
+                  {
+                    name: "IN (image ref)",
+                    rows: [{ t: "productUpload · userPrompt · aspectRatio" }],
+                  },
+                  {
+                    name: "OUT → assets(product_sheet) + product_reference_sheets",
+                    rows: [
+                      {
+                        t: "ProductReferenceSheet — 2×2 views (front / ¾ / side / rear) PNG @ 2K",
+                      },
+                      { t: "row { views, promptUsed, status = draft }" },
+                    ],
+                  },
+                ],
+              },
+              {
+                n: "",
+                color: "teal",
+                title: "generatePersonImage",
+                sub: "gpt-image-2 · generate (invent) | edit (from-upload / edit-revise)",
+                tag: "gpt-image-2",
+                tagc: "teal",
+                secs: [
+                  {
+                    name: "IN — product image NEVER reaches this skill",
+                    rows: [
+                      {
+                        t: "personBrief · userPrompt · aspectRatio · baseRef? (upload OR prior person sheet)",
+                      },
+                    ],
+                  },
+                  {
+                    name: "OUT → assets(person_sheet) + person_reference_sheets",
+                    rows: [
+                      {
+                        t: "PersonReferenceSheet — 2×2 person views PNG (encodes uploaded face if any)",
+                      },
+                      {
+                        t: "row { views, personDetails, promptUsed, status = draft }",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "G1",
+            color: "purple",
+            kind: "gatey",
+            title: "GATE · reference (confirm mode only)",
+            sub: "status = awaiting_confirmation → POST /runs/:id/feedback → running | regenerating",
+            tag: "GATE",
+            tagc: "purple",
+            secs: [
+              {
+                name: "BEHAVIOR",
+                rows: [
+                  {
+                    t: "blank feedback = continue · text = approve | revise (classified)",
+                  },
+                  {
+                    t: "revise regenerates the PERSON sheet only (product sheet hidden); loops until approve",
+                  },
+                ],
+              },
+              {
+                name: "PARKED · Critic (gpt-4.1 vision)",
+                rows: [
+                  {
+                    t: "product_inspection / storyboard_inspection steps exist but are SKIPPED — runs.critic_enabled defaults false",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            phase:
+              "BRANCH · chosen by duration — 15s = single clip · 30/45/60s = N segments + merge",
+          },
+
+          { phase: "15s · single clip (default path)" },
+
+          {
+            n: "5a",
+            color: "teal",
+            title: "storyboard",
+            sub: "gpt-4.1 plan → gpt-image-2 · images.edit · 15s only",
+            tag: "gpt-image-2",
+            tagc: "teal",
+            secs: [
+              {
+                name: "IN",
+                rows: [
+                  {
+                    t: "productSheetRef · personSheetRef? · userPrompt · directive?",
+                  },
+                ],
+              },
+              {
+                name: "OUT → assets(storyboard_sheet) + storyboard_sheets",
+                rows: [
+                  {
+                    t: "labelled 2×2 keyframe PNG — badges 01–04 (kept out of frame downstream)",
+                  },
+                  {
+                    t: "scenes[4] { index, cameraAngle, actionMovement, sceneDescription, panelCaption, transcript, adStyle } · segment_index = null",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "G2",
+            color: "purple",
+            kind: "gatey",
+            title: "GATE · storyboard (confirm mode only)",
+            sub: "review sheet → approve | revise · shared by both paths",
+            tag: "GATE",
+            tagc: "purple",
+            secs: [
+              {
+                name: "BEHAVIOR",
+                rows: [
+                  {
+                    t: '15s: approve | revise · multi: parseTargetSegments "fix storyboard 3" → regen that segment only; newest-per-index wins',
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "6a",
+            color: "amber",
+            title: "video",
+            sub: "gpt-4.1 buildVideoPrompt → BytePlus submitVideo / pollVideo · Seedance 2.0 · 15s only",
+            tag: "SEEDANCE 2.0",
+            tagc: "amber",
+            secs: [
+              {
+                name: "IMAGES — content[] (text + reference images)",
+                rows: [
+                  { t: "product sheet — plain reference_image (product identity lock)" },
+                  {
+                    t: "storyboard sheet — shot composition + timeline (asset:// when person present)",
+                  },
+                  {
+                    t: "person face asset — asset://<id> (V4-signed) when hasPerson",
+                  },
+                ],
+              },
+              {
+                name: "TEXT",
+                rows: [
+                  {
+                    t: "scenes[] (sceneDescription + transcript) · userPrompt · characterAnchor?",
+                  },
+                ],
+              },
+              {
+                name: "PARAMS",
+                rows: [
+                  {
+                    t: "duration = 15 · resolution = 1080p (env) · ratio = aspectRatio · generate_audio = true · watermark = false",
+                  },
+                ],
+              },
+              {
+                name: "OUT → assets(final_video) + videos (segment_index = null)",
+                rows: [
+                  {
+                    t: "MP4 ~15s with native synchronized audio · hasAudio = true · providerMeta.provider = byteplus (poll → video_url) — DONE",
+                  },
+                ],
+              },
+            ],
+          },
+
+          { phase: "30 · 45 · 60s · N segments → merge (N = 2 / 3 / 4)" },
+
+          {
+            n: "4",
+            color: "blue",
+            title: "narrativeOutline",
+            sub: "gpt-4.1 · chat (JSON) · multi-segment only",
+            tag: "gpt-4.1",
+            tagc: "blue",
+            secs: [
+              {
+                name: "IN",
+                rows: [
+                  {
+                    t: "adStyle · adType · productBrief · productUse? · personBrief · userPrompt",
+                  },
+                ],
+              },
+              {
+                name: "OUT → runs.narrative_outline + runs.visual_style",
+                rows: [
+                  {
+                    t: "segments { index, beat, summary } — the arc: hook → in-use → benefit → close",
+                  },
+                  {
+                    t: "visualStyle — one locked look (grade · film/lens · lighting · palette · time-of-day arc)",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "5b",
+            color: "teal",
+            title: "segment_storyboard · generateMaster",
+            sub: "ONE 4×N-panel master sheet → crop into N row strips · gpt-4.1 plan → gpt-image-2",
+            tag: "gpt-image-2",
+            tagc: "teal",
+            secs: [
+              {
+                name: "IN",
+                rows: [
+                  {
+                    t: "productSheetRef · personSheetRef? · userPrompt · segmentCount (N) · directive?",
+                  },
+                  {
+                    t: "visual_style injected VERBATIM (same string in storyboard + video prompts)",
+                  },
+                ],
+              },
+              {
+                name: "OUT → assets(storyboard_master) + N×assets(storyboard_sheet)",
+                rows: [
+                  {
+                    t: "single 4×N master PNG — anti-repetition rule kills duplicate panels",
+                    isNew: true,
+                  },
+                  {
+                    t: "sharp cropPanelRows (lib/image/crop.ts) → N row strips → storyboard_sheets(segment_index 0..N-1)",
+                    isNew: true,
+                  },
+                  {
+                    t: "each strip carries its 4 scenes { index, cameraAngle, actionMovement, sceneDescription, panelCaption, transcript, adStyle }",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "G2",
+            color: "purple",
+            kind: "gatey",
+            title: "GATE · storyboard (confirm mode only)",
+            sub: "review master / strips → approve | targeted revise",
+            tag: "GATE",
+            tagc: "purple",
+            secs: [
+              {
+                name: "BEHAVIOR",
+                rows: [
+                  {
+                    t: 'parseTargetSegments: "fix storyboard 3" → regenerate only that segment; newest-per-index wins',
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "6b",
+            color: "amber",
+            title: "segment_video ×N",
+            sub: "parallel · cap = SEGMENT_VIDEO_CONCURRENCY (4) · idempotent — gpt-4.1 buildVideoPrompt → BytePlus · Seedance 2.0",
+            tag: "SEEDANCE 2.0",
+            tagc: "amber",
+            secs: [
+              {
+                name: "IMAGES — per segment i",
+                rows: [
+                  {
+                    t: "this segment's storyboard crop — shot composition + timeline",
+                  },
+                  {
+                    t: "SHARED product sheet (same ref in every segment → identity lock)",
+                  },
+                  {
+                    t: "SHARED person face asset — asset://<id> in every segment when hasPerson",
+                  },
+                ],
+              },
+              {
+                name: "TEXT",
+                rows: [
+                  {
+                    t: "scenes[] (sceneDescription + transcript) · userPrompt · segmentIndex · segmentCount",
+                  },
+                  {
+                    t: "visual_style injected VERBATIM (same look string as the master)",
+                  },
+                ],
+              },
+              {
+                name: "PARAMS",
+                rows: [
+                  {
+                    t: "duration = 15 · resolution = 1080p (env) · ratio = aspectRatio · generate_audio = true · watermark = false",
+                  },
+                ],
+              },
+              {
+                name: "OUT → videos(segment_index = i) + assets(segment_video)",
+                rows: [
+                  {
+                    t: "N × MP4 ~15s with native synchronized audio (poll until succeeded → video_url)",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "7",
+            color: "gray",
+            title: "mergeSegments",
+            sub: "ffmpeg-static via spawn · NO AI · 3-pass · concurrency = 1 · retry once on signal/timeout",
+            tag: "FFMPEG",
+            tagc: "gray",
+            secs: [
+              {
+                name: "IN",
+                rows: [
+                  {
+                    t: "the N segment_video clips, loaded in segment_index order",
+                  },
+                ],
+              },
+              {
+                name: "PROCESS (3-pass)",
+                rows: [
+                  {
+                    t: "A — per-segment normalize: scale/pad to target · fps · eq grade · loudnorm I=-16:TP=-1.5:LRA=11 · libx264 CRF20 · threads 2",
+                  },
+                  {
+                    t: "B — concat demuxer · stream-copy (-c copy, inputs now uniform)",
+                  },
+                  {
+                    t: "C — optional music bed if MUSIC_BED_URL set — sidechain-ducked under native audio",
+                  },
+                ],
+              },
+              {
+                name: "OUT → assets(final_video) + videos (segment_index = null)",
+                rows: [
+                  {
+                    t: "one ~N×15s MP4 — durationSec = N*15 · providerMeta.merged = true, segmentCount = N · same surface the 15s clip uses",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "OUT",
+            color: "coral",
+            kind: "endy",
+            title: "OUTPUT · GET /runs/:id/artifacts",
+            sub: "both paths converge here · run status = completed",
+            tag: "ENDPOINT",
+            tagc: "coral",
+            secs: [
+              {
+                name: "RESULT",
+                rows: [
+                  {
+                    t: "productSheet · personSheet · storyboardSheet (15s) · storyboardMaster (multi)",
+                  },
+                  {
+                    t: "finalVideo · video { durationSec, hasAudio } · segmentStoryboards[] · segmentVideos[] (multi)",
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            phase:
+              "POST-COMPLETION · video editor — NOT a pipeline step (worker never touches a completed run)",
+          },
+
+          {
+            n: "ED",
+            color: "purple",
+            title: "Video editor · /studio/[runId]/edit",
+            sub: "img.ly CE.SDK · client-side WASM · non-destructive (original final_video kept)",
+            tag: "CE.SDK",
+            tagc: "purple",
+            secs: [
+              {
+                name: "LOADS",
+                rows: [
+                  {
+                    t: "final_video (+ latest editor_scene when resuming a prior edit)",
+                    isNew: true,
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "",
+            color: "gray",
+            title: "GET /runs/:id/audio-track",
+            sub: "ffmpeg -vn extract · lazy + idempotent · needs status = completed",
+            tag: "FFMPEG",
+            tagc: "gray",
+            secs: [
+              {
+                name: "BEHAVIOR",
+                rows: [
+                  {
+                    t: "returns existing final_audio asset, else extracts it from final_video once → assets(final_audio) (AAC m4a)",
+                    isNew: true,
+                  },
+                  {
+                    t: "editor mounts it as a separate editable timeline lane; video clip's baked-in audio muted (avoids double audio)",
+                    isNew: true,
+                  },
+                ],
+              },
+            ],
+          },
+
+          {
+            n: "",
+            color: "coral",
+            kind: "endy",
+            title: "POST /runs/:id/edited-video",
+            sub: "save-back · multipart · needs status = completed",
+            tag: "ENDPOINT",
+            tagc: "coral",
+            secs: [
+              {
+                name: "REQUEST → assets(edited_video) + assets(editor_scene)",
+                rows: [
+                  {
+                    t: "video (mp4 ≤ 200MB, required) → edited_video · scene (json, optional) → editor_scene",
+                    isNew: true,
+                  },
+                ],
+              },
+            ],
+          },
+
+          { phase: "RUN CONTROL · API (polled by the studio)" },
+
+          {
+            n: "API",
+            color: "coral",
+            kind: "endy",
+            title: "Lifecycle endpoints",
+            sub: "list · poll · gate · cancel · delete",
+            tag: "ENDPOINT",
+            tagc: "coral",
+            secs: [
+              {
+                name: "READ",
+                rows: [
+                  { t: "GET /runs — list runs, newest first" },
+                  {
+                    t: "GET /runs/:id — poll status + artifacts + audit trail (step_events)",
+                  },
+                ],
+              },
+              {
+                name: "MUTATE",
+                rows: [
+                  {
+                    t: "POST /runs/:id/feedback — gate action (confirm mode): blank = continue, text = approve | revise",
+                  },
+                  {
+                    t: "POST /runs/:id/cancel — terminate (idempotent) → status = failed, errorCode = RUN_CANCELLED",
+                  },
+                  {
+                    t: "DELETE /runs/:id — purge run + owned assets/events (storage best-effort + FK cascade)",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      /* ================= state ================= */
+      const deepClone = (o) => JSON.parse(JSON.stringify(o));
+      let spec = deepClone(SPEC_DEFAULT);
+      const closedSet = new Set();
+      const app = document.getElementById("app");
+      const toastEl = document.getElementById("toast");
+      const esc = (s) =>
+        String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+      const ICONS = {
+        up: '<svg viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
+        down: '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>',
+        add: '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
+        del: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+        caret: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+        sun: '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+        moon: '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+        fold: '<svg viewBox="0 0 24 24"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></svg>',
+        unfold:
+          '<svg viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>',
+      };
+
+      function arrowHTML() {
+        return `<div class="flow" aria-hidden="true"><svg viewBox="0 0 20 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="10" y1="0" x2="10" y2="28"/><path d="M4 24 L10 32 L16 24" fill="none"/></svg></div>`;
+      }
+
+      function cardHTML(c, path) {
+        let body = "";
+        c.secs.forEach((s, si) => {
+          body += `<div class="sec"><span class="secname" contenteditable="true" spellcheck="false" data-path="${path}.secs.${si}.name">${esc(s.name)}</span></div>`;
+          s.rows.forEach((r, ri) => {
+            body += `<div class="row${r.isNew ? " is-new" : ""}" data-path="${path}.secs.${si}.rows.${ri}">
+        <span class="dot"></span>
+        <div class="field" contenteditable="true" spellcheck="false" data-path="${path}.secs.${si}.rows.${ri}.t">${esc(r.t)}</div>
+        <span class="newpill" role="button" tabindex="0" title="Toggle NEW tag">NEW</span>
+        <div class="ctl">
+          <button class="ictl" data-act="up" title="Move up" aria-label="Move up">${ICONS.up}</button>
+          <button class="ictl" data-act="down" title="Move down" aria-label="Move down">${ICONS.down}</button>
+          <button class="ictl" data-act="add" title="Add row below" aria-label="Add row below">${ICONS.add}</button>
+          <button class="ictl del" data-act="del" title="Delete row" aria-label="Delete row">${ICONS.del}</button>
+        </div></div>`;
+          });
+          body += `<button class="addrow" data-path="${path}.secs.${si}">+ add field</button>`;
+        });
+        const closed = closedSet.has(path) ? " closed" : "";
+        return `<article class="card${closed}" data-c="${c.color}" data-path="${path}">
+    <div class="card-h" title="Collapse / expand">
+      <div class="tt">
+        <h2 contenteditable="true" spellcheck="false" data-path="${path}.title">${esc(c.title)}</h2>
+        <div class="sub" contenteditable="true" spellcheck="false" data-path="${path}.sub">${esc(c.sub)}</div>
+      </div>
+      <span class="tag ${c.tagc}">${esc(c.tag)}</span>
+      <span class="caret">${ICONS.caret}</span>
+    </div>
+    <div class="card-b">${body}</div>
+  </article>`;
+      }
+
+      function render() {
+        let html = '<div class="spine" aria-hidden="true"></div>';
+        spec.stages.forEach((st, i) => {
+          const last = i === spec.stages.length - 1;
+          if (st.phase) {
+            html += `<div class="phase-label"><span contenteditable="true" spellcheck="false" data-path="stages.${i}.phase">${esc(st.phase)}</span></div>`;
+            return;
+          }
+          if (st.parallel) {
+            html += `<div class="stage"><span class="num">${esc(st.parallel[0].n)}</span><div class="par-grid">`;
+            st.parallel.forEach((c, j) => {
+              html += cardHTML(c, `stages.${i}.parallel.${j}`);
+            });
+            html += `</div></div>`;
+            if (!last) html += arrowHTML();
+            return;
+          }
+          html += `<div class="stage ${st.kind || ""}"><span class="num">${esc(st.n)}</span>${cardHTML(st, `stages.${i}`)}</div>`;
+          if (!last) html += arrowHTML();
+        });
+        app.innerHTML = html;
+        applySearch();
+      }
+
+      /* ================= helpers ================= */
+      function getByPath(path) {
+        return path
+          .split(".")
+          .reduce((o, k) => o[/^\d+$/.test(k) ? +k : k], spec);
+      }
+      function setByPath(path, val) {
+        const ks = path.split(".");
+        const last = ks.pop();
+        const obj = ks.reduce((o, k) => o[/^\d+$/.test(k) ? +k : k], spec);
+        obj[/^\d+$/.test(last) ? +last : last] = val;
+      }
+      function markDirty() {
+        document.body.classList.add("dirty");
+      }
+      let toastTimer;
+      function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1900);
+      }
+
+      /* ================= editing events ================= */
+      app.addEventListener("input", (e) => {
+        const p = e.target.dataset && e.target.dataset.path;
+        if (p) {
+          setByPath(p, e.target.textContent.trim());
+          markDirty();
+        }
+      });
+      app.addEventListener("keydown", (e) => {
+        if (e.target.isContentEditable && e.key === "Enter") {
+          e.preventDefault();
+          e.target.blur();
+        }
+        if (
+          e.target.classList &&
+          e.target.classList.contains("newpill") &&
+          (e.key === "Enter" || e.key === " ")
+        ) {
+          e.preventDefault();
+          e.target.click();
+        }
+      });
+      app.addEventListener("click", (e) => {
+        const ictl = e.target.closest(".ictl");
+        const pill = e.target.closest(".newpill");
+        const addr = e.target.closest(".addrow");
+        const head = e.target.closest(".card-h");
+
+        if (ictl) {
+          const row = ictl.closest(".row");
+          const rp = row.dataset.path;
+          const ks = rp.split(".");
+          const ri = +ks.pop();
+          ks.pop();
+          const rows = getByPath(ks.join(".")).rows;
+          const act = ictl.dataset.act;
+          if (act === "del") rows.splice(ri, 1);
+          else if (act === "add")
+            rows.splice(ri + 1, 0, { t: "new field — click to edit" });
+          else if (act === "up" && ri > 0)
+            [rows[ri - 1], rows[ri]] = [rows[ri], rows[ri - 1]];
+          else if (act === "down" && ri < rows.length - 1)
+            [rows[ri + 1], rows[ri]] = [rows[ri], rows[ri + 1]];
+          else return;
+          markDirty();
+          render();
+          return;
+        }
+        if (pill) {
+          const r = getByPath(pill.closest(".row").dataset.path);
+          r.isNew = !r.isNew;
+          markDirty();
+          render();
+          return;
+        }
+        if (addr) {
+          getByPath(addr.dataset.path).rows.push({
+            t: "new field — click to edit",
+          });
+          markDirty();
+          render();
+          return;
+        }
+        if (head && !e.target.isContentEditable) {
+          const card = head.closest(".card");
+          const p = card.dataset.path;
+          card.classList.toggle("closed");
+          card.classList.contains("closed")
+            ? closedSet.add(p)
+            : closedSet.delete(p);
+        }
+      });
+
+      /* ================= search ================= */
+      const searchBox = document.getElementById("searchBox");
+      const searchWrap = document.getElementById("searchWrap");
+      const matchCount = document.getElementById("matchCount");
+      function applySearch() {
+        const q = searchBox.value.trim().toLowerCase();
+        searchWrap.classList.toggle("has", q.length > 0);
+        if (!q) {
+          document.body.classList.remove("searching");
+          return;
+        }
+        document.body.classList.add("searching");
+        let hits = 0;
+        document.querySelectorAll(".card").forEach((card) => {
+          let cardHits = 0;
+          card.querySelectorAll(".card-b .row").forEach((row) => {
+            const ok = row
+              .querySelector(".field")
+              .textContent.toLowerCase()
+              .includes(q);
+            row.classList.toggle("hit", ok);
+            if (ok) {
+              cardHits++;
+              hits++;
+            }
+          });
+          card.classList.toggle("nohits", cardHits === 0);
+          if (cardHits > 0) {
+            card.classList.remove("closed");
+            closedSet.delete(card.dataset.path);
+          }
+          card.querySelectorAll(".sec").forEach((sec) => {
+            let el = sec.nextElementSibling,
+              any = false;
+            while (el && el.classList.contains("row")) {
+              if (el.classList.contains("hit")) any = true;
+              el = el.nextElementSibling;
+            }
+            sec.classList.toggle("nohits", !any);
+          });
+        });
+        matchCount.textContent = hits
+          ? `${hits} matching field${hits === 1 ? "" : "s"} — “${searchBox.value.trim()}”`
+          : `No fields match “${searchBox.value.trim()}”`;
+      }
+      searchBox.addEventListener("input", applySearch);
+      document.getElementById("searchClr").addEventListener("click", () => {
+        searchBox.value = "";
+        applySearch();
+        searchBox.focus();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.key === "/" &&
+          !e.target.isContentEditable &&
+          e.target.tagName !== "INPUT"
+        ) {
+          e.preventDefault();
+          searchBox.focus();
+        }
+        if (e.key === "Escape" && document.activeElement === searchBox) {
+          searchBox.value = "";
+          applySearch();
+          searchBox.blur();
+        }
+      });
+
+      /* ================= theme ================= */
+      const btnTheme = document.getElementById("btnTheme");
+      function setTheme(t) {
+        document.documentElement.dataset.theme = t;
+        btnTheme.innerHTML = t === "dark" ? ICONS.sun : ICONS.moon;
+        btnTheme.title =
+          t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+      }
+      setTheme(
+        window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light",
+      );
+      btnTheme.addEventListener("click", () =>
+        setTheme(
+          document.documentElement.dataset.theme === "dark" ? "light" : "dark",
+        ),
+      );
+
+      /* ================= fold toggle ================= */
+      const btnFold = document.getElementById("btnFold");
+      function setFold(state) {
+        btnFold.dataset.state = state;
+        btnFold.innerHTML =
+          state === "open" ? ICONS.fold + "Collapse" : ICONS.unfold + "Expand";
+      }
+      setFold("open");
+      btnFold.addEventListener("click", () => {
+        const collapse = btnFold.dataset.state === "open";
+        document.querySelectorAll(".card").forEach((c) => {
+          c.classList.toggle("closed", collapse);
+          collapse
+            ? closedSet.add(c.dataset.path)
+            : closedSet.delete(c.dataset.path);
+        });
+        setFold(collapse ? "closed" : "open");
+      });
+
+      /* ================= toolbar ================= */
+      document.getElementById("btnReset").addEventListener("click", () => {
+        if (confirm("Discard all edits and restore the original spec?")) {
+          spec = deepClone(SPEC_DEFAULT);
+          closedSet.clear();
+          document.body.classList.remove("dirty");
+          render();
+          setFold("open");
+          toast("Spec restored");
+        }
+      });
+      document.getElementById("btnJson").addEventListener("click", () => {
+        const blob = new Blob([JSON.stringify(spec, null, 2)], {
+          type: "application/json",
+        });
+        const a = Object.assign(document.createElement("a"), {
+          href: URL.createObjectURL(blob),
+          download: "pipeline-spec.json",
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast("pipeline-spec.json downloaded");
+      });
+      document.getElementById("btnMd").addEventListener("click", async () => {
+        let md = `# ${spec.title}\n\n`;
+        const cardMd = (c) => {
+          md += `## ${c.title}\n_${c.sub}_ · **${c.tag}**\n\n`;
+          c.secs.forEach((s) => {
+            md += `**${s.name}**\n`;
+            s.rows.forEach(
+              (r) => (md += `- ${r.isNew ? "**[NEW]** " : ""}${r.t}\n`),
+            );
+            md += `\n`;
+          });
+        };
+        spec.stages.forEach((st) => {
+          if (st.phase) {
+            md += `---\n### ${st.phase}\n\n`;
+            return;
+          }
+          if (st.parallel) {
+            st.parallel.forEach(cardMd);
+            return;
+          }
+          cardMd(st);
+        });
+        try {
+          await navigator.clipboard.writeText(md);
+          toast("Markdown copied to clipboard");
+        } catch {
+          toast("Clipboard blocked — use JSON export instead");
+        }
+      });
+      document
+        .getElementById("btnPrint")
+        .addEventListener("click", () => window.print());
+
+      render();
+    </script>
+  </body>
+</html>

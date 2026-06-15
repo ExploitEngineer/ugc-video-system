@@ -171,7 +171,9 @@ export function buildStoryboardPrompt({
   // "row 1 = panels 01-04 left→right, row 2 = 05-08, …" — the master's row map.
   const rowMap = Array.from({ length: rows }, (_, r) => {
     const span = `${pad2(r * 4 + 1)}-${pad2(r * 4 + 4)}`;
-    return r === 0 ? `row 1 = panels ${span} left→right` : `row ${r + 1} = ${span}`;
+    return r === 0
+      ? `row 1 = panels ${span} left→right`
+      : `row ${r + 1} = ${span}`;
   }).join(", ");
   // "panels 1-4, 5-8, …" — the per-segment ~15s timing stretches.
   const stretchMap = Array.from(
@@ -248,7 +250,9 @@ export function buildStoryboardPrompt({
   const layoutPhrase = isMaster
     ? `the ${rows}×4 ${totalWordLower}-panel layout (row-major 01-${lastBadge}, all panels visually distinct) with thin`
     : "the 2×2 four-panel layout with thin";
-  const badgeRangePhrase = isMaster ? `(01–${lastBadge}, in order)` : "(01–04, in order)";
+  const badgeRangePhrase = isMaster
+    ? `(01–${lastBadge}, in order)`
+    : "(01–04, in order)";
   const scenesCountLine = isMaster
     ? `\`scenes\` MUST have exactly ${totalPanels} entries, in order. Set every scene's \`adStyle\``
     : "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`";
@@ -546,7 +550,7 @@ export function buildStoryboardPrompt({
     "  BETTER with short, focused direction than long paragraphs — do NOT write a",
     "  paragraph. Match the panel, the real product (per the identity above) and",
     "  the real person with correct, consistent pronouns (see CHARACTER ANCHOR).",
-    '  e.g. (STRUCTURE ONLY — substitute THIS product and a fitting real setting)',
+    "  e.g. (STRUCTURE ONLY — substitute THIS product and a fitting real setting)",
     '  "Medium close-up; she [uses the product] and [its real working motion shows]."',
     "- `panelCaption` — the on-image caption-bar label, in the MANDATORY format",
     "  `<SHOT TYPE>. <concrete action that NAMES the product>`. The shot-type",

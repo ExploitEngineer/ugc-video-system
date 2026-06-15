@@ -1,9 +1,10 @@
 # Agents
 
 Agents as code, not a framework. Each **skill** = a prompt module (`prompt.ts`)
-+ a function (`index.ts`) of shape `(ctx: SkillContext, input) => Promise<SkillResult<T>>`.
-The OpenAI/BytePlus provider adapters are injected via `SkillContext` (see `types.ts`),
-never imported inside a skill — so skills stay swappable and testable.
+
+- a function (`index.ts`) of shape `(ctx: SkillContext, input) => Promise<SkillResult<T>>`.
+  The OpenAI/BytePlus provider adapters are injected via `SkillContext` (see `types.ts`),
+  never imported inside a skill — so skills stay swappable and testable.
 
 Layout:
 
