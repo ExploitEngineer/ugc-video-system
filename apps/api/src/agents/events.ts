@@ -10,6 +10,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Step } from "@ugc/shared";
 import { db, schema } from "../db/index.js";
+import { notifyRunChanged } from "../lib/run-events.js";
 
 /** Mirrors the `step_events_status_check` CHECK constraint. */
 export type StepEventStatus = "started" | "passed" | "failed" | "regenerated";
@@ -34,6 +35,8 @@ export async function writeStepEvent({
     status,
     payload: payload ?? null,
   });
+  // Push the new audit row to any connected SSE stream for this run.
+  notifyRunChanged(runId);
 }
 
 /**

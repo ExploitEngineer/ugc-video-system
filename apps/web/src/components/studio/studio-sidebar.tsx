@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunDetail } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeftIcon,
@@ -20,7 +19,6 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { deleteRunAction } from "@/app/studio/actions";
 import { BrandGlyph, BrandMark } from "@/components/brand-mark";
-import { isTerminal } from "@/components/studio/run/run-meta";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,12 +27,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { fetchRun, fetchRuns } from "@/lib/api";
+import { fetchRuns } from "@/lib/api";
 import {
   type RunHistoryEntry,
   removeRun,
   useRunHistory,
 } from "@/lib/run-history";
+import { useRunsStream } from "@/lib/use-runs-stream";
 import { cn } from "@/lib/utils";
 
 /** Merge DB runs with locally recorded ones, dedupe by id, newest first. */
@@ -52,22 +51,9 @@ function mergeRuns(
   );
 }
 
-// Stable module-level poller — slow cadence, stops at terminal states and on
-// error (e.g. a deleted run that now 404s — otherwise it would poll forever).
-// Hoisted out of the component so its identity never changes between renders
-// (React Compiler does not memoize query-option closures).
-function runItemPollInterval(query: {
-  state: { data?: RunDetail; status?: string };
-}): number | false {
-  if (query.state.status === "error") return false;
-  const status = query.state.data?.status;
-  if (!status) return 6000;
-  return isTerminal(status) ? false : 5000;
-}
-
-// A freshly created run can briefly 404 before its row is visible. Only treat an
-// entry as a prunable orphan once it's older than this grace window, so we never
-// delete a run mid-creation.
+// A freshly created run can briefly be absent from the DB list before its row is
+// visible. Only treat an entry as a prunable orphan once it's older than this
+// grace window, so we never delete a run mid-creation.
 const PRUNE_GRACE_MS = 60_000;
 function isStale(createdAt: string): boolean {
   const t = Date.parse(createdAt);
@@ -162,12 +148,27 @@ function SidebarInner({
   onClose?: () => void;
 }) {
   const localRuns = useRunHistory();
+  // Keep the run list live over SSE instead of polling — pushes on every
+  // create / delete / status change.
+  useRunsStream();
   const { data: dbRuns } = useQuery({
     queryKey: ["runs"],
     queryFn: fetchRuns,
-    refetchInterval: 10000,
     staleTime: 5000,
   });
+
+  // Prune confirmed-missing orphans against the live DB list: once it's loaded,
+  // drop any locally-recorded run that isn't in it AND is past the creation
+  // grace window (so a run still being created — not yet listed — is safe). This
+  // replaces the per-item 404 poll that used to live on each RunListItem.
+  useEffect(() => {
+    if (!dbRuns) return;
+    const ids = new Set(dbRuns.map((r) => r.id));
+    for (const r of localRuns) {
+      if (!ids.has(r.id) && isStale(r.createdAt)) removeRun(r.id);
+    }
+  }, [localRuns, dbRuns]);
+
   const runs = useMemo(
     () =>
       mergeRuns(
@@ -332,27 +333,9 @@ function RunListItem({
   const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState(false);
 
-  // Poll the per-id endpoint so the run-view cache stays warm and confirmed-
-  // missing orphans (404) can be pruned below.
-  const { isError, error } = useQuery({
-    queryKey: ["run", entry.id],
-    queryFn: () => fetchRun(entry.id),
-    refetchInterval: runItemPollInterval,
-    retry: (count, err) => (err as Error).message !== "not-found" && count < 1,
-  });
-
-  // Auto-prune confirmed-missing orphans (404 on the per-id endpoint) so ghost
-  // chats drop out of the sidebar instead of lingering gray. Age guard avoids
-  // deleting a run that's still being created.
-  useEffect(() => {
-    if (
-      isError &&
-      (error as Error)?.message === "not-found" &&
-      isStale(entry.createdAt)
-    ) {
-      removeRun(entry.id);
-    }
-  }, [isError, error, entry.id, entry.createdAt]);
+  // No per-item poll: the active run's SSE stream keeps its ["run", id] cache
+  // warm, and orphan pruning is handled centrally in SidebarInner against the
+  // live DB list.
 
   async function handleDelete() {
     if (deleting) return;

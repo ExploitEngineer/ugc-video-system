@@ -1,5 +1,6 @@
 import { db, schema } from "../db/index.js";
 import { type AssetKind } from "@ugc/shared";
+import { notifyRunChanged } from "../lib/run-events.js";
 import { uploadAsset } from "../lib/storage.js";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -40,7 +41,7 @@ export async function persistSheet<TArtifact>({
     contentType: mime,
   });
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [asset] = await tx
       .insert(schema.assets)
       .values({
@@ -56,6 +57,10 @@ export async function persistSheet<TArtifact>({
     const artifact = await artifactInsert(tx, asset.id);
     return { assetId: asset.id, assetUrl: url, artifact };
   });
+  // Push the new artifact to any connected SSE stream (final video, segment
+  // clips, sheets surface live as they land).
+  notifyRunChanged(runId);
+  return result;
 }
 
 export interface PersistAssetInput {
@@ -93,5 +98,6 @@ export async function persistAsset({
     .values({ runId, kind, storagePath, url, mime, meta: meta ?? null })
     .returning();
 
+  notifyRunChanged(runId);
   return { assetId: asset.id, assetUrl: url };
 }

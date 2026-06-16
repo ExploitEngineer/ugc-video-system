@@ -11,8 +11,11 @@ import {
   feedbackInputSchema,
   isMultiSegment,
 } from "@ugc/shared";
+import type { Run, RunDetail } from "@ugc/shared";
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Hono } from "hono";
+import type { Context } from "hono";
+import { streamSSE } from "hono/streaming";
 import {
   gateForCurrentStep,
   getOpenAI,
@@ -24,6 +27,14 @@ import { badRequest, unprocessable } from "../lib/errors.js";
 import { normalizePersonImage } from "../lib/image/normalize.js";
 import { createLogger } from "../lib/log.js";
 import { toAssetDto, toRunDto } from "../lib/mappers.js";
+import {
+  notifyListChanged,
+  notifyRunChanged,
+  offListChanged,
+  offRunChanged,
+  onListChanged,
+  onRunChanged,
+} from "../lib/run-events.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
 import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
 import { extractAudio } from "../lib/video/merge.js";
@@ -37,6 +48,101 @@ const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200MB — headroom for a ~60s 1080
 const log = createLogger("runs");
 
 export const runs = new Hono();
+
+// ── SSE plumbing (live updates; replaces client polling) ──────────────
+// The in-process bus (lib/run-events) signals a change; this handler re-reads
+// the authoritative snapshot from the DB and writes ONE frame. A 250ms tick
+// coalesces the 2-4 emits a single step produces; a ~10s backstop re-read covers
+// any missed signal (or a second worker process); a ~20s heartbeat keeps
+// intermediaries from idle-closing the connection.
+const SSE_TICK_MS = 250;
+const SSE_BACKSTOP_TICKS = 40; // 40 × 250ms ≈ 10s
+const SSE_HEARTBEAT_TICKS = 80; // 80 × 250ms ≈ 20s
+
+interface SnapshotResult<T> {
+  data: T;
+  /** Cheap change key — identical-signature frames are skipped. */
+  sig: string;
+  /** Terminal + settled → send a final `done` event and close the stream. */
+  done?: boolean;
+}
+
+/** Generic snapshot streamer: subscribe to the bus, re-read on change, push a
+ *  frame only when the signature moves. Shared by both SSE routes below. */
+function streamSnapshots<T>(
+  c: Context,
+  opts: {
+    subscribe: (cb: () => void) => void;
+    unsubscribe: (cb: () => void) => void;
+    read: () => Promise<SnapshotResult<T> | null>;
+  },
+) {
+  return streamSSE(c, async (stream) => {
+    let dirty = true; // force the initial frame
+    const onChange = () => {
+      dirty = true;
+    };
+    opts.subscribe(onChange);
+    stream.onAbort(() => opts.unsubscribe(onChange));
+
+    let lastSig = "";
+    let tick = 0;
+    try {
+      while (!stream.aborted && !stream.closed) {
+        // Re-read when a signal arrived, or on the periodic backstop tick.
+        if (dirty || tick % SSE_BACKSTOP_TICKS === 0) {
+          dirty = false;
+          const snap = await opts.read().catch(() => null);
+          if (snap && snap.sig !== lastSig) {
+            lastSig = snap.sig;
+            await stream.writeSSE({
+              event: "snapshot",
+              data: JSON.stringify(snap.data),
+            });
+            if (snap.done) {
+              await stream.writeSSE({ event: "done", data: "{}" });
+              break;
+            }
+          }
+        }
+        if (tick % SSE_HEARTBEAT_TICKS === 0) {
+          await stream.writeSSE({ event: "ping", data: "" });
+        }
+        tick++;
+        await stream.sleep(SSE_TICK_MS);
+      }
+    } finally {
+      opts.unsubscribe(onChange);
+    }
+  });
+}
+
+/** The `GET /runs` list payload — shared by the list route + its stream. */
+async function loadRunList(): Promise<Run[]> {
+  const rows = await db
+    .select()
+    .from(schema.runs)
+    .orderBy(desc(schema.runs.createdAt));
+  return rows.map(toRunDto);
+}
+
+/** Cheap list signature — id+status+updatedAt across all rows (also catches
+ *  create/delete via row count). */
+const runListSig = (rows: Run[]): string =>
+  rows.map((r) => `${r.id}:${r.status}:${r.updatedAt}`).join("|");
+
+/** Cheap run-detail signature — status, timestamp, and step/asset counts. */
+const runDetailSig = (run: RunDetail): string =>
+  `${run.status}:${run.updatedAt}:${run.stepEvents.length}:${run.assets.length}`;
+
+/** A per-run stream closes once the run is terminal AND its final output landed
+ *  (mirrors the old poll's stop condition so the clip is never stranded). */
+function isSettled(run: RunDetail): boolean {
+  if (run.status === "failed") return true;
+  if (run.status === "completed")
+    return run.assets.some((a) => a.kind === "final_video");
+  return false;
+}
 
 /** Read + validate a single uploaded image from a parsed multipart body. */
 function validateImage(value: unknown, field: string, required: boolean): File | null {
@@ -192,21 +298,58 @@ runs.post("/", async (c) => {
     .set({ lockedAt: null, lockedBy: null, updatedAt: new Date() })
     .where(eq(schema.runs.id, run.id));
 
+  // Surface the new run in any open sidebar list stream.
+  notifyListChanged();
+
   return c.json(await loadRunDetail(run.id), 201);
 });
 
 // ── GET /runs — list all runs, newest first (sidebar history) ─────────
 runs.get("/", async (c) => {
-  const rows = await db
-    .select()
-    .from(schema.runs)
-    .orderBy(desc(schema.runs.createdAt));
-  return c.json(rows.map(toRunDto));
+  return c.json(await loadRunList());
 });
 
-// ── GET /runs/:id — poll status + artifacts + audit trail ─────────────
+// ── GET /runs/events — SSE stream of the run LIST (sidebar) ───────────
+// Registered BEFORE `/:id` so the static segment is never captured as an id.
+// Pushes a fresh `Run[]` whenever any run is created, deleted, or changes
+// status — replaces the sidebar's 10s list poll.
+runs.get("/events", (c) => {
+  return streamSnapshots<Run[]>(c, {
+    subscribe: onListChanged,
+    unsubscribe: offListChanged,
+    read: async () => {
+      const rows = await loadRunList();
+      return { data: rows, sig: runListSig(rows) };
+    },
+  });
+});
+
+// ── GET /runs/:id — status + artifacts + audit trail (one-shot) ───────
 runs.get("/:id", async (c) => {
   return c.json(await loadRunDetail(c.req.param("id")));
+});
+
+// ── GET /runs/:id/events — SSE stream of ONE run (run view) ───────────
+// Pushes a fresh `RunDetail` on every status/step/asset change; closes with a
+// `done` event once the run is terminal and its final video has landed.
+// `getRunOr404` runs FIRST so a missing/invalid id returns the 404 JSON (via the
+// onError sink) before the stream opens — the web layer keys its not-found
+// branch on that.
+runs.get("/:id/events", async (c) => {
+  const id = c.req.param("id");
+  await getRunOr404(id);
+  return streamSnapshots<RunDetail>(c, {
+    subscribe: (cb) => onRunChanged(id, cb),
+    unsubscribe: (cb) => offRunChanged(id, cb),
+    read: async () => {
+      const detail = await loadRunDetail(id);
+      return {
+        data: detail,
+        sig: runDetailSig(detail),
+        done: isSettled(detail),
+      };
+    },
+  });
 });
 
 // ── GET /runs/:id/artifacts — generated sheets + final video ──────────
@@ -446,6 +589,10 @@ runs.post("/:id/feedback", async (c) => {
       .where(eq(schema.runs.id, id));
   });
 
+  // The txn writes its step_event directly (not via writeStepEvent), so push
+  // the new status to any open run stream explicitly.
+  notifyRunChanged(id);
+
   return c.json(await loadRunDetail(id));
 });
 
@@ -466,6 +613,8 @@ runs.post("/:id/cancel", async (c) => {
         updatedAt: new Date(),
       })
       .where(eq(schema.runs.id, id));
+    // Push the terminal status to any open run stream (and the sidebar).
+    notifyRunChanged(id);
   }
 
   return c.json(await loadRunDetail(id));
@@ -491,5 +640,7 @@ runs.delete("/:id", async (c) => {
   }
 
   await db.delete(schema.runs).where(eq(schema.runs.id, id));
+  // Drop it from any open sidebar list stream.
+  notifyListChanged();
   return c.json({ ok: true, id });
 });
