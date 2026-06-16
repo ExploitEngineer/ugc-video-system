@@ -33,13 +33,22 @@ import {
 } from "@cesdk/cesdk-js/plugins";
 
 import { type OnSaved, registerActions } from "./actions";
+import { setupCaptionGenerator } from "./captions";
 import { VideoEditorConfig } from "./video-editor/plugin";
 
 export type { OnSaved } from "./actions";
 
 export async function initVideoEditor(
   cesdk: CreativeEditorSDK,
-  { onSaved }: { onSaved: OnSaved },
+  {
+    onSaved,
+    captionSegments = [],
+  }: {
+    onSaved: OnSaved;
+    // Per-segment spoken lines used by the "Generate with AI" captions button.
+    // One group for a 15s clip; one per 15s segment for merged 30/45/60s runs.
+    captionSegments?: string[][];
+  },
 ): Promise<void> {
   // 1. The full Video Editor UI: features, dock, timeline, inspector, canvas,
   //    panels, and engine settings. (Internally runs `resetEditor()`, so this
@@ -124,7 +133,12 @@ export async function initVideoEditor(
     },
   );
 
-  // 4. Our `exportDesign` override (registered LAST so it wins over the
+  // 4. "Generate with AI" button in the Add Captions panel — turns the scenes'
+  //    spoken lines into timed captions (see ./captions). Safe no-op when there
+  //    are no transcripts (button renders disabled).
+  setupCaptionGenerator(cesdk, captionSegments);
+
+  // 5. Our `exportDesign` override (registered LAST so it wins over the
   //    starter kit's download): export the MP4 + serialize the scene, then
   //    hand both to `onSaved` to upload them back to the run.
   registerActions(cesdk, { onSaved });

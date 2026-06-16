@@ -27,11 +27,16 @@ export function setupSettings(engine: CreativeEngine): void {
   // ============================================================================
 
   // #region Video Features
-  // Enable video captions functionality.
-  // NOTE: this setting key isn't in @cesdk/engine 1.76.0's typed `Settings`, so it
-  // is omitted (captions still come from CaptionPresetsAssetSource + feature flags).
-  // Re-enable on an SDK version that types this key.
-  // engine.editor.setSetting("features/videoCaptionsEnabled", true);
+  // Enable video captions functionality. Without this the engine refuses to
+  // CREATE captions ("Creation of captions is not allowed. Please enable the
+  // video captions feature.") even though the Add Captions panel renders — which
+  // breaks our "Generate with AI" button (see ../../captions.ts).
+  // NOTE: this setting key isn't in @cesdk/engine 1.76.0's typed `Settings`, so
+  // call through an untyped cast. Drop the cast on an SDK version that types it.
+  (engine.editor.setSetting as (key: string, value: boolean) => void)(
+    "features/videoCaptionsEnabled",
+    true,
+  );
 
   // Show all timeline tracks at once (matches CE.SDK's own video preset) so the
   // video clip and the separate audio lane are visible together. "active" would
@@ -56,11 +61,15 @@ export function setupSettings(engine: CreativeEngine): void {
   // Move handles - Center handles for moving blocks
   // engine.editor.setSetting('controlGizmo/showMoveHandles', true);
 
-  // Resize handles - Edge handles for non-proportional resizing
-  // engine.editor.setSetting('controlGizmo/showResizeHandles', true);
+  // Resize handles - Edge (top/bottom/left/right) handles for single-axis resize.
+  engine.editor.setSettingBool("controlGizmo/showResizeHandles", true);
 
-  // Scale handles - Corner handles for proportional scaling
-  // engine.editor.setSetting('controlGizmo/showScaleHandles', true);
+  // Scale handles - Corner handles for PROPORTIONAL scaling. ON. The earlier
+  // abrupt jump-to-tiny was caused by captions carrying an "Auto" height (an
+  // undefined reference for the scale gizmo); captions.ts now pins their fitted
+  // frame to Absolute pixels, so corner-scale is smooth from the first drag.
+  // Handle visibility is global in CE.SDK (no per-block control).
+  engine.editor.setSettingBool("controlGizmo/showScaleHandles", true);
 
   // Rotate handles - Handles for rotating blocks
   // engine.editor.setSetting('controlGizmo/showRotateHandles', true);

@@ -11,11 +11,13 @@ import type CreativeEditorSDK from "@cesdk/cesdk-js";
 import { useEffect, useRef } from "react";
 
 import { initVideoEditor, type OnSaved } from "@/lib/cesdk";
+import { injectCaptionPanelStyles } from "@/lib/cesdk/captions";
 
 export default function CesdkEditor({
   sourceVideoUrl,
   sceneUrl,
   audioUrl,
+  captionSegments,
   onSaved,
 }: {
   sourceVideoUrl: string;
@@ -25,6 +27,9 @@ export default function CesdkEditor({
   // lane so users can edit audio separately. Null on the resume path (a saved
   // scene already encodes the split) or when extraction failed (keep baked-in).
   audioUrl: string | null;
+  // Per-segment spoken lines (transcripts) for the "Generate with AI" captions
+  // button. Memoized by the parent so its identity is stable across renders.
+  captionSegments: string[][];
   onSaved: OnSaved;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,8 +63,13 @@ export default function CesdkEditor({
 
       await initVideoEditor(cesdk, {
         onSaved: (video, scene) => onSavedRef.current(video, scene),
+        captionSegments,
       });
       if (disposed) return;
+
+      // Override CE.SDK's fixed-height caption-row textareas (they clip wrapped
+      // lines and paint scrollbar chevrons) — see ./captions. Best-effort.
+      injectCaptionPanelStyles(container);
 
       // Resume a saved edit when one exists; otherwise start from the source.
       if (sceneUrl) {
@@ -79,7 +89,7 @@ export default function CesdkEditor({
       local?.dispose();
       instanceRef.current = null;
     };
-  }, [sourceVideoUrl, sceneUrl, audioUrl]);
+  }, [sourceVideoUrl, sceneUrl, audioUrl, captionSegments]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
