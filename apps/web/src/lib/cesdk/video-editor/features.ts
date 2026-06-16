@@ -282,7 +282,7 @@ export function setupFeatures(cesdk: CreativeEditorSDK): void {
     // 'ly.img.video.timeline.controls.background', /* Background color controls */
     // 'ly.img.video.timeline.controls.playback', /* Play/pause and timestamp */
     // 'ly.img.video.timeline.controls.loop', /* Loop toggle */
-    // 'ly.img.video.timeline.controls.split', /* Split clip control */
+    "ly.img.video.timeline.controls.split" /* Split clip control — required to cut a clip so a Transition In/Out can be applied at the cut. Pinned explicitly (don't rely on the ly.img.video glob) since it's the entry point for transitions. */,
     // 'ly.img.video.timeline.controls.timelineZoom', /* Timeline zoom controls */
     // 'ly.img.video.caption', /* Video captions */
     // #endregion
@@ -303,7 +303,12 @@ export function setupFeatures(cesdk: CreativeEditorSDK): void {
     // ============================================================================
 
     // #region Animations
-    "ly.img.animations" /* Animations button */,
+    // Animations button. This is ALSO our video-transition mechanism: CE.SDK
+    // has no true clip-to-clip transition, so a transition = split a clip
+    // (ly.img.video.timeline.controls.split above) then apply an exit
+    // animation to the left piece + an entrance animation to the right piece.
+    // The entrance/exit groups are relabeled "Transition In/Out" in i18n.ts.
+    "ly.img.animations" /* Animations + transitions button */,
     // #endregion
 
     // ============================================================================

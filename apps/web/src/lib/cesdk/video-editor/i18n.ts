@@ -26,22 +26,36 @@ import type CreativeEditorSDK from "@cesdk/cesdk-js";
  * ```
  */
 export function setupTranslations(cesdk: CreativeEditorSDK): void {
-  // Example: Override built-in labels with custom text
-  // cesdk.i18n.setTranslations({
-  //   en: {
-  //     'libraries.ly.img.video.label': 'Videos',
-  //     'libraries.ly.img.audio.label': 'Audio',
-  //     'component.fileOperation.export': 'Export Video',
-  //     'common.done': 'Finish',
-  //   },
-  //   de: {
-  //     'libraries.ly.img.video.label': 'Videos',
-  //     'libraries.ly.img.audio.label': 'Audio',
-  //     'component.fileOperation.export': 'Video exportieren',
-  //     'common.done': 'Fertig',
-  //   }
-  // });
-
-  // Suppress unused variable warning
-  void cesdk;
+  // Expose CE.SDK's built-in entrance/exit animations *as transitions*.
+  //
+  // CE.SDK has no true clip-to-clip transition primitive (no overlapping
+  // crossfade). The way to add a transition is: split a clip on the timeline,
+  // then apply an exit animation to the left piece + an entrance animation to
+  // the right piece at the cut. Those animations live under the "Animations"
+  // button — a name users won't read as "transition". Relabel the In/Out
+  // groups to "Transition In/Out" (and the button to "Transitions &
+  // Animations") so the workflow is discoverable. Loop animations
+  // (breathing/pulsating) are genuinely not transitions, so their label is
+  // left unchanged. Pure label override — no behavior change. Keys taken from
+  // the @cesdk/cesdk-js 1.76 English bundle.
+  cesdk.i18n.setTranslations({
+    en: {
+      // Inspector button + panel title (image/video and text blocks)
+      "input.animations": "Transitions & Animations",
+      "libraries.ly.img.animations.ly.img.animations.label":
+        "Transitions & Animations",
+      "libraries.ly.img.textAnimations.ly.img.animations.label":
+        "Transitions & Animations",
+      // Entrance group → "Transition In"
+      "libraries.ly.img.animations.ly.img.animations.in.label":
+        "Transition In",
+      "libraries.ly.img.textAnimations.ly.img.animations.in.label":
+        "Transition In",
+      // Exit group → "Transition Out"
+      "libraries.ly.img.animations.ly.img.animations.out.label":
+        "Transition Out",
+      "libraries.ly.img.textAnimations.ly.img.animations.out.label":
+        "Transition Out",
+    },
+  });
 }
