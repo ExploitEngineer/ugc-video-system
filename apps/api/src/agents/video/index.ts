@@ -1,3 +1,4 @@
+import type { AssetKind } from "@ugc/shared";
 import type { SkillContext, SkillResult } from "../types.js";
 import type { ImageRef } from "../../providers/openai/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
@@ -6,7 +7,9 @@ import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
-import { createLogger } from "../../lib/log.js";
+import { type Logger, createLogger } from "../../lib/log.js";
+import { padToProviderAspect } from "../../lib/image/normalize.js";
+import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
 
@@ -76,6 +79,47 @@ type Video = typeof schema.videos.$inferSelect;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Make a person-reference URL safe for BytePlus `CreateAsset`, which rejects
+ * aspect ratios outside 0.4–2.5. Generated sheets/strips (which skip the upload
+ * normalizer) occasionally drift out of band → `AspectRatioTooSmall/Large` and
+ * the whole run fails before it even starts rendering. Pad a PROVIDER-ONLY copy
+ * when needed (the stored original — reused as an OpenAI reference + shown in the
+ * UI — stays untouched); in-band images and any fetch/encode hiccup fall back to
+ * the original URL unchanged.
+ */
+async function providerSafeFaceUrl(
+  url: string,
+  runId: string,
+  kind: AssetKind,
+  log: Logger,
+): Promise<string> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return url;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const mime = res.headers.get("content-type") ?? "image/png";
+    const norm = await padToProviderAspect(bytes, mime);
+    if (!norm.adjusted) return url;
+    const { url: paddedUrl } = await uploadAsset({
+      runId,
+      kind,
+      bytes: norm.bytes,
+      contentType: norm.mime,
+    });
+    log.info("padded face ref into provider aspect band", { kind });
+    return paddedUrl;
+  } catch (err) {
+    // Never let a normalization hiccup mask the real generation — fall back to
+    // the raw URL and let CreateAsset speak if it's genuinely out of band.
+    log.warn("face-ref aspect normalization skipped", {
+      kind,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return url;
+  }
+}
+
+/**
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
  * injected video provider) together with the LABELLED storyboard sheet as the
@@ -98,7 +142,10 @@ export async function videoBuilder(
   const isSegment = input.segmentIndex != null;
   const step = isSegment ? "segment_video" : "video";
   const assetKind = isSegment ? "segment_video" : "final_video";
-  const log = createLogger("video", { run: ctx.runId });
+  const log = createLogger("video", {
+    run: ctx.runId,
+    seg: input.segmentIndex ?? null,
+  });
   log.info("▶ building video", {
     durationSec,
     hasPerson: input.hasPerson,
@@ -112,6 +159,12 @@ export async function videoBuilder(
     status: "started",
     payload: isSegment ? { segmentIndex: input.segmentIndex } : undefined,
   });
+
+  // Hoisted so the catch can report exactly which task, how far it got, and the
+  // last provider status it saw — even for failures before/around submit.
+  let taskId: string | undefined;
+  let startedAt: number | undefined;
+  let lastStatus: string | undefined;
 
   try {
     // 1. Compose the cinematic motion/audio prompt from the scenes + transcripts.
@@ -192,9 +245,24 @@ export async function videoBuilder(
     referenceImages = productUrl ? [productUrl] : [];
     personReferences = [];
     if (storyboardIsPersonContent) {
-      personReferences.push(storyboardUrl);
-      if (faceUrl) personReferences.push(faceUrl);
+      // Person refs ride the CreateAsset path (aspect 0.4–2.5) — pad a provider
+      // copy first so a stray generated dimension can't fail the run. Order +
+      // count are preserved, so the @Image legend below stays correct.
+      personReferences.push(
+        await providerSafeFaceUrl(
+          storyboardUrl,
+          ctx.runId,
+          "storyboard_sheet",
+          log,
+        ),
+      );
+      if (faceUrl) {
+        personReferences.push(
+          await providerSafeFaceUrl(faceUrl, ctx.runId, "person_sheet", log),
+        );
+      }
     } else {
+      // Plain reference_image (raw image_url, no CreateAsset) — no aspect limit.
       referenceImages.push(storyboardUrl);
     }
 
@@ -233,26 +301,69 @@ export async function videoBuilder(
     });
 
     // 3. Poll until completed / failed / timeout.
-    const startedAt = Date.now();
-    const deadline = startedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
+    taskId = task.taskId;
+    const submittedAt = Date.now();
+    startedAt = submittedAt;
+    const deadline = submittedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
+    const resolution = env.BYTEPLUS_VIDEO_RESOLUTION;
+    const segLabel = isSegment ? `, segment ${input.segmentIndex}` : "";
     log.info("task submitted — polling BytePlus", { taskId: task.taskId });
     let result = await ctx.video.pollVideo(task);
+    lastStatus = result.status ?? "running";
+    // Split the wall-clock into BytePlus QUEUE wait vs actual RENDER: mark the
+    // first poll that reports `running`. Tells us whether a slow run is provider
+    // capacity (long queue) or pure 1080p render time — invisible while `queued`
+    // and `running` both read as "processing".
+    let runningSince: number | undefined =
+      lastStatus === "running" ? submittedAt : undefined;
     while (result.state === "processing") {
+      const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
       if (Date.now() > deadline) {
         throw new Error(
-          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms`,
+          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms — ${elapsedSec}s elapsed, last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel}`,
         );
       }
       await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
+      result = await ctx.video.pollVideo(task);
+      lastStatus = result.status ?? lastStatus;
+      if (runningSince === undefined && lastStatus === "running") {
+        runningSince = Date.now();
+        log.info("task left queue — rendering", {
+          taskId: task.taskId,
+          queuedSec: Math.round((runningSince - submittedAt) / 1000),
+        });
+      }
       log.debug("still processing", {
         taskId: task.taskId,
-        elapsedSec: Math.round((Date.now() - startedAt) / 1000),
+        status: lastStatus,
+        elapsedSec: Math.round((Date.now() - submittedAt) / 1000),
       });
-      result = await ctx.video.pollVideo(task);
     }
     if (result.state === "failed" || !result.videoUrl) {
-      throw new Error(result.error ?? "video generation failed");
+      const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
+      // pollVideo already prefixes failures with the taskId + raw status; only
+      // synthesize a message for the (rare) completed-without-url case.
+      throw new Error(
+        result.error ??
+          `video task ${task.taskId} produced no video — last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel} (${elapsedSec}s elapsed)`,
+      );
     }
+
+    // Generation timing (submit → ready, excludes download). queuedSec falls
+    // back to 0 when we never observed a `running` poll (treat as render).
+    const readyAt = Date.now();
+    const totalSec = Math.round((readyAt - submittedAt) / 1000);
+    const queuedSec = runningSince
+      ? Math.round((runningSince - submittedAt) / 1000)
+      : 0;
+    log.info("✓ task ready", {
+      taskId: task.taskId,
+      totalSec,
+      queuedSec,
+      renderSec: totalSec - queuedSec,
+      resolution,
+      durationSec,
+    });
 
     // 4. Download the mp4. Pass any auth headers the provider supplied
     // (Seedance's video_url is directly fetchable, so this is usually empty).
@@ -337,7 +448,19 @@ export async function videoBuilder(
     // failures) never propagates as the failure message — only as `detail`.
     const failure = classifyRunError(err, "VIDEO_GENERATION_FAILED");
     const raw = err instanceof Error ? err.message : String(err);
-    log.error("✗ video failed", { code: failure.code, err: failure.detail ?? raw });
+    const elapsedSec =
+      startedAt != null ? Math.round((Date.now() - startedAt) / 1000) : undefined;
+    // Self-contained ERR line: code + which task/clip + how far it got (taskId /
+    // lastStatus / elapsedSec are undefined for failures before submit — fmtCtx
+    // drops them). `seg` is already bound on the base logger.
+    log.error("✗ video failed", {
+      code: failure.code,
+      taskId,
+      durationSec,
+      lastStatus,
+      elapsedSec,
+      err: failure.detail ?? raw,
+    });
     await writeStepEvent({
       runId: ctx.runId,
       step,
@@ -346,6 +469,8 @@ export async function videoBuilder(
         error: failure.userMessage,
         code: failure.code,
         detail: truncateDetail(failure.detail ?? raw),
+        ...(taskId ? { taskId } : {}),
+        ...(lastStatus ? { lastStatus } : {}),
         ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
       },
     });

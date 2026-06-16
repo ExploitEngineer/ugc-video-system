@@ -127,6 +127,12 @@ export const runErrorCodeSchema = z.enum([
   "PERSON_IMAGE_INVALID",
   "IMAGE_GENERATION_FAILED",
   "VIDEO_GENERATION_FAILED",
+  // We polled past BYTEPLUS_POLL_TIMEOUT_MS — the provider never returned a
+  // terminal status. Distinct from a provider-side failure so logs/dashboards
+  // can tell "too slow / stuck" apart from "the job itself failed".
+  "VIDEO_GENERATION_TIMEOUT",
+  // The provider expired the task on its own side before it finished.
+  "VIDEO_GENERATION_EXPIRED",
   "VIDEO_MERGE_FAILED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_CONTENT_BLOCKED",

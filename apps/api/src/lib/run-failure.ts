@@ -44,6 +44,10 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
   VIDEO_MERGE_FAILED:
     "We couldn't assemble the final video from its segments. Please try the run again.",
   VIDEO_GENERATION_FAILED: "Video generation failed. Please try the run again.",
+  VIDEO_GENERATION_TIMEOUT:
+    "Video generation took too long and timed out. Please try the run again.",
+  VIDEO_GENERATION_EXPIRED:
+    "The video provider expired this job before it finished. Please try the run again.",
   IMAGE_GENERATION_FAILED:
     "We couldn't generate the reference images. Please try the run again.",
   RUN_CANCELLED: "Run cancelled.",
@@ -60,7 +64,7 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
   },
   {
     pattern:
-      /sensitivecontentdetected|moderation\b|content.?policy|safety system|flagged/i,
+      /sensitivecontentdetected|moderation\b|content.?policy|safety system|flagged|sensitive information|output video may contain/i,
     code: "PROVIDER_CONTENT_BLOCKED",
   },
   {
@@ -68,6 +72,13 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
     code: "PROVIDER_RATE_LIMITED",
   },
   { pattern: /ffmpeg|merge/i, code: "VIDEO_MERGE_FAILED" },
+  // Specific video-task outcomes BEFORE the generic byteplus/video row below —
+  // both their messages contain "video task"/"byteplus", so order decides.
+  { pattern: /timed out after/i, code: "VIDEO_GENERATION_TIMEOUT" },
+  {
+    pattern: /\btask\b.*\bexpired\b|status[= ]expired|\bexpired\b/i,
+    code: "VIDEO_GENERATION_EXPIRED",
+  },
   {
     pattern: /byteplus|seedance|video task|video generation/i,
     code: "VIDEO_GENERATION_FAILED",

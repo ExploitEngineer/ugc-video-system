@@ -32,7 +32,11 @@ const serverEnvSchema = z.object({
   // per-generation variety (the provider then sends a random seed).
   BYTEPLUS_VIDEO_SEED: z.coerce.number().int().optional(),
   BYTEPLUS_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
-  BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
+  // Max wall-clock to keep polling ONE Seedance task before giving up (the
+  // dead-man's switch for a stuck job — NOT a network timeout). 30 min: 1080p
+  // Seedance 2.0 routinely renders near/over 10 min, worse when N segments share
+  // BytePlus capacity, so the old 10-min default false-failed legit clips.
+  BYTEPLUS_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(1800000),
 
   // BytePlus asset management (real-human/face assets) — OpenAPI, AK/SK-signed.
   // SEPARATE from the `ark-` key above. Required ONLY to register faces so

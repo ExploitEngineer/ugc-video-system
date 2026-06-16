@@ -1,17 +1,21 @@
-// Upload-time normalization for the user's PERSON photo — the one uploaded
-// image that reaches BytePlus `CreateAsset` (the face-asset path), which
-// rejects anything outside aspect ratio 0.4–2.5 (w:h) or height 300–6000px
-// (`InvalidParameter.AspectRatioTooSmall/Large`). Fixing the image ONCE at
-// upload makes every downstream consumer compliant: the stored `person_upload`
-// feeds both the OpenAI person-sheet reference and the face asset.
+// Aspect/size normalization for any image bound for BytePlus `CreateAsset` (the
+// face-asset path), which rejects anything outside aspect ratio 0.4–2.5 (w:h)
+// or height 300–6000px (`InvalidParameter.AspectRatioTooSmall/Large`).
 //
-// Out-of-band shapes are letterboxed with neutral padding into a safe band
-// (the face asset only needs the face, and the person sheet is regenerated
-// anyway, so bars carry no downstream cost); truly degenerate strips are
-// rejected with a friendly 422 — padding a 50×2000 sliver would leave a face
-// too small for detection regardless. The PRODUCT upload is intentionally NOT
-// normalized: it never reaches CreateAsset, and padding bars would leak into
-// the generated stills.
+// Two entry points share one padding core (`padIntoBand`):
+//   • `normalizePersonImage` — UPLOAD time. Fixes the user's photo ONCE so the
+//     stored `person_upload` feeds both the OpenAI person-sheet reference and
+//     the face asset. Truly degenerate strips are rejected with a friendly 422
+//     (padding a 50×2000 sliver leaves a face too small to detect anyway).
+//   • `padToProviderAspect` — for GENERATED images (the invented person sheet,
+//     the storyboard crop strip) that skip the upload guard. Non-throwing: pads
+//     when out-of-band, passes through byte-identical otherwise. Callers register
+//     the padded COPY with the provider and leave the stored original untouched
+//     (so the person sheet stays bar-free for OpenAI/UI).
+//
+// Out-of-band shapes are letterboxed with neutral padding into a safe band. The
+// PRODUCT upload is intentionally NOT normalized: it never reaches CreateAsset,
+// and padding bars would leak into the generated stills.
 //
 // Pure bytes-in / bytes-out (no DB, no storage) — mirrors lib/image/crop.ts.
 
@@ -42,39 +46,37 @@ export interface NormalizedImageResult {
   adjusted: boolean;
 }
 
-/**
- * Make an uploaded person photo satisfy BytePlus `CreateAsset` limits.
- * Compliant images pass through byte-identical; out-of-band ones are padded
- * and/or height-clamped and re-encoded as JPEG. Throws a friendly 422
- * `ApiError` for unreadable or unusably-degenerate images — callers run this
- * BEFORE creating any run/project rows.
- */
-export async function normalizePersonImage(
-  bytes: Uint8Array,
-  mime: string,
-): Promise<NormalizedImageResult> {
-  // .rotate() bakes EXIF orientation so width/height match the visual image
-  // (a sideways phone photo would otherwise pad along the wrong axis).
-  let img = sharp(Buffer.from(bytes)).rotate();
+/** Post-rotate pixel dims of an image, or null when unreadable. */
+async function readDims(
+  img: sharp.Sharp,
+): Promise<{ width: number; height: number } | null> {
   let meta: sharp.Metadata;
   try {
     meta = await img.metadata();
   } catch {
-    throw unprocessable("We couldn't read that image. Please upload a different photo.");
+    return null;
   }
   // autoOrient dims reflect the post-rotate image; fall back to raw dims.
   const width = meta.autoOrient?.width ?? meta.width ?? 0;
   const height = meta.autoOrient?.height ?? meta.height ?? 0;
-  if (!width || !height) {
-    throw unprocessable("We couldn't read that image. Please upload a different photo.");
-  }
+  if (!width || !height) return null;
+  return { width, height };
+}
 
+/**
+ * Letterbox `img` (already `.rotate()`-d, with known dims) into the safe aspect
+ * band + provider height window. Returns the original bytes byte-identical when
+ * nothing needs changing; otherwise pads/clamps and re-encodes as JPEG. Pure
+ * padding — never rejects (the upload guard checks for degenerate input first).
+ */
+async function padIntoBand(
+  img: sharp.Sharp,
+  bytes: Uint8Array,
+  mime: string,
+  width: number,
+  height: number,
+): Promise<NormalizedImageResult> {
   const aspect = width / height;
-  if (aspect < MIN_USABLE_ASPECT || aspect > MAX_USABLE_ASPECT) {
-    throw unprocessable(
-      "That person photo is too narrow or too wide to use. Please upload a standard portrait or landscape photo.",
-    );
-  }
 
   // Letterbox into the safe aspect band, centered.
   let outW = width;
@@ -108,11 +110,58 @@ export async function normalizePersonImage(
   }
 
   const out = new Uint8Array(await img.jpeg({ quality: 92 }).toBuffer());
-  log.info("✓ normalized person upload for provider limits", {
+  log.info("✓ normalized image for provider aspect/height limits", {
     source: `${width}x${height}`,
     aspect: aspect.toFixed(3),
     padded: needsPad,
     resized: needsResize,
   });
   return { bytes: out, mime: "image/jpeg", adjusted: true };
+}
+
+/**
+ * Make an uploaded person photo satisfy BytePlus `CreateAsset` limits.
+ * Compliant images pass through byte-identical; out-of-band ones are padded
+ * and/or height-clamped and re-encoded as JPEG. Throws a friendly 422
+ * `ApiError` for unreadable or unusably-degenerate images — callers run this
+ * BEFORE creating any run/project rows.
+ */
+export async function normalizePersonImage(
+  bytes: Uint8Array,
+  mime: string,
+): Promise<NormalizedImageResult> {
+  // .rotate() bakes EXIF orientation so width/height match the visual image
+  // (a sideways phone photo would otherwise pad along the wrong axis).
+  const img = sharp(Buffer.from(bytes)).rotate();
+  const dims = await readDims(img);
+  if (!dims) {
+    throw unprocessable("We couldn't read that image. Please upload a different photo.");
+  }
+
+  const aspect = dims.width / dims.height;
+  if (aspect < MIN_USABLE_ASPECT || aspect > MAX_USABLE_ASPECT) {
+    throw unprocessable(
+      "That person photo is too narrow or too wide to use. Please upload a standard portrait or landscape photo.",
+    );
+  }
+
+  return padIntoBand(img, bytes, mime, dims.width, dims.height);
+}
+
+/**
+ * Make a GENERATED image (invented person sheet, storyboard crop strip) satisfy
+ * BytePlus `CreateAsset` aspect/height limits — the safety net the upload guard
+ * provides for uploads. Non-throwing: pads when out-of-band, returns the bytes
+ * byte-identical (and `adjusted: false`) when already compliant or unreadable.
+ * Callers register the returned bytes with the provider and DO NOT overwrite the
+ * stored original, so OpenAI references / the UI keep the un-padded image.
+ */
+export async function padToProviderAspect(
+  bytes: Uint8Array,
+  mime: string,
+): Promise<NormalizedImageResult> {
+  const img = sharp(Buffer.from(bytes)).rotate();
+  const dims = await readDims(img);
+  if (!dims) return { bytes, mime, adjusted: false };
+  return padIntoBand(img, bytes, mime, dims.width, dims.height);
 }
