@@ -821,7 +821,7 @@
     <header>
       <div class="brand">
         <h1>Ad Video Pipeline</h1>
-        <span class="ver">I/O SPEC · multi-duration + editor</span>
+        <span class="ver">I/O SPEC · multi-duration + editor + SSE</span>
       </div>
       <span class="dirty-dot" title="Unsaved edits"></span>
       <div class="search" id="searchWrap">
@@ -1233,36 +1233,6 @@
           { phase: "30 · 45 · 60s · N segments → merge (N = 2 / 3 / 4)" },
 
           {
-            n: "4",
-            color: "blue",
-            title: "narrativeOutline",
-            sub: "gpt-4.1 · chat (JSON) · multi-segment only",
-            tag: "gpt-4.1",
-            tagc: "blue",
-            secs: [
-              {
-                name: "IN",
-                rows: [
-                  {
-                    t: "adStyle · adType · productBrief · productUse? · personBrief · userPrompt",
-                  },
-                ],
-              },
-              {
-                name: "OUT → runs.narrative_outline + runs.visual_style",
-                rows: [
-                  {
-                    t: "segments { index, beat, summary } — the arc: hook → in-use → benefit → close",
-                  },
-                  {
-                    t: "visualStyle — one locked look (grade · film/lens · lighting · palette · time-of-day arc)",
-                  },
-                ],
-              },
-            ],
-          },
-
-          {
             n: "5b",
             color: "teal",
             title: "segment_storyboard · generateMaster",
@@ -1277,7 +1247,8 @@
                     t: "productSheetRef · personSheetRef? · userPrompt · segmentCount (N) · directive?",
                   },
                   {
-                    t: "visual_style injected VERBATIM (same string in storyboard + video prompts)",
+                    t: "authored as ONE coherent 4×N master from the prompt — no separate narrativeOutline / visual_style step (consistency is inherent to the single image)",
+                    isNew: true,
                   },
                 ],
               },
@@ -1347,9 +1318,6 @@
                 rows: [
                   {
                     t: "scenes[] (sceneDescription + transcript) · userPrompt · segmentIndex · segmentCount",
-                  },
-                  {
-                    t: "visual_style injected VERBATIM (same look string as the master)",
                   },
                 ],
               },
@@ -1458,6 +1426,19 @@
                   },
                 ],
               },
+              {
+                name: "AI CAPTIONS",
+                rows: [
+                  {
+                    t: 'Add Captions panel → "Generate with AI": each scene transcript → timed WebVTT cues (phrase-chunked ≤42 chars, distributed across each scene / segment window)',
+                    isNew: true,
+                  },
+                  {
+                    t: "NO external AI call — reuses pipeline transcripts; fed via CE.SDK createCaptionsFromURI + outline preset, same as the panel's Import File path",
+                    isNew: true,
+                  },
+                ],
+              },
             ],
           },
 
@@ -1506,7 +1487,9 @@
             ],
           },
 
-          { phase: "RUN CONTROL · API (polled by the studio)" },
+          {
+            phase: "RUN CONTROL · API + SSE (studio subscribes via EventSource)",
+          },
 
           {
             n: "API",
@@ -1522,7 +1505,15 @@
                 rows: [
                   { t: "GET /runs — list runs, newest first" },
                   {
-                    t: "GET /runs/:id — poll status + artifacts + audit trail (step_events)",
+                    t: "GET /runs/:id — snapshot read: status + artifacts + audit trail (step_events) — fallback now SSE is primary",
+                  },
+                  {
+                    t: "GET /runs/events — SSE stream: run-list live updates (replaces sidebar polling)",
+                    isNew: true,
+                  },
+                  {
+                    t: "GET /runs/:id/events — SSE stream: per-run live updates; closes with `done` once run is terminal + final_video exists",
+                    isNew: true,
                   },
                 ],
               },

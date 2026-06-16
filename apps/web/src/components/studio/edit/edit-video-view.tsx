@@ -5,7 +5,7 @@ import { ArrowLeftIcon, TriangleAlertIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,14 @@ export function EditVideoView({ runId }: { runId: string }) {
     },
     [runId, queryClient, router],
   );
+
+  // Spoken lines per 15s window for the "Generate with AI" captions button:
+  // grouped by segment (30/45/60s) or a single group (15s). Transcript only —
+  // empties stay as placeholders so each scene keeps its timeline slot.
+  const captionSegments = useMemo<string[][]>(() => {
+    const groups = run?.segmentScenes ?? (run?.scenes ? [run.scenes] : []);
+    return groups.map((group) => group.map((s) => (s.transcript ?? "").trim()));
+  }, [run?.segmentScenes, run?.scenes]);
 
   const finalVideo = run?.assets.find((a) => a.kind === "final_video");
   // Resume the most recent saved edit, if any (newest `editor_scene` wins).
@@ -103,6 +111,7 @@ export function EditVideoView({ runId }: { runId: string }) {
         // Null when resuming a saved scene (split already baked in) or if
         // extraction failed — the editor then keeps the video's native audio.
         audioUrl={latestScene ? null : (audioQuery.data?.url ?? null)}
+        captionSegments={captionSegments}
         onSaved={onSaved}
       />
     );
