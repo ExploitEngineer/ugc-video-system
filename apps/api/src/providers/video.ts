@@ -44,6 +44,13 @@ export type VideoTaskState = "processing" | "completed" | "failed";
 
 export interface VideoTaskResult {
   state: VideoTaskState;
+  /**
+   * Raw provider status (`queued` | `running` | `succeeded` | `failed` |
+   * `cancelled` | `expired`) behind the coarse `state`. Surfaced so the poll
+   * loop can log exactly how far a task got (and which terminal status it hit)
+   * when it times out or fails.
+   */
+  status?: string;
   /** Present when `state === "completed"`. */
   videoUrl?: string;
   hasAudio?: boolean;

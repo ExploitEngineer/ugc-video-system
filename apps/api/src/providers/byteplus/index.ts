@@ -181,23 +181,32 @@ export function createBytePlusProvider(): VideoProvider {
         content?: { video_url?: string };
       };
 
-      const state = mapState(json.status ?? "running");
-      log.debug("poll", { taskId: task.taskId, status: json.status, state });
+      const status = json.status ?? "running";
+      const state = mapState(status);
+      log.debug("poll", { taskId: task.taskId, status, state });
       if (state === "completed") {
         const videoUrl = json.content?.video_url;
         if (!videoUrl) {
-          return { state: "failed", error: "BytePlus succeeded but no video_url" };
+          return {
+            state: "failed",
+            status,
+            error: `BytePlus task ${task.taskId} succeeded but returned no video_url`,
+          };
         }
-        return { state, videoUrl, hasAudio: true };
+        return { state, status, videoUrl, hasAudio: true };
       }
       if (state === "failed") {
-        const error =
+        // Lead with the taskId + raw status so the message itself says which
+        // job and WHY (failed | cancelled | expired) — the classifier then keys
+        // `expired` → VIDEO_GENERATION_EXPIRED, everything else generic.
+        const providerMsg =
           typeof json.error === "string"
             ? json.error
-            : (json.error?.message ?? `BytePlus task ${json.status}`);
-        return { state, error };
+            : (json.error?.message ?? "");
+        const error = `BytePlus task ${task.taskId} ${status}${providerMsg ? `: ${providerMsg}` : ""}`;
+        return { state, status, error };
       }
-      return { state };
+      return { state, status };
     },
   };
 }
