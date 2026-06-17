@@ -145,13 +145,26 @@ export function RunView({ runId }: { runId: string }) {
   // and ones opened directly by URL. addRun is idempotent per id. If the run is
   // confirmed missing (404), drop it from history so the ghost entry can't keep
   // reappearing in the sidebar.
+  //
+  // Depend on the PRIMITIVE fields addRun uses, not the `run` object: SSE writes
+  // a new RunDetail into the cache on every frame, so `run`'s identity changes
+  // each push and depending on it would re-run this (findIndex + localStorage)
+  // every frame for the whole run.
+  const historyId = run?.id;
+  const historyPrompt = run?.prompt;
+  const historyCreatedAt = run?.createdAt;
+  const fetchErrorMessage = isError ? (error as Error).message : null;
   useEffect(() => {
-    if (run) {
-      addRun({ id: run.id, prompt: run.prompt, createdAt: run.createdAt });
-    } else if (isError && (error as Error).message === "not-found") {
+    if (historyId && historyPrompt && historyCreatedAt) {
+      addRun({
+        id: historyId,
+        prompt: historyPrompt,
+        createdAt: historyCreatedAt,
+      });
+    } else if (fetchErrorMessage === "not-found") {
       removeRun(runId);
     }
-  }, [run, isError, error, runId]);
+  }, [historyId, historyPrompt, historyCreatedAt, fetchErrorMessage, runId]);
 
   if (isError && (error as Error).message === "not-found") {
     return (

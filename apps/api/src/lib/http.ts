@@ -21,6 +21,21 @@ export interface FetchRetryOptions {
   label?: string;
   /** Base backoff in ms (capped-exponential: base·2^n, max 12s). Default 600. */
   baseDelayMs?: number;
+  /**
+   * Per-attempt timeout in ms — aborts a socket that connects but then stalls
+   * mid-response (undici has NO default response timeout, so without this a
+   * hung provider freezes the caller forever). Default 60s. A caller-supplied
+   * `init.signal` takes precedence.
+   */
+  timeoutMs?: number;
+  /**
+   * Retry a THROWN network error (connection reset, DNS, or the timeout abort).
+   * Default true. Set false for a NON-idempotent request (e.g. a task-submit
+   * POST): a socket that drops after the request reached the server would
+   * otherwise be retried and duplicate the action. Retryable HTTP *statuses*
+   * (429/5xx) are still retried regardless — the server told us to.
+   */
+  retryOnNetworkError?: boolean;
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -39,11 +54,18 @@ export async function fetchWithRetry(
   const attempts = Math.max(1, opts.attempts ?? 4);
   const base = opts.baseDelayMs ?? 600;
   const label = opts.label ?? "fetch";
+  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const retryOnNetworkError = opts.retryOnNetworkError ?? true;
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const res = await fetch(url, init);
+      const res = await fetch(url, {
+        ...init,
+        // Caller signal wins; otherwise enforce a per-attempt timeout so a
+        // stalled response can never hang the worker indefinitely.
+        signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
+      });
       if (!RETRYABLE_STATUS.has(res.status) || attempt === attempts) return res;
       lastErr = new Error(`HTTP ${res.status}`);
       log.warn("retryable status", { label, attempt, status: res.status });
@@ -56,6 +78,9 @@ export async function fetchWithRetry(
         attempt,
         err: cause?.code ?? cause?.message ?? (err as Error).message,
       });
+      // Non-idempotent caller: the request may have reached the server before
+      // the socket dropped, so retrying could duplicate it — surface instead.
+      if (!retryOnNetworkError) throw err;
       if (attempt === attempts) break;
     }
     // Capped exponential backoff + jitter, so parallel fan-out retries don't

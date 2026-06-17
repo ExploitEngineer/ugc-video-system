@@ -12,10 +12,12 @@ import {
   isMultiSegment,
 } from "@ugc/shared";
 import type { Run, RunDetail } from "@ugc/shared";
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import sharp from "sharp";
 import {
   gateForCurrentStep,
   getOpenAI,
@@ -45,6 +47,15 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED_VIDEO_MIME = ["video/mp4"];
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200MB — headroom for a ~60s 1080p client-side MP4 export
 
+// Coarse request-body caps enforced by `bodyLimit` middleware BEFORE
+// `parseBody` buffers the whole body into memory (the DoS backstop; the
+// per-field validate* checks below remain the exact limits). Headroom over the
+// per-file limit covers multipart boundaries/overhead.
+const MAX_CREATE_BODY_BYTES = 12 * 1024 * 1024; // 10MB image + overhead
+const MAX_EDITED_VIDEO_BODY_BYTES = 210 * 1024 * 1024; // 200MB video + overhead
+const bodyTooLarge = (c: Context) =>
+  c.json({ error: "Upload too large.", code: "PAYLOAD_TOO_LARGE" }, 413);
+
 const log = createLogger("runs");
 
 export const runs = new Hono();
@@ -59,22 +70,25 @@ const SSE_TICK_MS = 250;
 const SSE_BACKSTOP_TICKS = 40; // 40 × 250ms ≈ 10s
 const SSE_HEARTBEAT_TICKS = 80; // 80 × 250ms ≈ 20s
 
-interface SnapshotResult<T> {
-  data: T;
-  /** Cheap change key — identical-signature frames are skipped. */
-  sig: string;
-  /** Terminal + settled → send a final `done` event and close the stream. */
-  done?: boolean;
-}
-
-/** Generic snapshot streamer: subscribe to the bus, re-read on change, push a
- *  frame only when the signature moves. Shared by both SSE routes below. */
+/**
+ * Generic snapshot streamer. Subscribe to the bus, then each tick probe a CHEAP
+ * change key (`readSig`); only when it moves do we build + push the full payload
+ * (`load`). This keeps the expensive read (5 queries + Zod + JSON.stringify of
+ * the growing run history) off every backstop tick and every idle frame — it
+ * runs once per ACTUAL change, not per tick × open client. Shared by both SSE
+ * routes below.
+ */
 function streamSnapshots<T>(
   c: Context,
   opts: {
     subscribe: (cb: () => void) => void;
     unsubscribe: (cb: () => void) => void;
-    read: () => Promise<SnapshotResult<T> | null>;
+    /** Cheap change key (tiny query). `null` ⇒ gone (e.g. deleted mid-stream). */
+    readSig: () => Promise<string | null>;
+    /** Full payload build — runs ONLY when `readSig` moved. */
+    load: () => Promise<T>;
+    /** Terminal + settled → send a final `done` event and close the stream. */
+    done?: (data: T) => boolean;
   },
 ) {
   return streamSSE(c, async (stream) => {
@@ -89,19 +103,23 @@ function streamSnapshots<T>(
     let tick = 0;
     try {
       while (!stream.aborted && !stream.closed) {
-        // Re-read when a signal arrived, or on the periodic backstop tick.
+        // Probe the cheap signature when a signal arrived or on the backstop.
         if (dirty || tick % SSE_BACKSTOP_TICKS === 0) {
           dirty = false;
-          const snap = await opts.read().catch(() => null);
-          if (snap && snap.sig !== lastSig) {
-            lastSig = snap.sig;
-            await stream.writeSSE({
-              event: "snapshot",
-              data: JSON.stringify(snap.data),
-            });
-            if (snap.done) {
-              await stream.writeSSE({ event: "done", data: "{}" });
-              break;
+          const sig = await opts.readSig().catch(() => null);
+          if (sig !== null && sig !== lastSig) {
+            lastSig = sig;
+            // Only NOW pay for the full payload build.
+            const data = await opts.load().catch(() => null);
+            if (data !== null) {
+              await stream.writeSSE({
+                event: "snapshot",
+                data: JSON.stringify(data),
+              });
+              if (opts.done?.(data)) {
+                await stream.writeSSE({ event: "done", data: "{}" });
+                break;
+              }
             }
           }
         }
@@ -117,23 +135,57 @@ function streamSnapshots<T>(
   });
 }
 
-/** The `GET /runs` list payload — shared by the list route + its stream. */
+/** The `GET /runs` list payload — shared by the list route + its stream. Selects
+ *  only the columns `toRunDto` reads, NOT the heavy jsonb
+ *  (`narrativeOutline`/`productUse`/`visualStyle`) the list DTO never carries. */
 async function loadRunList(): Promise<Run[]> {
   const rows = await db
-    .select()
+    .select({
+      id: schema.runs.id,
+      projectId: schema.runs.projectId,
+      prompt: schema.runs.prompt,
+      adStyle: schema.runs.adStyle,
+      adType: schema.runs.adType,
+      mode: schema.runs.mode,
+      aspectRatio: schema.runs.aspectRatio,
+      duration: schema.runs.duration,
+      criticEnabled: schema.runs.criticEnabled,
+      status: schema.runs.status,
+      currentStep: schema.runs.currentStep,
+      error: schema.runs.error,
+      errorCode: schema.runs.errorCode,
+      feedback: schema.runs.feedback,
+      createdAt: schema.runs.createdAt,
+      updatedAt: schema.runs.updatedAt,
+    })
     .from(schema.runs)
     .orderBy(desc(schema.runs.createdAt));
   return rows.map(toRunDto);
 }
 
-/** Cheap list signature — id+status+updatedAt across all rows (also catches
- *  create/delete via row count). */
-const runListSig = (rows: Run[]): string =>
-  rows.map((r) => `${r.id}:${r.status}:${r.updatedAt}`).join("|");
+/** Cheap list change key — row count + newest updatedAt. A create/delete moves
+ *  the count; any status/step change bumps a row's updatedAt (so the max moves).
+ *  The ~10s backstop covers the rare same-instant collision. */
+async function listSig(): Promise<string> {
+  const [agg] = await db
+    .select({
+      n: sql<number>`count(*)::int`,
+      m: sql<string>`coalesce(max(${schema.runs.updatedAt})::text, '')`,
+    })
+    .from(schema.runs);
+  return `${agg?.n ?? 0}:${agg?.m ?? ""}`;
+}
 
-/** Cheap run-detail signature — status, timestamp, and step/asset counts. */
-const runDetailSig = (run: RunDetail): string =>
-  `${run.status}:${run.updatedAt}:${run.stepEvents.length}:${run.assets.length}`;
+/** Cheap per-run change key — status + updatedAt only (no joins/jsonb). `null`
+ *  when the run is gone (deleted mid-stream). */
+async function runHeadSig(id: string): Promise<string | null> {
+  const [head] = await db
+    .select({ status: schema.runs.status, updatedAt: schema.runs.updatedAt })
+    .from(schema.runs)
+    .where(eq(schema.runs.id, id))
+    .limit(1);
+  return head ? `${head.status}:${head.updatedAt.getTime()}` : null;
+}
 
 /** A per-run stream closes once the run is terminal AND its final output landed
  *  (mirrors the old poll's stop condition so the clip is never stranded). */
@@ -184,8 +236,41 @@ async function fileToBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
 }
 
+/**
+ * Sniff actual image bytes. The multipart part's Content-Type is client-
+ * controlled, so confirm the bytes really decode as one of the allowed formats
+ * before we store them verbatim (the product image is NOT re-encoded). Rejects
+ * mislabeled/undecodable content with a 422.
+ */
+async function assertImageBytes(bytes: Uint8Array, field: string): Promise<void> {
+  let format: string | undefined;
+  try {
+    format = (await sharp(Buffer.from(bytes)).metadata()).format;
+  } catch {
+    throw unprocessable(`${field} is not a readable image. Use PNG, JPEG, or WebP.`);
+  }
+  if (!format || !["png", "jpeg", "webp"].includes(format)) {
+    throw unprocessable(`${field} is not a PNG, JPEG, or WebP image.`);
+  }
+}
+
+/** Confirm MP4 bytes by the ISO-BMFF `ftyp` box marker at offset 4 (the
+ *  declared video type is client-controlled). */
+function assertMp4Bytes(bytes: Uint8Array, field: string): void {
+  const hasFtyp =
+    bytes.length > 12 &&
+    bytes[4] === 0x66 && // f
+    bytes[5] === 0x74 && // t
+    bytes[6] === 0x79 && // y
+    bytes[7] === 0x70; // p
+  if (!hasFtyp) throw unprocessable(`${field} is not a valid MP4 file.`);
+}
+
 // ── POST /runs — create a run from multipart form data ────────────────
-runs.post("/", async (c) => {
+runs.post(
+  "/",
+  bodyLimit({ maxSize: MAX_CREATE_BODY_BYTES, onError: bodyTooLarge }),
+  async (c) => {
   const body = await c.req.parseBody();
 
   const productImage = validateImage(body.productImage, "productImage", true);
@@ -215,10 +300,14 @@ runs.post("/", async (c) => {
   // (aspect 0.4–2.5, height 300–6000) so the stored `person_upload` is always
   // usable as a face asset. The product image is left untouched — it never
   // reaches CreateAsset, and padding bars would leak into generated stills.
+  const productBytes = await fileToBytes(productImage as File);
+  // Verify the bytes really decode as an allowed image — the declared MIME is
+  // client-controlled and the product image is stored verbatim.
+  await assertImageBytes(productBytes, "productImage");
   const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [
     {
       kind: "product_upload",
-      bytes: await fileToBytes(productImage as File),
+      bytes: productBytes,
       mime: (productImage as File).type,
     },
   ];
@@ -317,10 +406,8 @@ runs.get("/events", (c) => {
   return streamSnapshots<Run[]>(c, {
     subscribe: onListChanged,
     unsubscribe: offListChanged,
-    read: async () => {
-      const rows = await loadRunList();
-      return { data: rows, sig: runListSig(rows) };
-    },
+    readSig: listSig,
+    load: loadRunList,
   });
 });
 
@@ -341,14 +428,9 @@ runs.get("/:id/events", async (c) => {
   return streamSnapshots<RunDetail>(c, {
     subscribe: (cb) => onRunChanged(id, cb),
     unsubscribe: (cb) => offRunChanged(id, cb),
-    read: async () => {
-      const detail = await loadRunDetail(id);
-      return {
-        data: detail,
-        sig: runDetailSig(detail),
-        done: isSettled(detail),
-      };
-    },
+    readSig: () => runHeadSig(id),
+    load: () => loadRunDetail(id),
+    done: isSettled,
   });
 });
 
@@ -466,13 +548,19 @@ runs.get("/:id/artifacts", async (c) => {
 // original `final_video` is always kept — and, when the editor includes one,
 // the serialized scene lands as `editor_scene` so reopening resumes the edit.
 // Multipart body: `video` (required MP4) + `scene` (optional scene JSON).
-runs.post("/:id/edited-video", async (c) => {
+runs.post(
+  "/:id/edited-video",
+  bodyLimit({ maxSize: MAX_EDITED_VIDEO_BODY_BYTES, onError: bodyTooLarge }),
+  async (c) => {
   const id = c.req.param("id");
   const run = await getRunOr404(id);
   assertStatus(run, ["completed"], "Run is not completed.");
 
   const body = await c.req.parseBody();
   const video = validateVideo(body.video, "video");
+  const videoBytes = await fileToBytes(video);
+  // Confirm real MP4 bytes — the declared video type is client-controlled.
+  assertMp4Bytes(videoBytes, "video");
   const sceneValue = body.scene;
   const scene =
     sceneValue instanceof File && sceneValue.size > 0 ? sceneValue : null;
@@ -480,7 +568,7 @@ runs.post("/:id/edited-video", async (c) => {
   await persistAsset({
     runId: id,
     kind: "edited_video",
-    bytes: await fileToBytes(video),
+    bytes: videoBytes,
     mime: "video/mp4",
     meta: { source: "cesdk" },
   });

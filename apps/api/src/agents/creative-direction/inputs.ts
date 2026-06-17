@@ -4,7 +4,7 @@
 // Every step reloads from the DB (never threads state through memory) so a
 // crash/restart resumes purely from persisted rows.
 
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "../../db/index.js";
 import type { ImageRef } from "../../providers/openai/index.js";
 import type { NarrativeOutline } from "../types.js";
@@ -227,6 +227,22 @@ export async function persistedSegmentVideoIndices(
 ): Promise<Set<number>> {
   const vids = await segmentVideos(runId);
   return new Set(vids.map((v) => v.segmentIndex));
+}
+
+/**
+ * Whether the run's single FINAL video (the 15s clip / merged output, i.e. the
+ * `videos` row with `segment_index IS NULL`) is already persisted. The 15s
+ * `video` step's idempotent-resume guard, mirroring the segment guards above so
+ * a crash before the `completed` write can't trigger a second paid generation.
+ */
+export async function persistedFinalVideo(runId: string): Promise<boolean> {
+  const row = await db.query.videos.findFirst({
+    where: and(
+      eq(schema.videos.runId, runId),
+      isNull(schema.videos.segmentIndex),
+    ),
+  });
+  return Boolean(row);
 }
 
 /** Newest generated person sheet URL for the run (none when person uploaded). */

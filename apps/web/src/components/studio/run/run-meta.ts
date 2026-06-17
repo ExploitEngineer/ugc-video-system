@@ -262,25 +262,6 @@ export function stepState(run: RunDetail, step: Step): StepState {
   return "pending";
 }
 
-export const STATUS_LABEL: Record<RunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  awaiting_confirmation: "Awaiting confirmation",
-  regenerating: "Regenerating",
-  completed: "Completed",
-  failed: "Failed",
-};
-
-/** Tailwind classes for the colored status dot, shared by header + sidebar. */
-export const STATUS_DOT: Record<RunStatus, string> = {
-  queued: "bg-muted-foreground",
-  running: "bg-brand animate-pulse",
-  awaiting_confirmation: "bg-warning",
-  regenerating: "bg-warning animate-pulse",
-  completed: "bg-success",
-  failed: "bg-destructive",
-};
-
 export function isTerminal(status: RunStatus) {
   return status === "completed" || status === "failed";
 }

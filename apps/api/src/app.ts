@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { env } from "./config/index.js";
 import { onError } from "./lib/errors.js";
+import { createLogger } from "./lib/log.js";
 import { runs } from "./routes/runs.js";
 
 export function createApp() {
@@ -15,10 +16,18 @@ export function createApp() {
   const allowed = env.CORS_ORIGIN.split(",")
     .map((o) => o.trim())
     .filter(Boolean);
+  const wildcard = allowed.includes("*");
+  // A wildcard origin in production is almost never intended — surface it loudly
+  // so a real frontend allowlist is set instead of shipping "*".
+  if (wildcard && env.NODE_ENV === "production") {
+    createLogger("app").warn(
+      "CORS_ORIGIN is '*' in production — set an explicit frontend origin allowlist",
+    );
+  }
   app.use(
     "*",
     cors({
-      origin: allowed.includes("*") ? "*" : allowed,
+      origin: wildcard ? "*" : allowed,
       allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type"],
     }),

@@ -9,7 +9,7 @@ import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
 import { createLogger } from "../../lib/log.js";
-import { driveRun } from "./orchestrator.js";
+import { driveRun, failRun } from "./orchestrator.js";
 
 /** Statuses the driver can advance. Terminal + awaiting_confirmation are skipped. */
 const CLAIMABLE: RunStatus[] = ["queued", "running", "regenerating"];
@@ -85,8 +85,22 @@ async function tick(): Promise<void> {
     const heartbeat = setInterval(() => {
       void db
         .update(schema.runs)
-        .set({ lockedAt: new Date(), lockedBy: workerId })
-        .where(eq(schema.runs.id, id))
+        .set({ lockedAt: new Date() })
+        // Refresh ONLY if we still hold the lock. If another worker stale-
+        // reclaimed this run, an unconditional refresh would steal it back and
+        // run two drivers at once (the exact race the lock prevents). On 0 rows
+        // we lost it: stop the heartbeat so we can't resurrect ownership — the
+        // driver then bails at its next ownsRun() check.
+        .where(and(eq(schema.runs.id, id), eq(schema.runs.lockedBy, workerId)))
+        .returning({ id: schema.runs.id })
+        .then((rows) => {
+          if (rows.length === 0) {
+            clearInterval(heartbeat);
+            log.warn("lost lock during heartbeat — stopped refreshing", {
+              run: id,
+            });
+          }
+        })
         // Best effort: a missed refresh just lets the lock go stale (the run is
         // re-claimable later). Log it so a flaky DB is visible, never crash.
         .catch((err) =>
@@ -98,12 +112,22 @@ async function tick(): Promise<void> {
     }, HEARTBEAT_MS);
 
     void driveRun(id, workerId)
-      .catch((err) =>
+      .catch(async (err) => {
         log.error("driveRun threw", {
           run: id,
           err: err instanceof Error ? err.message : String(err),
-        }),
-      )
+        });
+        // Safety net: an escape from driveRun (a throw OUTSIDE its per-step
+        // try/catch — loadUploads, a status read/write, a bug) left the run
+        // non-terminal. Move it to failed so the worker doesn't reclaim and
+        // re-run it every tick forever.
+        await failRun(id, null, err).catch((e) =>
+          log.error("failRun (driveRun safety net) threw", {
+            run: id,
+            err: e instanceof Error ? e.message : String(e),
+          }),
+        );
+      })
       .finally(async () => {
         clearInterval(heartbeat);
         inFlight.delete(id);

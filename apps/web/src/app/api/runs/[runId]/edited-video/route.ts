@@ -4,7 +4,7 @@
 // (not a Server Action, whose ~1MB body cap rejects real video) keeps the
 // browser same-origin — no CORS, no public API URL needed.
 
-import { apiUrl } from "@/lib/api";
+import { proxyUpload } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -13,20 +13,5 @@ export async function POST(
   { params }: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await params;
-
-  try {
-    const res = await fetch(apiUrl(`/runs/${runId}/edited-video`), {
-      method: "POST",
-      body: req.body,
-      headers: { "content-type": req.headers.get("content-type") ?? "" },
-      duplex: "half", // stream the request body instead of buffering it
-      cache: "no-store",
-    } as RequestInit);
-    const body = await res
-      .json()
-      .catch(() => ({ error: "Bad response from API" }));
-    return Response.json(body, { status: res.status });
-  } catch {
-    return Response.json({ error: "API unreachable" }, { status: 502 });
-  }
+  return proxyUpload(`/runs/${encodeURIComponent(runId)}/edited-video`, req);
 }
