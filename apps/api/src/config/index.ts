@@ -15,6 +15,12 @@ const serverEnvSchema = z.object({
   // OpenAI — GPT Image 2 + LLM reasoning/critique
   OPENAI_API_KEY: z.string().min(1),
 
+  // OpenRouter — Claude Sonnet 4.6 for the vision/label-reading steps
+  // (describeProduct, derivePersonBrief). OpenAI-SDK-compatible endpoint.
+  // Optional: when unset, those steps silently fall back to gpt-4.1, so the
+  // server still boots and runs without it.
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
   // The `ark-` key authenticates VIDEO GENERATION (inference) only.
   BYTEPLUS_API_KEY: z.string().min(1),

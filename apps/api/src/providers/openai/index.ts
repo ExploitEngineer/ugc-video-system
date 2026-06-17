@@ -19,6 +19,8 @@ import {
   DEFAULT_IMAGE_SIZE,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_CLAUDE_MODEL,
 } from "./constants.js";
 
 const log = createLogger("openai");
@@ -35,6 +37,12 @@ export interface GenerateImageInput {
   /** Optional reference images (product upload, prior sheets, …). */
   refs?: ImageRef[];
   size?: string;
+  /**
+   * Render quality. gpt-image-2's biggest fidelity lever for labels/text and
+   * dense product detail (low→high ≈ 35× sharper, ~4× slower). Defaults to
+   * `"high"` — every sheet in this pipeline carries product markings or a face.
+   */
+  quality?: "low" | "medium" | "high" | "auto";
 }
 
 export interface GenerateImageResult {
@@ -58,8 +66,19 @@ export interface ChatOptions {
    * Force `response_format: json_object` — the model must emit a single JSON
    * object. Use for every strict-JSON skill; it also hardens against mid-string
    * truncation. Safe only when the prompt asks for JSON (all our skills do).
+   *
+   * NOTE: only honored on the `"openai"` backend. Claude-via-OpenRouter does not
+   * reliably support basic JSON mode (and can error on it), so on `"claude"` we
+   * skip `response_format` and lean on the strict-JSON prompt + the forgiving
+   * `parseJsonObject` (fence-stripping + brace-slicing) instead.
    */
   jsonMode?: boolean;
+  /**
+   * Reasoning backend. `"openai"` (default) → gpt-4.1. `"claude"` → Claude
+   * Sonnet 4.6 via OpenRouter, for the vision/label-reading steps. If
+   * `OPENROUTER_API_KEY` is unset, `"claude"` silently falls back to gpt-4.1.
+   */
+  backend?: "openai" | "claude";
 }
 
 export interface OpenAIProvider {
@@ -88,6 +107,27 @@ function getClient(): OpenAI {
     });
   }
   return client;
+}
+
+/**
+ * OpenRouter client for the Claude-routed chat steps. Same OpenAI SDK, just a
+ * different base URL + key (OpenRouter is OpenAI-API-compatible). Lazy + cached;
+ * only built when a `"claude"` chat call actually fires.
+ */
+let orClient: OpenAI | null = null;
+function getOpenRouterClient(): OpenAI {
+  if (!orClient) {
+    if (!env.OPENROUTER_API_KEY) {
+      throw internal("OPENROUTER_API_KEY is not set; cannot route to Claude.");
+    }
+    orClient = new OpenAI({
+      apiKey: env.OPENROUTER_API_KEY,
+      baseURL: OPENROUTER_BASE_URL,
+      timeout: 240_000,
+      maxRetries: 4,
+    });
+  }
+  return orClient;
 }
 
 /** Image-gen attempts before giving up (covers truncated-body JSON failures). */
@@ -150,18 +190,28 @@ export function createOpenAIProvider(): OpenAIProvider {
     async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
+      // Route to Claude only when asked AND the key is present; otherwise the
+      // step degrades to gpt-4.1 (safe — the Claude steps are best-effort).
+      const useClaude =
+        opts?.backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
+      const apiClient = useClaude ? getOpenRouterClient() : getClient();
+      const model = useClaude ? OPENROUTER_CLAUDE_MODEL : OPENAI_CHAT_MODEL;
+      // json_object is reliable on gpt-4.1; on Claude-via-OpenRouter it is not
+      // guaranteed (and can error) — skip it there and trust the prompt + parser.
+      const wantJson = Boolean(opts?.jsonMode) && !useClaude;
       const t0 = Date.now();
       log.debug("chat →", {
-        model: OPENAI_CHAT_MODEL,
+        model,
+        backend: useClaude ? "claude" : "openai",
         msgs: sdkMessages.length,
         maxTokens,
-        jsonMode: Boolean(opts?.jsonMode),
+        jsonMode: wantJson,
       });
-      const completion = await getClient().chat.completions.create({
-        model: OPENAI_CHAT_MODEL,
+      const completion = await apiClient.chat.completions.create({
+        model,
         messages: sdkMessages,
         max_completion_tokens: maxTokens,
-        ...(opts?.jsonMode
+        ...(wantJson
           ? { response_format: { type: "json_object" as const } }
           : {}),
       });
@@ -178,6 +228,7 @@ export function createOpenAIProvider(): OpenAIProvider {
 
     async generateImage(input) {
       const size = input.size ?? DEFAULT_IMAGE_SIZE;
+      const quality = input.quality ?? "high";
       const mode = input.refs?.length ? "edit" : "generate";
       // Pre-fetch the reference files ONCE (not per attempt).
       const refFiles = input.refs?.length
@@ -196,6 +247,7 @@ export function createOpenAIProvider(): OpenAIProvider {
           mode,
           refs: input.refs?.length ?? 0,
           size,
+          quality,
           attempt,
         });
         try {
@@ -205,11 +257,13 @@ export function createOpenAIProvider(): OpenAIProvider {
                 image: refFiles,
                 prompt: input.prompt,
                 size: size as never,
+                quality: quality as never,
               })
             : await getClient().images.generate({
                 model: OPENAI_IMAGE_MODEL,
                 prompt: input.prompt,
                 size: size as never,
+                quality: quality as never,
               });
 
           const b64 = result.data?.[0]?.b64_json;

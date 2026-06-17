@@ -26,7 +26,9 @@ export async function derivePersonBrief(
       adStyle: ctx.adStyle,
       personUpload: input.personUpload,
     }),
-    { jsonMode: true },
+    // Claude Sonnet 4.6: stronger vision read of the uploaded person (gender /
+    // age / hair) than gpt-4.1; falls back to gpt-4.1 if OpenRouter is unset.
+    { jsonMode: true, backend: "claude" },
   );
   const plan = parseJsonObject<PersonBriefPlan>(reply);
   return { personBrief: plan.personBrief?.trim() ?? "" };

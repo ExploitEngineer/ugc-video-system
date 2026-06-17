@@ -47,6 +47,9 @@ export async function productSheetBuilder(
     prompt: plan.imagePrompt,
     refs: [input.productUpload],
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
+    // High quality: the product sheet is the identity anchor — its label text,
+    // markings and finish must be sharp enough to drive every downstream render.
+    quality: "high",
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
 

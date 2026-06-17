@@ -116,6 +116,9 @@ export async function generatePersonImage(
     prompt: plan.imagePrompt,
     refs: input.baseRef ? [input.baseRef] : undefined,
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
+    // High quality: keeps the face/skin/wardrobe sharp and consistent for the
+    // downstream identity lock.
+    quality: "high",
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
 
