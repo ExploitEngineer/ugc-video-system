@@ -281,7 +281,15 @@ export async function videoBuilder(
         `@Image${boardNo + 1} (the on-screen face) is the presenter — keep this exact face and identity for the entire shot`,
       );
     }
-    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}`;
+    // Standard Seedance 2.0 negatives (per the prompting guide): a short,
+    // relevant set appended at the tail — jitter + bent limbs are the canonical
+    // motion artifacts; temporal flicker matters on ~15s clips; identity drift
+    // guards the face/product consistency this pipeline depends on. Kept to four
+    // (the guide warns too many negatives dull the result) and placed once here
+    // so BOTH the LLM and deterministic prompts carry them.
+    const negatives =
+      "Keep motion natural and physically stable: avoid jitter, avoid bent or distorted limbs, avoid temporal flicker, and avoid identity drift in the face or product.";
+    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}\n\n${negatives}`;
 
     const task = await ctx.video.submitVideo({
       referenceImages,

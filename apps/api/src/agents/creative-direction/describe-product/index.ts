@@ -37,7 +37,9 @@ export async function describeProduct(
       adStyle: ctx.adStyle,
       productUpload: input.productUpload,
     }),
-    { jsonMode: true },
+    // Claude Sonnet 4.6: stronger label/marking OCR + disciplined JSON for the
+    // product identity anchor; falls back to gpt-4.1 if OpenRouter is unset.
+    { jsonMode: true, backend: "claude" },
   );
   const plan = parseJsonObject<ProductBriefPlan>(reply);
   return {

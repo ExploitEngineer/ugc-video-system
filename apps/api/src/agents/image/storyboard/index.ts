@@ -143,6 +143,9 @@ async function renderStoryboard(
     prompt: imagePrompt,
     refs,
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
+    // High quality: these panels are the final frames that feed the video — the
+    // product/label fidelity and per-panel sharpness ride directly into Seedance.
+    quality: "high",
   });
   log.debug("✓ image generated", { bytes: bytes.length, mime });
   return { bytes, mime, scenes: plan.scenes, imagePrompt };
@@ -153,7 +156,10 @@ export async function storyboardGenerator(
   input: StoryboardInput,
 ): Promise<SkillResult<StoryboardSheet>> {
   const log = createLogger("image", { run: ctx.runId, skill: "storyboard" });
-  const { bytes, mime, scenes, imagePrompt } = await renderStoryboard(ctx, input);
+  const { bytes, mime, scenes, imagePrompt } = await renderStoryboard(
+    ctx,
+    input,
+  );
 
   const { assetId, assetUrl, artifact } = await persistSheet({
     runId: ctx.runId,
