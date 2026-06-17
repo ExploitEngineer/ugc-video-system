@@ -33,8 +33,10 @@ const log = createLogger("merge");
 const MAX_CONCURRENT_MERGES = 1;
 /** Per-ffmpeg thread cap so one merge can't monopolise every core. */
 const FFMPEG_THREADS = 2;
-/** Hard backstop per ffmpeg invocation — a pass that runs this long is hung. */
-const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
+/** Hard backstop per ffmpeg invocation — a pass that runs this long is hung. A
+ *  normalize/concat/mix pass on a ~15–60s clip finishes in low minutes; 4 min
+ *  is generous while bounding how long a stuck pass can hold the merge slot. */
+const FFMPEG_TIMEOUT_MS = 4 * 60 * 1000;
 /**
  * Pinned output fps. Seedance clips are 24fps; pinning makes every pass-A
  * intermediate identical (a hard requirement for the `-c copy` concat) and is
@@ -176,7 +178,11 @@ async function runFfmpegWithRetry(args: string[], label: string): Promise<void> 
   try {
     await runFfmpeg(args, label);
   } catch (err) {
-    if (err instanceof FfmpegError && err.kind !== "exit") {
+    // Retry ONLY a signal/OOM kill (usually transient memory pressure). A
+    // TIMEOUT means the pass is genuinely stuck — retrying just holds the single
+    // process-wide merge slot for another full timeout, stalling every other
+    // run's merge + audio-extract. A nonzero `exit` is deterministic, not retried.
+    if (err instanceof FfmpegError && err.kind === "signal") {
       log.warn(`ffmpeg (${label}) ${err.kind} — retrying once`, { err: err.message });
       await runFfmpeg(args, label);
       return;
@@ -296,36 +302,47 @@ export async function mergeSegmentUrls(
     );
 
     // Pass C — mix the (looped, loudness-matched, ducked) music bed under the
-    // native audio. Video is stream-copied; only audio re-encodes.
+    // native audio. Video is stream-copied; only audio re-encodes. Best-effort:
+    // music is OPTIONAL, so a bad/incompatible bed must never discard a good video.
     let finalFile = merged;
     if (musicFile) {
-      const withMusic = join(dir, "final.mp4");
-      const filter =
-        `[0:a]asplit=2[ack][acm];` +
-        `[1:a]${MUSIC_LOUDNORM}[mraw];` +
-        `[mraw][ack]${MUSIC_DUCK}[mduck];` +
-        `[acm][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`;
-      await runFfmpegWithRetry(
-        [
-          "-y",
-          "-i", merged,
-          // Loop the music to cover the full video; `-shortest` trims it.
-          "-stream_loop", "-1",
-          "-i", musicFile,
-          "-filter_complex", filter,
-          "-map", "0:v",
-          "-map", "[a]",
-          "-c:v", "copy",
-          "-c:a", "aac",
-          "-b:a", "192k",
-          "-threads", String(FFMPEG_THREADS),
-          "-shortest",
-          "-movflags", "+faststart",
-          withMusic,
-        ],
-        "music-mix",
-      );
-      finalFile = withMusic;
+      try {
+        const withMusic = join(dir, "final.mp4");
+        const filter =
+          `[0:a]asplit=2[ack][acm];` +
+          `[1:a]${MUSIC_LOUDNORM}[mraw];` +
+          `[mraw][ack]${MUSIC_DUCK}[mduck];` +
+          `[acm][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`;
+        await runFfmpegWithRetry(
+          [
+            "-y",
+            "-i", merged,
+            // Loop the music to cover the full video; `-shortest` trims it.
+            "-stream_loop", "-1",
+            "-i", musicFile,
+            "-filter_complex", filter,
+            "-map", "0:v",
+            "-map", "[a]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-threads", String(FFMPEG_THREADS),
+            "-shortest",
+            "-movflags", "+faststart",
+            withMusic,
+          ],
+          "music-mix",
+        );
+        finalFile = withMusic;
+      } catch (err) {
+        // A URL that 200s with non-audio bytes (HTML error page, expired CDN
+        // object) downloads fine but has no audio stream, so pass C fails here.
+        // Fall back to the music-free concat instead of failing the whole run.
+        log.warn("music mix failed — using the music-free merge", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+        finalFile = merged;
+      }
     }
 
     const bytes = await readFile(finalFile);

@@ -13,7 +13,9 @@
 // out of the rendered frame.
 
 import { env } from "../../config/index.js";
+import { fetchWithRetry } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
+import { redactUrls } from "../../lib/run-failure.js";
 import { ensureFaceAsset, isAssetMgmtConfigured } from "./assets.js";
 import type {
   SubmitVideoInput,
@@ -52,48 +54,51 @@ const imagePart = (url: string, role = "reference_image"): ContentPart => ({
   image_url: { url },
 });
 
-/** Map BytePlus task status → our coarse VideoTaskState. */
+/** BytePlus statuses that mean "still working — keep polling". */
+const PROCESSING_STATUSES = new Set([
+  "queued",
+  "running",
+  "pending",
+  "in_progress",
+]);
+
+/** Map BytePlus task status → our coarse VideoTaskState. An unmapped status is
+ *  treated as a FAILURE (surfaced with the raw status) rather than silently
+ *  polled until the 30-min timeout. */
 function mapState(status: string): VideoTaskState {
   if (status === "succeeded") return "completed";
   if (status === "failed" || status === "cancelled" || status === "expired") {
     return "failed";
   }
-  return "processing"; // queued | running
+  if (PROCESSING_STATUSES.has(status)) return "processing";
+  log.warn("unmapped BytePlus task status — treating as failed", { status });
+  return "failed";
 }
 
 async function bytePlusFetch(path: string, init?: RequestInit): Promise<unknown> {
   const url = `${env.BYTEPLUS_BASE_URL}/api/v3${path}`;
+  const method = (init?.method ?? "GET").toUpperCase();
   const headers = {
     Authorization: `Bearer ${env.BYTEPLUS_API_KEY}`,
     "Content-Type": "application/json",
     ...init?.headers,
   };
 
-  // Retry transient network failures (the bare "fetch failed" / connection
-  // reset / timeout that undici throws) a few times before giving up — a single
-  // blip on the submit or a poll shouldn't kill a whole video run. A thrown
-  // fetch never reached the server, so retrying is safe.
-  let res: Response | undefined;
-  let lastDetail = "";
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      res = await fetch(url, { ...init, headers });
-      break;
-    } catch (err) {
-      const cause = (err as { cause?: { code?: string; message?: string } })
-        .cause;
-      lastDetail = cause?.code ?? cause?.message ?? (err as Error).message;
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 800 * attempt));
-    }
-  }
-  if (!res) {
-    throw new Error(`BytePlus ${path} request failed: ${lastDetail}`);
-  }
+  // fetchWithRetry gives us a per-attempt timeout (a stalled poll/submit must
+  // never hang the worker) + capped backoff. Only the idempotent poll (GET)
+  // retries a thrown network error; the submit POST does NOT — a drop AFTER the
+  // request reached BytePlus would create a duplicate, paid generation task.
+  const res = await fetchWithRetry(
+    url,
+    { ...init, headers },
+    { label: `byteplus ${path}`, retryOnNetworkError: method === "GET" },
+  );
 
   const text = await res.text();
   if (!res.ok) {
+    // Redact any echoed signed URLs/tokens before this reaches logs/step_events.
     throw new Error(
-      `BytePlus ${path} failed: ${res.status} ${text.slice(0, 500)}`,
+      `BytePlus ${path} failed: ${res.status} ${redactUrls(text).slice(0, 500)}`,
     );
   }
   return text ? JSON.parse(text) : {};

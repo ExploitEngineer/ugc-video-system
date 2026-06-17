@@ -108,21 +108,28 @@ export function getPublicUrl(storagePath: string): string {
  */
 export async function deleteRunObjects(runId: string): Promise<void> {
   const prefix = `runs/${runId}`;
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .list(prefix, { limit: 1000 });
-  if (error) {
-    throw internal(`Storage list failed for run ${runId}: ${error.message}`);
-  }
-  if (!data || data.length === 0) return;
+  const PAGE = 100;
+  // Page through the flat prefix until a short/empty page. We always list from
+  // offset 0 because each iteration REMOVES what it listed, so the next "first
+  // page" is the previously-unseen objects — an offset would skip items.
+  for (;;) {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .list(prefix, { limit: PAGE });
+    if (error) {
+      throw internal(`Storage list failed for run ${runId}: ${error.message}`);
+    }
+    if (!data || data.length === 0) return;
 
-  const paths = data.map((obj) => `${prefix}/${obj.name}`);
-  const { error: removeError } = await supabase.storage
-    .from(BUCKET)
-    .remove(paths);
-  if (removeError) {
-    throw internal(
-      `Storage delete failed for run ${runId}: ${removeError.message}`,
-    );
+    const paths = data.map((obj) => `${prefix}/${obj.name}`);
+    const { error: removeError } = await supabase.storage
+      .from(BUCKET)
+      .remove(paths);
+    if (removeError) {
+      throw internal(
+        `Storage delete failed for run ${runId}: ${removeError.message}`,
+      );
+    }
+    if (data.length < PAGE) return; // last page — nothing more to remove
   }
 }

@@ -92,9 +92,12 @@ export async function uploadEditedVideo(
 export async function ensureAudioTrack(
   runId: string,
 ): Promise<{ url: string }> {
-  const res = await fetch(`/api/runs/${runId}/audio-track`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `/api/runs/${encodeURIComponent(runId)}/audio-track`,
+    {
+      cache: "no-store",
+    },
+  );
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -102,4 +105,83 @@ export async function ensureAudioTrack(
     throw new Error(body?.error ?? "Failed to prepare the audio track.");
   }
   return res.json() as Promise<{ url: string }>;
+}
+
+// ── Server-side proxy helpers (used by the Next Route Handlers under
+// app/api/runs/**). They keep the browser same-origin and the API internal.
+// IMPORTANT: any path segment taken from the request URL (e.g. a runId) MUST be
+// `encodeURIComponent`'d by the caller before being passed here, so a crafted
+// value can't alter the upstream path or inject a query string. ──
+
+/** Forward a JSON request to the API, mirroring its status; 502 if unreachable. */
+export async function proxyJson(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    const res = await fetch(apiUrl(path), { cache: "no-store", ...init });
+    const body = await res
+      .json()
+      .catch(() => ({ error: "Bad response from API" }));
+    return Response.json(body, { status: res.status });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
+  }
+}
+
+/** Stream a multipart upload (`req.body`) to the API and mirror its JSON status.
+ *  Streaming (not buffering) keeps large product/person/video uploads off this
+ *  server's heap. */
+export async function proxyUpload(
+  path: string,
+  req: Request,
+): Promise<Response> {
+  try {
+    const res = await fetch(apiUrl(path), {
+      method: req.method,
+      body: req.body,
+      headers: { "content-type": req.headers.get("content-type") ?? "" },
+      duplex: "half", // stream the request body instead of buffering it
+      cache: "no-store",
+    } as RequestInit);
+    const body = await res
+      .json()
+      .catch(() => ({ error: "Bad response from API" }));
+    return Response.json(body, { status: res.status });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
+  }
+}
+
+/** Unbuffered SSE passthrough; forwards `req.signal` so a browser disconnect
+ *  aborts upstream and the API detaches its bus listener. */
+export async function proxyStream(
+  path: string,
+  req: Request,
+): Promise<Response> {
+  let upstream: Response;
+  try {
+    upstream = await fetch(apiUrl(path), {
+      headers: { accept: "text/event-stream" },
+      cache: "no-store",
+      signal: req.signal,
+    });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
+  }
+  if (!upstream.ok || !upstream.body) {
+    const body = await upstream
+      .json()
+      .catch(() => ({ error: "Stream unavailable" }));
+    return Response.json(body, { status: upstream.status || 502 });
+  }
+  return new Response(upstream.body, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    },
+  });
 }

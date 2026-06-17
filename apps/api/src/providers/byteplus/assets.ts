@@ -19,7 +19,7 @@
 
 import { env } from "../../config/index.js";
 import { createLogger } from "../../lib/log.js";
-import { RUN_ERROR_MESSAGES, RunFailure } from "../../lib/run-failure.js";
+import { RUN_ERROR_MESSAGES, RunFailure, redactUrls } from "../../lib/run-failure.js";
 import { signedFetch, type SignedFetchResult } from "./sign.js";
 
 const log = createLogger("byteplus");
@@ -44,8 +44,10 @@ function errorOf(res: SignedFetchResult): string {
   const meta = (res.json as { ResponseMetadata?: { Error?: { Code?: string; Message?: string } } })
     ?.ResponseMetadata;
   const e = meta?.Error;
-  if (e?.Code || e?.Message) return `${e.Code ?? ""} ${e.Message ?? ""}`.trim();
-  return res.raw.slice(0, 300);
+  // Redact any echoed signed URLs/tokens before this reaches logs/step_events.
+  if (e?.Code || e?.Message)
+    return redactUrls(`${e.Code ?? ""} ${e.Message ?? ""}`.trim());
+  return redactUrls(res.raw).slice(0, 300);
 }
 
 function idOf(r: Record<string, unknown>): string | undefined {
@@ -82,13 +84,29 @@ export interface AssetRow {
   error?: string;
 }
 
-/** One page of assets in a group. */
-async function listAssetsPage(groupId: string, pageNumber: number): Promise<AssetRow[]> {
-  const res = await signedFetch("ListAssets", {
-    Filter: { GroupType: GROUP_TYPE, GroupId: groupId },
-    PageNumber: pageNumber,
-    PageSize: LIST_PAGE_SIZE,
-  });
+/** Bound the scan on busy groups (MAX_LIST_PAGES × LIST_PAGE_SIZE = 2000). */
+const MAX_LIST_PAGES = 20;
+
+/**
+ * One page of assets in a group. Returns the filtered rows AND the raw server
+ * item count: pagination must end on a genuinely short SERVER page, not one
+ * merely thinned by the client-side GroupId filter (else a mixed page stops the
+ * scan early and a reusable asset on a later page is missed → duplicate
+ * registration).
+ */
+async function listAssetsPage(
+  groupId: string,
+  pageNumber: number,
+): Promise<{ rows: AssetRow[]; rawCount: number }> {
+  const res = await signedFetch(
+    "ListAssets",
+    {
+      Filter: { GroupType: GROUP_TYPE, GroupId: groupId },
+      PageNumber: pageNumber,
+      PageSize: LIST_PAGE_SIZE,
+    },
+    { idempotent: true }, // a read — safe to retry on a network blip
+  );
   if (!res.ok) throw new Error(`BytePlus ListAssets failed: ${errorOf(res)}`);
   const items = (result(res).Items ?? []) as Record<string, unknown>[];
   const rows: AssetRow[] = [];
@@ -103,18 +121,19 @@ async function listAssetsPage(groupId: string, pageNumber: number): Promise<Asse
       error: err?.Code ? `${err.Code} ${err.Message ?? ""}`.trim() : undefined,
     });
   }
-  return rows;
+  return { rows, rawCount: items.length };
 }
 
 /** Find an asset in a group by its (deterministic) name across pages. */
 async function findAssetByName(groupId: string, name: string): Promise<AssetRow | undefined> {
   // Names are deterministic + assets list newest-first, so the first page
-  // almost always has it; cap the scan to stay bounded on busy groups.
-  for (let page = 1; page <= 5; page++) {
-    const rows = await listAssetsPage(groupId, page);
+  // almost always has it. Page on the SERVER count (rawCount) and cap at
+  // MAX_LIST_PAGES so a busy/never-pruned group stays bounded.
+  for (let page = 1; page <= MAX_LIST_PAGES; page++) {
+    const { rows, rawCount } = await listAssetsPage(groupId, page);
     const hit = rows.find((a) => a.name === name);
     if (hit) return hit;
-    if (rows.length < LIST_PAGE_SIZE) break; // last page
+    if (rawCount < LIST_PAGE_SIZE) break; // genuinely the last page
   }
   return undefined;
 }
@@ -151,8 +170,10 @@ async function waitAssetActive(groupId: string, assetId: string): Promise<void> 
   const deadline = Date.now() + env.BYTEPLUS_POLL_TIMEOUT_MS;
   for (;;) {
     let row: AssetRow | undefined;
-    for (let page = 1; page <= 5 && !row; page++) {
-      row = (await listAssetsPage(groupId, page)).find((a) => a.id === assetId);
+    for (let page = 1; page <= MAX_LIST_PAGES && !row; page++) {
+      const { rows, rawCount } = await listAssetsPage(groupId, page);
+      row = rows.find((a) => a.id === assetId);
+      if (!row && rawCount < LIST_PAGE_SIZE) break; // no more pages
     }
     const status = row?.status;
     if (status === ACTIVE_STATUS) return;

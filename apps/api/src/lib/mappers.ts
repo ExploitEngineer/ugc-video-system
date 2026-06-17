@@ -68,7 +68,34 @@ export function toStepEventDto(row: StepEventRow): StepEvent {
   };
 }
 
-export function toRunDto(row: RunRow): Run {
+/**
+ * The run columns `toRunDto` actually reads. Declaring it as a `Pick` lets the
+ * list query (`loadRunList`) select a column SUBSET — dropping the heavy jsonb
+ * (`narrativeOutline`/`productUse`/`visualStyle`) the list DTO never carries —
+ * and still pass the result here. A full `RunRow` satisfies it (superset), so
+ * `toRunDetailDto` keeps working unchanged.
+ */
+export type RunListRow = Pick<
+  RunRow,
+  | "id"
+  | "projectId"
+  | "prompt"
+  | "adStyle"
+  | "adType"
+  | "mode"
+  | "aspectRatio"
+  | "duration"
+  | "criticEnabled"
+  | "status"
+  | "currentStep"
+  | "error"
+  | "errorCode"
+  | "feedback"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export function toRunDto(row: RunListRow): Run {
   return {
     id: row.id,
     projectId: row.projectId,

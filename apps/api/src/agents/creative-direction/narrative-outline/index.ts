@@ -11,6 +11,9 @@ import { buildNarrativeOutlinePrompt, type NarrativeOutlinePlan } from "./prompt
 
 export interface NarrativeOutlineInput {
   userPrompt: string;
+  /** Number of ~15s segments for this run — `segmentCountFor(duration)` (1–4).
+   *  The outline is sliced to exactly this many segments. */
+  segmentCount: number;
 }
 
 /**
@@ -30,19 +33,23 @@ export const PANELS_PER_SEGMENT = 4;
 const FALLBACK_BEATS = ["hook", "product in use", "benefit", "close"];
 
 /**
- * Coerce the LLM plan into exactly four ordered, non-empty segments. A short or
- * malformed reply is padded with neutral placeholders so the pipeline never
- * stalls on a flaky outline (downstream storyboards still have the refs to lean
- * on); an over-long reply is clamped to four.
+ * Coerce the LLM plan into exactly `segmentCount` ordered, non-empty segments
+ * (the run's real duration-driven count, 1–4). A short or malformed reply is
+ * padded with neutral placeholders so the pipeline never stalls on a flaky
+ * outline (downstream storyboards still have the refs to lean on); an over-long
+ * reply is clamped to `segmentCount`.
  */
-function normalize(plan: NarrativeOutlinePlan): NarrativeOutline {
+function normalize(
+  plan: NarrativeOutlinePlan,
+  segmentCount: number,
+): NarrativeOutline {
   const raw = Array.isArray(plan?.segments) ? plan.segments : [];
   const segments: SegmentSummary[] = [];
-  for (let i = 0; i < SEGMENT_COUNT; i++) {
+  for (let i = 0; i < segmentCount; i++) {
     const s = raw[i];
     segments.push({
       index: i,
-      beat: s?.beat?.trim() || FALLBACK_BEATS[i],
+      beat: s?.beat?.trim() || FALLBACK_BEATS[i] || `segment ${i + 1}`,
       summary: s?.summary?.trim() || "",
     });
   }
@@ -75,5 +82,5 @@ export async function narrativeOutline(
     plan = parseJsonObject<NarrativeOutlinePlan>(reply);
   }
 
-  return normalize(plan);
+  return normalize(plan, input.segmentCount);
 }

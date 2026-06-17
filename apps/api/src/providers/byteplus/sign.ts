@@ -18,6 +18,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import { env } from "../../config/index.js";
+import { fetchWithRetry } from "../../lib/http.js";
 
 const ALGORITHM = "HMAC-SHA256";
 
@@ -42,16 +43,29 @@ export interface SignedFetchResult {
   raw: string;
 }
 
+export interface SignedFetchOptions {
+  /**
+   * Retry a thrown network error. All OpenAPI actions are POST, so this is keyed
+   * on semantics, not method: `true` for READ actions (List*) which are safe to
+   * replay, `false` (default) for WRITE actions (Create*) so a drop after the
+   * request reached the server can't duplicate the asset/group.
+   */
+  idempotent?: boolean;
+  /** Injectable timestamp for tests. */
+  nowIso?: string;
+}
+
 /**
  * Sign + send a BytePlus OpenAPI action as `POST /?Action=…&Version=…` with a
  * JSON body. Requires AK/SK to be configured (guard with assets.ts's
- * `isAssetMgmtConfigured()` first). `nowIso` is injectable for testing.
+ * `isAssetMgmtConfigured()` first). `opts.nowIso` is injectable for testing.
  */
 export async function signedFetch(
   action: string,
   body: unknown,
-  nowIso: string = new Date().toISOString(),
+  opts: SignedFetchOptions = {},
 ): Promise<SignedFetchResult> {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   const accessKey = env.BYTEPLUS_ACCESS_KEY;
   const secretKey = env.BYTEPLUS_SECRET_KEY;
   if (!accessKey || !secretKey) {
@@ -118,25 +132,18 @@ export async function signedFetch(
     Authorization: authorization,
   };
 
-  // Retry transient network errors (connect timeouts/resets) a couple of times —
-  // a blip on one asset call shouldn't fail a whole video run. The request is
-  // idempotent-safe enough here: a failed connect never reached the server.
-  let res: Response | undefined;
-  let lastDetail = "";
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      res = await fetch(url, { method: "POST", headers, body: payload });
-      break;
-    } catch (err) {
-      // node fetch hides the real reason (DNS/conn) under "fetch failed".
-      const cause = (err as { cause?: { code?: string; message?: string } }).cause;
-      lastDetail = cause?.code ?? cause?.message ?? (err as Error).message;
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
-    }
-  }
-  if (!res) {
-    throw new Error(`BytePlus OpenAPI request to ${url} failed: ${lastDetail}`);
-  }
+  // fetchWithRetry adds a per-attempt timeout (a stalled OpenAPI call must never
+  // hang the worker) + capped backoff. Network-error retry is gated on
+  // `opts.idempotent` so a write (Create*) is never replayed after a post-send
+  // drop. A non-retryable failure still throws — caller checks `res.ok`.
+  const res = await fetchWithRetry(
+    url,
+    { method: "POST", headers, body: payload },
+    {
+      label: `byteplus-openapi ${action}`,
+      retryOnNetworkError: opts.idempotent ?? false,
+    },
+  );
 
   const raw = await res.text();
   let json: unknown = undefined;

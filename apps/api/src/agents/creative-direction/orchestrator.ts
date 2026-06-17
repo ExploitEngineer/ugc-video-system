@@ -16,7 +16,7 @@
 // flips →regenerating (driver re-runs the stage of currentStep).
 
 import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
-import { eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
 import {
@@ -57,6 +57,7 @@ import {
   latestProductSheet,
   latestStoryboardSheet,
   loadUploads,
+  persistedFinalVideo,
   persistedMasterStoryboard,
   persistedSegmentStoryboardIndices,
   persistedSegmentVideoIndices,
@@ -96,6 +97,31 @@ async function setRun(runId: string, fields: Partial<RunRow>): Promise<void> {
     .where(eq(schema.runs.id, runId));
   // Push the status/step change to any connected SSE stream for this run.
   notifyRunChanged(runId);
+}
+
+/**
+ * Compare-and-set variant of `setRun`: a NO-OP if the run already reached a
+ * terminal state. Every driver status/advance write goes through this so a
+ * concurrent cancel (which writes status=failed) can never be overwritten by a
+ * late write that lands in the TOCTOU gap after the driver's terminal check.
+ * Returns whether it actually wrote (false ⇒ the run was cancelled — stop).
+ */
+async function setRunIfActive(
+  runId: string,
+  fields: Partial<RunRow>,
+): Promise<boolean> {
+  const rows = await db
+    .update(schema.runs)
+    .set({ ...fields, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.runs.id, runId),
+        notInArray(schema.runs.status, ["failed", "completed"]),
+      ),
+    )
+    .returning({ id: schema.runs.id });
+  if (rows.length) notifyRunChanged(runId);
+  return rows.length > 0;
 }
 
 /** True if a concurrent cancel flipped the run to a terminal status. */
@@ -288,6 +314,10 @@ async function executeStep(
     }
 
     case "video": {
+      // Idempotent resume: if a final video already landed (crash AFTER the
+      // generation persisted but BEFORE the `completed` write), don't pay for a
+      // second render — mirrors the segment_video / merge skip-if-done guards.
+      if (await persistedFinalVideo(runId)) return {};
       const storyboard = await latestStoryboardSheet(runId);
       if (!storyboard) throw new Error("no storyboard sheet for video");
       // The video model receives the clean storyboard image (shot order/layout)
@@ -325,7 +355,10 @@ async function executeStep(
       // Plan the whole 60s arc as four segment summaries BEFORE any storyboard,
       // so each storyboard can be handed the others' summaries (continuity).
       await writeStepEvent({ runId, step, status: "started" });
-      const outline = await narrativeOutline(ctx, { userPrompt });
+      const outline = await narrativeOutline(ctx, {
+        userPrompt,
+        segmentCount: segmentCountFor(ctx.duration),
+      });
       // Persist the arc AND the locked visual-style bible. visual_style is then
       // read back into ctx on the next loop iteration and injected verbatim into
       // every segment storyboard + video prompt.
@@ -656,12 +689,16 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       const { adStyle, adType } = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
       });
-      await setRun(runId, {
-        adStyle,
-        adType,
-        status: "running",
-        currentStep: null,
-      });
+      if (
+        !(await setRunIfActive(runId, {
+          adStyle,
+          adType,
+          status: "running",
+          currentStep: null,
+        }))
+      ) {
+        return; // cancelled during interpretation — leave it terminal
+      }
       logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`, tag);
     } catch (err) {
       await failRun(runId, null, err);
@@ -781,7 +818,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       // avoid bleed. `gate` is the regenerated step's gate — genStepForRevise
       // keeps us on the same gate (person_sheet→reference, storyboard→storyboard).
       if (run.mode === "confirm" && gate) {
-        await setRun(runId, {
+        await setRunIfActive(runId, {
           status: "awaiting_confirmation",
           currentStep: genStep,
           feedback: null,
@@ -790,11 +827,15 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         return;
       }
       // No gate (automatic mode safety net): advance via the loop.
-      await setRun(runId, {
-        status: "running",
-        currentStep: genStep,
-        feedback: null,
-      });
+      if (
+        !(await setRunIfActive(runId, {
+          status: "running",
+          currentStep: genStep,
+          feedback: null,
+        }))
+      ) {
+        return; // cancelled — stop instead of looping
+      }
       continue;
     }
 
@@ -861,7 +902,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // terminates at `video` (15s) or `merge` (60s).
     if (step === "video" || step === "merge") {
       logRun(runId, "✓ run completed — final video ready", tag);
-      await setRun(runId, { status: "completed", currentStep: step });
+      await setRunIfActive(runId, { status: "completed", currentStep: step });
       return;
     }
     // Step-by-step gate: pause if completing this step lands us at a gate
@@ -876,7 +917,10 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         `✓ ${step} → next=${next ?? "—"} gate=${gate} mode=${run.mode} ⇒ PAUSE`,
         tag,
       );
-      await setRun(runId, { status: "awaiting_confirmation", currentStep: step });
+      await setRunIfActive(runId, {
+        status: "awaiting_confirmation",
+        currentStep: step,
+      });
       logRun(runId, `⏸ PAUSED — awaiting feedback (${gate} gate)`, tag);
       return;
     }
@@ -885,7 +929,8 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       `✓ ${step} → next=${next ?? "—"} gate=${gate ?? "none"} mode=${run.mode} ⇒ ADVANCE`,
       tag,
     );
-    await setRun(runId, { currentStep: step }); // stay running, loop on
+    // Advance the checkpoint; stop if a concurrent cancel already finalized it.
+    if (!(await setRunIfActive(runId, { currentStep: step }))) return;
   }
 }
 
@@ -894,7 +939,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
  * only ever gets the classified friendly message + code; the raw error text
  * stays in the server log and the step_event payload (`detail`).
  */
-async function failRun(
+export async function failRun(
   runId: string,
   step: Step | null,
   err: unknown,

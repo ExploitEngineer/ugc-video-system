@@ -1,9 +1,10 @@
-// Poll target for the run progress view. TanStack Query hits this on an
-// interval; this handler proxies the Hono API's GET /runs/:id and forwards its
-// status (so a 404 still reaches the run view's not-found branch). The backend
-// worker advances run state — this is a read-only proxy.
+// Read-only proxy for one run (GET) + permanent delete (DELETE). Forwards the
+// Hono API's status (so a 404 reaches the run view's not-found branch). The
+// backend worker advances run state — this never mutates beyond DELETE.
+// `runId` is encodeURIComponent'd so a crafted value can't alter the upstream
+// path/query.
 
-import { apiUrl } from "@/lib/api";
+import { proxyJson } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -12,16 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await params;
-
-  try {
-    const res = await fetch(apiUrl(`/runs/${runId}`), { cache: "no-store" });
-    const body = await res
-      .json()
-      .catch(() => ({ error: "Bad response from API" }));
-    return Response.json(body, { status: res.status });
-  } catch {
-    return Response.json({ error: "API unreachable" }, { status: 502 });
-  }
+  return proxyJson(`/runs/${encodeURIComponent(runId)}`);
 }
 
 // Permanently delete a run (and all its stored files + DB rows) via the API.
@@ -30,17 +22,5 @@ export async function DELETE(
   { params }: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await params;
-
-  try {
-    const res = await fetch(apiUrl(`/runs/${runId}`), {
-      method: "DELETE",
-      cache: "no-store",
-    });
-    const body = await res
-      .json()
-      .catch(() => ({ error: "Bad response from API" }));
-    return Response.json(body, { status: res.status });
-  } catch {
-    return Response.json({ error: "API unreachable" }, { status: 502 });
-  }
+  return proxyJson(`/runs/${encodeURIComponent(runId)}`, { method: "DELETE" });
 }

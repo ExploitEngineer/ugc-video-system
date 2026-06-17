@@ -109,3 +109,14 @@ export function classifyRunError(
 export function truncateDetail(s: string, max = 1500): string {
   return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
+
+/**
+ * Strip URL-looking substrings from provider/error text before it reaches logs
+ * or a step_event `detail`. A 4xx body that echoes the request can carry a
+ * signed asset URL (Supabase) or a token-bearing content URL; those must not
+ * leak into logs/DB. Status words ("expired", "moderation") are untouched, so
+ * `classifyRunError` still keys correctly.
+ */
+export function redactUrls(s: string): string {
+  return s.replace(/https?:\/\/[^\s"'<>)]+/gi, "[redacted-url]");
+}
