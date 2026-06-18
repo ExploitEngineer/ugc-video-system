@@ -232,7 +232,13 @@ export function buildStoryboardPrompt({
         "  time-of-day to create variety; the variety is in the CAMERA and the moment,",
         "  never the world.",
       ]
-    : [];
+    : [
+        "- Make every panel a DISTINCT SHOT: vary the camera angle, shot type and",
+        "  framing across the four (e.g. wide / medium / close-up / over-the-shoulder)",
+        "  and a different beat or action in each — never repeat a near-identical",
+        "  frame, pose or composition twice. Vary the SHOT, not the world: keep the",
+        "  same person, product, wardrobe, setting and lighting throughout.",
+      ];
 
   // PANEL LABELS badge range — 01..N×4 vs 01..04.
   const labelBadge = isMaster
@@ -320,7 +326,16 @@ export function buildStoryboardPrompt({
         "Every panel MUST show THIS product — the same category, form, materials,",
         "colors and markings described above AND shown in the product sheet. If the",
         "product sheet ever looks ambiguous, this text wins: never substitute a",
-        "different kind of item. State this product by name in the `imagePrompt`.",
+        "different kind of item.",
+        "REPRODUCE ITS PRINTED MARKINGS EXACTLY AND VERBATIM — every wordmark, brand",
+        "name, label line, numeral and price badge spelled letter-for-letter as on",
+        "the product sheet / in the brief; never invent, translate, paraphrase, blur",
+        "or omit any text on the product. In the `imagePrompt`, NAME the product and",
+        "transcribe its exact printed strings in quotes so the model letters them",
+        "correctly.",
+        "Keep the product's TRUE GEOMETRY in every panel — correct shape and",
+        "proportions, an undistorted label (no barrel bulge, pinching, warping or",
+        "skew, even on curved/cylindrical surfaces).",
       ]
     : [];
 
@@ -429,6 +444,12 @@ export function buildStoryboardPrompt({
   // invented-packaging / unboxing / duplicated-product failure modes.
   const presentationBlock = [
     "PRODUCT PRESENTATION — how the product appears in EVERY panel that shows it:",
+    "- THE PRODUCT IS THE HERO of every panel: held, used or presented toward the",
+    "  camera — never incidental, tiny or lost in the background. It fills roughly",
+    "  25-40% of the panel BY FRAMING THE SHOT CLOSE (a close or medium shot), NOT",
+    "  by enlarging the object beyond its real size; it sits in sharp foreground",
+    "  focus with its labelled face turned to camera so the printed text reads",
+    "  large and legible.",
     "- Show the product the way it is REALLY used: if wearable (jewelry, bracelet,",
     "  watch, glasses, apparel, shoes, bag) it is WORN on the body; if handheld it",
     "  is in ACTIVE USE — not a static product-on-a-pedestal (unless the ad style",
@@ -499,27 +520,33 @@ export function buildStoryboardPrompt({
   const keyframeLook =
     adType === "ugc"
       ? [
-          "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-          "  a glossy studio commercial: natural / available light from real windows",
-          "  or lamps, a real lived-in everyday setting with ordinary background",
-          "  detail, candid handheld-style framing, the person relaxed and real",
-          "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
-          "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
-          "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
-          "  sheets — only lighting, setting and framing read as real UGC, never",
-          "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
+          "- UGC LOOK — render every panel as a real, candid moment CAPTURED ON A",
+          "  PHONE CAMERA: shot on a modern smartphone, slightly imperfect handheld",
+          "  framing, natural available light from real windows or lamps with soft,",
+          "  uneven shadows and small specular highlights on the skin; a real",
+          "  lived-in everyday setting with ordinary background detail and natural",
+          "  depth of field. Render skin as REAL skin — visible pores, fine lines,",
+          "  subtle uneven tone and a few stray hairs — lit and exposed like a true",
+          "  photograph. Neutral 5500–6000K white balance, true-to-life color, NO",
+          "  warm / sepia / orange cast. Keep the EXACT face and identity from the",
+          "  person sheet: a real, ordinary person photographed as-is — do NOT",
+          "  beautify, smooth, slim, retouch or restyle the face. Every panel must",
+          "  look indistinguishable from a real candid photo, never a glossy",
+          "  commercial, a 3D render, or a polished AI portrait.",
         ]
       : [
           "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
-          "  intentional lighting, rich color and depth, a still lifted straight from a",
-          "  high-end commercial.",
+          "  intentional lighting, rich color and depth, a still lifted straight from",
+          "  a high-end commercial. Keep skin and faces photographic with real",
+          "  texture (never waxy, plastic or over-retouched), true-to-life color and",
+          "  a neutral white balance — no heavy warm / sepia cast.",
         ];
 
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
     "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity:",
     hasPerson
-      ? "a product sheet AND a person sheet are attached."
+      ? "Image 1 is the PRODUCT sheet (authoritative for the product's shape, colour, material and ALL printed text / markings — reproduce them EXACTLY and verbatim); Image 2 is the PERSON sheet (authoritative for the face and identity — keep that exact person)."
       : "a product sheet is attached (no person in this ad).",
     "",
     "STEP 1 — REVIEW. First study the attached sheet(s) together with the user's",
@@ -622,9 +649,11 @@ export function buildStoryboardPrompt({
     "(the EXACT caption text is appended after your prompt automatically — so",
     "describe the bar's STYLE and placement only; do NOT write the caption words",
     'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
-    "other text and NO arrows; the product worn / in real use as",
-    "the real solid item at TRUE real-world scale and correctly placed (never",
-    "oversized, dominating or floating; never a box/packaging/unboxing, never",
+    "other text and NO arrows; the product worn / in real use as the real solid",
+    "item at its TRUE real-world size relative to the hand/body (never",
+    "unrealistically enlarged or floating) but FRAMED CLOSE so it reads as the",
+    "large, sharp, legible HERO of the panel with its printed markings reproduced",
+    "verbatim; never a box/packaging/unboxing, never",
     "duplicated); each panel showing the product in its CORRECT causal state from",
     hasUse
       ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`

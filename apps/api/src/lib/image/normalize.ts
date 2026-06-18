@@ -75,6 +75,7 @@ async function padIntoBand(
   mime: string,
   width: number,
   height: number,
+  opts: { forceJpeg?: boolean } = {},
 ): Promise<NormalizedImageResult> {
   const aspect = width / height;
 
@@ -106,6 +107,12 @@ async function padIntoBand(
   }
 
   if (!needsPad && !needsResize) {
+    // Already in-band. Transcode to JPEG only when asked (the provider needs
+    // JPEG, not the pipeline's WebP) and it isn't already JPEG.
+    if (opts.forceJpeg && mime !== "image/jpeg") {
+      const jpg = new Uint8Array(await img.jpeg({ quality: 92 }).toBuffer());
+      return { bytes: jpg, mime: "image/jpeg", adjusted: true };
+    }
     return { bytes, mime, adjusted: false };
   }
 
@@ -164,4 +171,24 @@ export async function padToProviderAspect(
   const dims = await readDims(img);
   if (!dims) return { bytes, mime, adjusted: false };
   return padIntoBand(img, bytes, mime, dims.width, dims.height);
+}
+
+/**
+ * Make a GENERATED image safe to hand to BytePlus/Seedance as a reference: same
+ * aspect/height letterboxing as `padToProviderAspect`, but ALWAYS emits JPEG —
+ * Seedance and `CreateAsset` don't accept the pipeline's 4K WebP sheets.
+ * Already-JPEG, in-band images pass through byte-identical (`adjusted: false`).
+ * Non-throwing; callers upload the returned bytes as a PROVIDER-ONLY copy and
+ * leave the stored WebP original (OpenAI reference + UI) untouched.
+ */
+export async function toProviderImage(
+  bytes: Uint8Array,
+  mime: string,
+): Promise<NormalizedImageResult> {
+  const img = sharp(Buffer.from(bytes)).rotate();
+  const dims = await readDims(img);
+  if (!dims) return { bytes, mime, adjusted: false };
+  return padIntoBand(img, bytes, mime, dims.width, dims.height, {
+    forceJpeg: true,
+  });
 }

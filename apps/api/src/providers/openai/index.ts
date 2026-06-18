@@ -19,6 +19,8 @@ import {
   DEFAULT_IMAGE_SIZE,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
+  OPENAI_IMAGE_OUTPUT_COMPRESSION,
+  OPENAI_IMAGE_OUTPUT_FORMAT,
   OPENROUTER_BASE_URL,
   OPENROUTER_CLAUDE_MODEL,
 } from "./constants.js";
@@ -43,6 +45,14 @@ export interface GenerateImageInput {
    * `"high"` — every sheet in this pipeline carries product markings or a face.
    */
   quality?: "low" | "medium" | "high" | "auto";
+  /**
+   * Output encoding. Defaults to WebP q100 — near-lossless but small enough that
+   * 4K sheets don't truncate the base64 response (4K-PNG did). gpt-image-2 has no
+   * `input_fidelity` knob (locked high), so this is the only output-side lever.
+   */
+  outputFormat?: "png" | "webp" | "jpeg";
+  /** WebP/JPEG quality 0–100 (ignored for PNG). Defaults to 100. */
+  outputCompression?: number;
 }
 
 export interface GenerateImageResult {
@@ -97,9 +107,10 @@ function getClient(): OpenAI {
       // Image generation is slow and returns multi-MB bodies; give it room and
       // let the SDK retry connection-level failures. (A post-200 truncated-body
       // parse error is NOT retried by the SDK — generateImage handles that.)
-      // 240s: a complex full-body person sheet can legitimately run >120s, so a
-      // tight timeout forced a wasteful regen instead of letting it finish.
-      timeout: 240_000,
+      // 300s: at 4K a complex full-body / storyboard sheet can run ~150-220s
+      // (a probe measured ~159s), so a tight timeout would force a wasteful regen
+      // instead of letting it finish.
+      timeout: 300_000,
       // The SDK auto-retries connection errors + 429/5xx on chat/image calls;
       // give it more headroom so the parallel 60s fan-outs survive provider
       // overload without surfacing a transient failure to the orchestrator.
@@ -229,6 +240,10 @@ export function createOpenAIProvider(): OpenAIProvider {
     async generateImage(input) {
       const size = input.size ?? DEFAULT_IMAGE_SIZE;
       const quality = input.quality ?? "high";
+      const outputFormat = input.outputFormat ?? OPENAI_IMAGE_OUTPUT_FORMAT;
+      const outputCompression =
+        input.outputCompression ?? OPENAI_IMAGE_OUTPUT_COMPRESSION;
+      const outMime = outputFormat === "jpeg" ? "image/jpeg" : `image/${outputFormat}`;
       const mode = input.refs?.length ? "edit" : "generate";
       // Pre-fetch the reference files ONCE (not per attempt).
       const refFiles = input.refs?.length
@@ -251,27 +266,30 @@ export function createOpenAIProvider(): OpenAIProvider {
           attempt,
         });
         try {
+          // Shared params; `output_compression` is only valid for webp/jpeg.
+          const baseParams = {
+            model: OPENAI_IMAGE_MODEL,
+            prompt: input.prompt,
+            size,
+            quality,
+            output_format: outputFormat,
+            ...(outputFormat === "png"
+              ? {}
+              : { output_compression: outputCompression }),
+          };
           const result = refFiles
             ? await getClient().images.edit({
-                model: OPENAI_IMAGE_MODEL,
+                ...baseParams,
                 image: refFiles,
-                prompt: input.prompt,
-                size: size as never,
-                quality: quality as never,
-              })
-            : await getClient().images.generate({
-                model: OPENAI_IMAGE_MODEL,
-                prompt: input.prompt,
-                size: size as never,
-                quality: quality as never,
-              });
+              } as never)
+            : await getClient().images.generate(baseParams as never);
 
           const b64 = result.data?.[0]?.b64_json;
           if (!b64) throw internal("OpenAI image response missing image data.");
           log.debug("image ✓", { ms: Date.now() - t0, mode, attempt });
           return {
             bytes: new Uint8Array(Buffer.from(b64, "base64")),
-            mime: "image/png",
+            mime: outMime,
           };
         } catch (err) {
           lastErr = err;
