@@ -821,7 +821,7 @@
     <header>
       <div class="brand">
         <h1>Ad Video Pipeline</h1>
-        <span class="ver">I/O SPEC · multi-duration + editor + SSE</span>
+        <span class="ver">I/O SPEC · v2 — verified vs code 2026-06</span>
       </div>
       <span class="dirty-dot" title="Unsaved edits"></span>
       <div class="search" id="searchWrap">
@@ -944,7 +944,6 @@
                   },
                   {
                     t: "duration (15s default | 30s | 45s | 60s) · criticEnabled (default false) · hasPersonImage",
-                    isNew: true,
                   },
                 ],
               },
@@ -987,7 +986,7 @@
                 n: "2",
                 color: "blue",
                 title: "describeProduct",
-                sub: "gpt-4.1 · chat · VISION · best-effort (non-fatal)",
+                sub: "gpt-4.1 (asks Claude Sonnet 4.6 via OpenRouter; gpt-4.1 fallback when OPENROUTER_API_KEY unset — current default) · VISION · best-effort (non-fatal)",
                 tag: "gpt-4.1",
                 tagc: "blue",
                 secs: [
@@ -1012,7 +1011,7 @@
                 n: "",
                 color: "blue",
                 title: "planPersonBrief / derivePersonBrief",
-                sub: "gpt-4.1 · chat · VISION",
+                sub: "gpt-4.1 · VISION — derivePersonBrief (uploaded person) asks Claude Sonnet 4.6 via OpenRouter, gpt-4.1 fallback when key unset",
                 tag: "gpt-4.1",
                 tagc: "blue",
                 secs: [
@@ -1083,7 +1082,8 @@
                     name: "OUT → assets(person_sheet) + person_reference_sheets",
                     rows: [
                       {
-                        t: "PersonReferenceSheet — 2×2 person views PNG (encodes uploaded face if any)",
+                        t: "PersonReferenceSheet — 8 panels in 2 rows: top = 4 full-body angles (front / L-profile / R-profile / back), bottom = 4 matching face close-ups PNG (encodes uploaded face if any)",
+                        isNew: true,
                       },
                       {
                         t: "row { views, personDetails, promptUsed, status = draft }",
@@ -1150,6 +1150,23 @@
                 ],
               },
               {
+                name: "IMAGE GEN (gpt-image-2 · images.edit)",
+                rows: [
+                  {
+                    t: 'params — size 2K (2048×1152 / 1152×2048) · quality "high" · refs = product sheet (+ person sheet); these refs are the identity + realism source',
+                    isNew: true,
+                  },
+                  {
+                    t: "imagePrompt carries an adType-chosen look block — UGC LOOK (authentic phone-shot, true skin texture, NOT waxy/airbrushed AI face) vs CINEMATIC LOOK (storyboard/prompt.ts)",
+                    isNew: true,
+                  },
+                  {
+                    t: "after the gpt-4.1 plan, a caption-burn directive is appended: letter each panel's panelCaption VERBATIM into its bottom bar (storyboard/index.ts)",
+                    isNew: true,
+                  },
+                ],
+              },
+              {
                 name: "OUT → assets(storyboard_sheet) + storyboard_sheets",
                 rows: [
                   {
@@ -1209,6 +1226,10 @@
                   {
                     t: "scenes[] (sceneDescription + transcript) · userPrompt · characterAnchor?",
                   },
+                  {
+                    t: "buildVideoPrompt (gpt-4.1) → ONE timestamped shot-list; then appended: role legend (@Image1 product · @Image2 storyboard · @Image3 face) + fixed negatives (avoid jitter, bent/distorted limbs, temporal flicker, identity drift)",
+                    isNew: true,
+                  },
                 ],
               },
               {
@@ -1260,7 +1281,7 @@
                     isNew: true,
                   },
                   {
-                    t: "sharp cropPanelRows (lib/image/crop.ts) → N row strips → storyboard_sheets(segment_index 0..N-1)",
+                    t: "sharp cropRowsAs2x2 (lib/image/crop.ts) → each row's 4 panels RE-TILED into a 2×2 block (NOT a 1×4 strip — BytePlus CreateAsset rejects aspect outside 0.4–2.5) → storyboard_sheets(segment_index 0..N-1)",
                     isNew: true,
                   },
                   {
@@ -1318,6 +1339,10 @@
                 rows: [
                   {
                     t: "scenes[] (sceneDescription + transcript) · userPrompt · segmentIndex · segmentCount",
+                  },
+                  {
+                    t: 'buildVideoPrompt (gpt-4.1) adds continuity ("part i of N… keep SAME person/wardrobe/product/lighting") + otherSummaries; same legend + negatives appended as 15s',
+                    isNew: true,
                   },
                 ],
               },
