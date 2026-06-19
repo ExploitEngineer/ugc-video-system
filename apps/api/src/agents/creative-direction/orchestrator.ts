@@ -40,7 +40,7 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
-import { FALLBACK_AD_TYPE_ID } from "../ad-types/registry.js";
+import { FALLBACK_AD_TYPE_ID, getAdType } from "../ad-types/registry.js";
 import { reconcile } from "../ad-types/reconcile.js";
 import type { HookSelection } from "../ad-types/types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
@@ -68,10 +68,14 @@ import {
   segmentStoryboards,
 } from "./inputs.js";
 import {
+  type AssetCtx,
   gateForCurrentStep,
   gateForNext,
   genStepForRevise,
+  hasAnyReference,
   nextStep,
+  willGeneratePerson,
+  willGenerateProduct,
 } from "./plan.js";
 
 type RunRow = typeof schema.runs.$inferSelect;
@@ -143,6 +147,20 @@ async function ownsRun(runId: string, myId?: string): Promise<boolean> {
   if (!myId) return true;
   const run = await readRun(runId);
   return run?.lockedBy === myId;
+}
+
+/** Asset signals for a run: registry asset policy for its adType + uploads. */
+function assetCtxFor(
+  run: RunRow,
+  uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
+): AssetCtx {
+  const policy = getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).assetPolicy;
+  return {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: Boolean(uploads.productUpload),
+    hasPersonUpload: Boolean(uploads.personUpload),
+  };
 }
 
 function buildCtx(
@@ -586,10 +604,24 @@ async function executeStep(
 async function runReferencePhase(
   ctx: SkillContext,
   tag?: string,
-): Promise<{ failedStep?: Step; err?: unknown }> {
+): Promise<{ failedStep?: Step; err?: unknown; hasReference: boolean }> {
   const runId = ctx.runId;
   const { productUpload, personUpload } = await loadUploads(runId);
   const userPrompt = (await readRun(runId))?.prompt ?? "";
+
+  // Chunk G — conditional asset steps. A product sheet comes only from an upload
+  // (never synthesized); a person sheet is generated when uploaded OR when the
+  // ad type REQUIRES a person (then synthesized). An optional asset with no
+  // upload is SKIPPED, so a neither-asset type can reach the storyboard directly.
+  const policy = getAdType(ctx.adType).assetPolicy;
+  const asset: AssetCtx = {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: Boolean(productUpload),
+    hasPersonUpload: Boolean(personUpload),
+  };
+  const genProduct = willGenerateProduct(asset);
+  const genPerson = willGeneratePerson(asset);
 
   // Person branch: when inventing a person (a product but no uploaded person),
   // plan + persist the brief FIRST, then generate the sheet — `executeStep`
@@ -597,6 +629,10 @@ async function runReferencePhase(
   // With an uploaded person the brief is skipped (the sheet is built from the
   // photo). The product branch runs alongside and never waits on the brief.
   const personBranch = async (): Promise<void> => {
+    if (!genPerson) {
+      logRun(runId, "↪ skip person_sheet (optional, none uploaded)", tag);
+      return;
+    }
     if (productUpload && !personUpload) {
       // Invent the person from the product — the sheet skill READS this brief,
       // so it must be persisted BEFORE the person_sheet step.
@@ -678,15 +714,15 @@ async function runReferencePhase(
   };
 
   const [product, person] = await Promise.allSettled([
-    executeStep(ctx, "product_sheet"),
+    genProduct ? executeStep(ctx, "product_sheet") : Promise.resolve(),
     personBranch(),
     productBriefBranch(),
   ]);
-  if (product.status === "rejected")
-    return { failedStep: "product_sheet", err: product.reason };
+  if (genProduct && product.status === "rejected")
+    return { failedStep: "product_sheet", err: product.reason, hasReference: false };
   if (person.status === "rejected")
-    return { failedStep: "person_sheet", err: person.reason };
-  return {};
+    return { failedStep: "person_sheet", err: person.reason, hasReference: false };
+  return { hasReference: hasAnyReference(asset) };
 }
 
 /**
@@ -801,9 +837,15 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         await failRun(runId, null, new Error("regenerating without a gate step"));
         return;
       }
-      // Reference gate always re-runs person_sheet (product is hidden); the
-      // storyboard gate re-runs the storyboard (15s) / segment storyboards (60s).
-      const genStep = genStepForRevise(gate, "person", run.duration);
+      // Reference gate re-runs person_sheet (product is hidden) — or product_sheet
+      // on a person-skipped run; the storyboard gate re-runs the storyboard (15s)
+      // / segment storyboards (60s).
+      const genStep = genStepForRevise(
+        gate,
+        "person",
+        run.duration,
+        assetCtxFor(run, uploads),
+      );
       const message = run.feedback?.trim() ?? "";
       const t0 = Date.now();
 
@@ -905,19 +947,24 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // ── running: execute the next step (or the parallel reference phase) ──
     let step: Step | null;
     let outcome: CriticOutcome | undefined;
+    // Whether the reference phase produced any sheet — collapses the reference
+    // gate when neither was generated (Chunk G). True for every non-reference step.
+    let referenceExists = true;
     const t0 = Date.now();
 
     if (run.currentStep === null) {
-      // First generation: product + person sheets run CONCURRENTLY. `person_sheet`
-      // is always the checkpoint the phase advances to — the gate/advance block
-      // below treats it exactly like a single completed reference step.
+      // First generation: product + person sheets run CONCURRENTLY (each skipped
+      // when its asset is optional + not uploaded). `person_sheet` is always the
+      // checkpoint the phase advances to — the gate/advance block below treats it
+      // exactly like a single completed reference step.
       step = "person_sheet";
-      logRun(runId, "▶ product_sheet + person_sheet (parallel) …", tag);
-      const { failedStep, err } = await runReferencePhase(ctx, tag);
+      logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
+      const { failedStep, err, hasReference } = await runReferencePhase(ctx, tag);
       if (failedStep) {
         await failRun(runId, failedStep, err);
         return;
       }
+      referenceExists = hasReference;
     } else {
       step = nextStep(
         run.currentStep,
@@ -973,7 +1020,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // Independent of the Critic — gateForNext works whether or not inspection
     // steps run.
     const next = nextStep(step, personUploaded, run.criticEnabled, run.duration);
-    const gate = gateForNext(next);
+    const gate = gateForNext(next, referenceExists);
     if (run.mode === "confirm" && gate) {
       logRun(
         runId,
