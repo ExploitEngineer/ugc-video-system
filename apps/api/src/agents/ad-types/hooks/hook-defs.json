@@ -1,0 +1,246 @@
+[
+  {
+    "id": "problem-solution",
+    "displayName": "Problem–Solution (Pain-First)",
+    "psychPrinciple": "Loss aversion / problem recognition (Prospect Theory)",
+    "description": "Opens on the specific frustrating moment the product later resolves, shown before the product appears. A vividly felt pain primes the viewer to want relief, so the product lands as the obvious fix.",
+    "openingDirective": "Open on the exact frustrating moment the product solves — show the problem happening to the subject in close-up first, before the product is anywhere in frame. Hold on the friction for the first beat; do not reveal or name the product yet.",
+    "scriptToneNote": "First line names the pain in the viewer's own words ('Why won't this just…'), empathetic not salesy.",
+    "fitsAdTypes": {
+      "good": [
+        "product-demo",
+        "problem-agitate-solve",
+        "before-after",
+        "testimonial",
+        "founder-pov",
+        "spokesperson"
+      ],
+      "clashes": ["unboxing", "announcement", "brand-awareness", "brand-story"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "pattern-interrupt",
+    "displayName": "Pattern Interrupt",
+    "psychPrinciple": "Orienting response / novelty",
+    "description": "Opens with an unexpected, slightly jarring visual or action that breaks the feed's rhythm and triggers the orienting response, buying a half-second of attention. Universal secondary hook.",
+    "openingDirective": "Open on a visually surprising, rhythm-breaking first frame — an unexpected object, motion, scale, or action that doesn't belong in a normal feed (something dropped, flipped, or revealed abruptly). The first ~0.5s must look 'wrong' enough to stop a thumb, then resolve into the scene.",
+    "scriptToneNote": "Optional first line is abrupt or mid-thought, cut into the action.",
+    "fitsAdTypes": {
+      "good": ["brand-story", "lifestyle", "announcement", "brand-awareness"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "curiosity-gap",
+    "displayName": "Curiosity Gap",
+    "psychPrinciple": "Information-gap curiosity (Loewenstein)",
+    "description": "Opens by withholding a key piece of information, creating an open loop the viewer must watch to close.",
+    "openingDirective": "Open on a teaser that promises a payoff without delivering it — a partially hidden result, a covered object, or a 'wait for it' setup, paired with text like 'The one thing nobody tells you about ___'. Withhold the reveal until later in the ad.",
+    "scriptToneNote": "Conspiratorial, 'let me show you something'; never state the answer in the first line.",
+    "fitsAdTypes": {
+      "good": ["unboxing", "explainer", "brand-story", "announcement"],
+      "clashes": ["promo-offer"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "question",
+    "displayName": "Direct Question",
+    "psychPrinciple": "Self-referential processing / open loop",
+    "description": "Opens by posing a pointed question straight to the viewer, triggering automatic self-referential processing — the brain starts answering before deciding to engage.",
+    "openingDirective": "Open with one short question on screen and/or spoken straight to camera in the first second (e.g., 'Still [doing the painful thing]?'). Frame the shot as addressing the viewer directly; keep the question under 8 words.",
+    "scriptToneNote": "Conversational, second-person ('you'), one question only.",
+    "fitsAdTypes": {
+      "good": ["explainer", "spokesperson"],
+      "clashes": ["brand-story"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "stat-shock",
+    "displayName": "Shocking Stat",
+    "psychPrinciple": "Anchoring + surprise (credibility heuristic)",
+    "description": "Opens with a single surprising number that reframes the stakes and lends instant credibility; a concrete figure feels authoritative and sets a reference point.",
+    "openingDirective": "Open on one big number as bold on-screen text, held for the first beat (e.g., '90% of people [surprising fact]'). Make the figure the visual focus of frame 1; keep supporting words minimal.",
+    "scriptToneNote": "Read the number flatly and let it land before any pitch.",
+    "fitsAdTypes": {
+      "good": ["social-proof", "promo-offer", "product-showcase"],
+      "clashes": ["brand-story", "lifestyle"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "bold-claim",
+    "displayName": "Bold Claim",
+    "psychPrinciple": "Bold promise / skeptical curiosity",
+    "description": "Opens with a confident, almost-too-good promise that dares the viewer to disprove it, driving engagement through skeptical curiosity.",
+    "openingDirective": "Open with a single superlative claim as a spoken line and/or on-screen text in the first beat (e.g., 'The last ___ you'll ever buy'). Deliver it with full confidence and no hedging; pair with a clean hero frame.",
+    "scriptToneNote": "Assured, declarative, zero qualifiers.",
+    "fitsAdTypes": {
+      "good": ["product-showcase"],
+      "clashes": ["testimonial", "founder-pov", "confession"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "contrarian",
+    "displayName": "Contrarian Take",
+    "psychPrinciple": "Belief / expectation violation",
+    "description": "Opens by contradicting a widely held belief, creating a belief-violation that forces re-evaluation ('wait, that's wrong?').",
+    "openingDirective": "Open by stating a common assumption and immediately negating it in the first beat (e.g., 'Stop [common advice] — here's why it's backwards.'). Shoot as a direct, confident address or bold text card; the contradiction must land in the first sentence.",
+    "scriptToneNote": "Confident, mildly provocative, 'everyone's wrong about this.'",
+    "fitsAdTypes": {
+      "good": ["comparison", "brand-awareness"],
+      "clashes": ["promo-offer", "announcement", "unboxing"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "testimonial",
+    "displayName": "Testimonial Quote",
+    "psychPrinciple": "Social proof (individual credibility)",
+    "description": "Opens on a real person delivering a first-person verdict to camera before any pitch; a peer's lived endorsement lowers skepticism faster than brand claims.",
+    "openingDirective": "Open on a person talking straight to camera, mid-sentence, delivering their honest verdict as the very first words (e.g., 'I did not think this would work, but…'). Authentic, phone-captured framing; the face and voice carry the opening — no product or graphics first.",
+    "scriptToneNote": "First-person, unscripted-sounding, starts mid-thought.",
+    "fitsAdTypes": {
+      "good": ["testimonial"],
+      "clashes": [
+        "brand-awareness",
+        "announcement",
+        "promo-offer",
+        "explainer",
+        "social-proof"
+      ]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": false
+  },
+  {
+    "id": "social-proof",
+    "displayName": "Social Proof (Aggregate)",
+    "psychPrinciple": "Social proof (consensus / volume)",
+    "description": "Opens with stacked third-party proof — star ratings, review snippets, press logos, or user counts — establishing consensus in the first beat ('lots of people can't be wrong').",
+    "openingDirective": "Open on aggregated proof rendered as motion graphics — a wall of 5-star ratings, scrolling review snippets, a press-logo strip, or a big user-count — as the first frame. No single presenter; the proof elements are the visual.",
+    "scriptToneNote": "Optional VO states the headline number ('Over 50,000 five-star reviews').",
+    "fitsAdTypes": {
+      "good": ["social-proof"],
+      "clashes": ["brand-story", "founder-pov", "confession"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "before-after",
+    "displayName": "Before / After Tease",
+    "psychPrinciple": "Contrast effect / transformation salience",
+    "description": "Opens on a stark contrast between a 'before' state and the 'after' result, compressing the product's payoff into the first beat. This is the opening hook, distinct from the before-after ad type.",
+    "openingDirective": "Open with a hard cut or split-screen between the 'before' and the 'after' in the first 1–2 seconds — show the worse state, then snap to the improved result. Make the contrast unmistakable in one beat; the product need not be in frame, only the change.",
+    "scriptToneNote": "Minimal words; let the visual contrast talk ('Watch this.').",
+    "fitsAdTypes": {
+      "good": ["before-after"],
+      "clashes": ["brand-awareness", "announcement", "brand-story", "confession"]
+    },
+    "policyNote": "For weight-loss and anti-aging/wrinkle categories, avoid the literal split-screen (Meta prohibits before/after there); use positive, after-forward framing instead.",
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "demonstration",
+    "displayName": "Demonstration (Show-It-Working)",
+    "psychPrinciple": "Visual proof / seeing-is-believing",
+    "description": "Opens mid-action with the product visibly doing the impressive thing, proving the benefit by sight before any words. Implicitly requires the product on screen.",
+    "openingDirective": "Open mid-action on the product performing its single most impressive function in extreme close-up (the satisfying result happening in real time). The product and its effect fill the first frame; start at the peak of the action, not the setup.",
+    "scriptToneNote": "Few or no words; let the action play ('Just look.').",
+    "fitsAdTypes": {
+      "good": ["product-demo", "unboxing"],
+      "clashes": ["brand-awareness", "explainer", "brand-story", "announcement"]
+    },
+    "worksWithoutProduct": false,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "relatable-scenario",
+    "displayName": "Relatable Scenario",
+    "psychPrinciple": "Self-identification / in-group recognition",
+    "description": "Opens on a hyper-specific everyday moment the target instantly recognizes as 'that's me,' creating identification before any selling.",
+    "openingDirective": "Open on a tightly specific everyday scene the target sees themselves in, framed POV or fly-on-the-wall (the 3pm slump, the messy junk drawer), with a caption like 'POV: ___'. Keep it mundane and recognizable; no product pitch in the first beat.",
+    "scriptToneNote": "Casual, knowing, second- or first-person ('us').",
+    "fitsAdTypes": {
+      "good": ["lifestyle"],
+      "clashes": ["brand-awareness", "announcement", "promo-offer", "social-proof"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "direct-callout",
+    "displayName": "Direct Callout",
+    "psychPrinciple": "Self-relevance / cocktail-party effect",
+    "description": "Opens by naming the exact audience so the right viewer self-selects and feels personally addressed.",
+    "openingDirective": "Open by calling out the target audience in the first words, spoken to camera and/or as bold text (e.g., 'If you have [trait/problem], stop scrolling.'). Make it specific enough that the right person knows it's for them within one second.",
+    "scriptToneNote": "Direct, second-person, slightly urgent.",
+    "fitsAdTypes": {
+      "good": ["promo-offer", "spokesperson"],
+      "clashes": ["brand-story", "confession"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "unexpected-comparison",
+    "displayName": "Unexpected Comparison",
+    "psychPrinciple": "Analogical framing / novelty",
+    "description": "Opens by likening the product or problem to something surprising and unrelated, reframing it via a vivid analogy that makes an abstract benefit concrete.",
+    "openingDirective": "Open by comparing the product to something unexpected in the first beat (e.g., 'This does for your ___ what ___ does for ___'), or cut between the product and the surprising stand-in. The comparison must be clear and a little jarring in one sentence.",
+    "scriptToneNote": "Playful, 'bet you didn't expect this.'",
+    "fitsAdTypes": {
+      "good": ["comparison"],
+      "clashes": ["testimonial", "confession", "promo-offer"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "negativity-bias",
+    "displayName": "Negativity Bias (Warning / Mistake)",
+    "psychPrinciple": "Negativity bias / loss aversion",
+    "description": "Opens with a warning, threat, or 'you're doing it wrong' callout, exploiting the brain's stronger weighting of negative information.",
+    "openingDirective": "Open with a sharp warning in the first beat — a mistake the viewer is likely making or a risk they're ignoring, as a spoken line and/or alarming text (e.g., 'You're [doing this] wrong — and it's costing you.'). Frame as urgent caution; no product reveal yet.",
+    "scriptToneNote": "Cautionary, slightly alarming, 'listen up.'",
+    "fitsAdTypes": {
+      "good": ["problem-agitate-solve"],
+      "clashes": ["brand-story", "lifestyle", "announcement", "unboxing"]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "confession",
+    "displayName": "Confession",
+    "psychPrinciple": "Self-disclosure / authenticity + curiosity",
+    "description": "Opens with a person admitting something candid or counterintuitive ('I wasn't going to post this…'), trading polish for authenticity and opening a curiosity loop. Requires a person.",
+    "openingDirective": "Open on a person talking candidly to camera, confessing something in the first words (e.g., 'I almost didn't share this…' / 'Okay, I was wrong about ___'). Raw, phone-captured, low-production framing; the admission is the opening line, before any product.",
+    "scriptToneNote": "Vulnerable, candid, lowered voice, unpolished.",
+    "fitsAdTypes": {
+      "good": ["founder-pov"],
+      "clashes": [
+        "brand-awareness",
+        "promo-offer",
+        "announcement",
+        "social-proof",
+        "explainer"
+      ]
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": false
+  }
+]
