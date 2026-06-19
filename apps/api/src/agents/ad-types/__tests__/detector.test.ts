@@ -52,8 +52,9 @@ describe("confidenceGate", () => {
   });
 
   it("keeps a low-confidence pick that shares the default's look + is asset-compatible", () => {
-    // brand-story shares look with the no-asset default and needs no assets
-    expect(confidenceGate("brand-story", 0.3, false, false)).toBe("brand-story");
+    // explainer shares the graphic_text look of the no-asset default
+    // (brand-awareness) and needs no assets → kept, not overridden.
+    expect(confidenceGate("explainer", 0.3, false, false)).toBe("explainer");
   });
 });
 

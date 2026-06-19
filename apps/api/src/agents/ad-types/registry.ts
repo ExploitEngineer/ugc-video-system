@@ -9,8 +9,21 @@ import type { AdTypeDef } from "./types.js";
 
 import { testimonial } from "./defs/testimonial.js";
 import { brandStory } from "./defs/brand-story.js";
-// New types are registered by adding an import + a REGISTRY entry below. That is
-// the ONLY edit adding a type requires in this file — purely additive (Chunk H).
+import { productShowcase } from "./defs/product-showcase.js";
+import { productDemo } from "./defs/product-demo.js";
+import { beforeAfter } from "./defs/before-after.js";
+import { comparison } from "./defs/comparison.js";
+import { unboxing } from "./defs/unboxing.js";
+import { lifestyle } from "./defs/lifestyle.js";
+import { problemAgitateSolve } from "./defs/problem-agitate-solve.js";
+import { founderPov } from "./defs/founder-pov.js";
+import { spokesperson } from "./defs/spokesperson.js";
+import { socialProof } from "./defs/social-proof.js";
+import { explainer } from "./defs/explainer.js";
+import { promoOffer } from "./defs/promo-offer.js";
+import { announcement } from "./defs/announcement.js";
+import { brandAwareness } from "./defs/brand-awareness.js";
+// Adding a type = one import + one REGISTRY entry below. Purely additive.
 
 // The open ad-type id schema lives in @ugc/shared (the `errorCode` precedent) so
 // the wire boundary (routes) and this registry share ONE source of truth. We
@@ -23,10 +36,20 @@ export { adTypeIdSchema } from "@ugc/shared";
 const ALL_DEFS: AdTypeDef[] = [
   testimonial, // legacyMapping: "ugc"
   brandStory, // legacyMapping: "inspirational"
-  // product-showcase, product-demo, social-proof, problem-agitate-solve,
-  // before-after, comparison, unboxing, explainer, founder-pov, lifestyle,
-  // promo-offer, announcement, brand-awareness, spokesperson — added one at a
-  // time in Chunk H.
+  productShowcase,
+  productDemo,
+  beforeAfter,
+  comparison,
+  unboxing,
+  lifestyle,
+  problemAgitateSolve,
+  founderPov,
+  spokesperson,
+  socialProof,
+  explainer,
+  promoOffer,
+  announcement,
+  brandAwareness,
 ];
 
 export const REGISTRY: Readonly<Record<string, AdTypeDef>> = Object.freeze(
