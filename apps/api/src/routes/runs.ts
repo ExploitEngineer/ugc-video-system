@@ -23,6 +23,7 @@ import {
   getOpenAI,
   interpretFeedback,
 } from "../agents/creative-direction/index.js";
+import { closeInFlightStepsOnCancel } from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
@@ -692,6 +693,12 @@ runs.post("/:id/cancel", async (c) => {
   // Idempotent: already-terminal runs return their current state unchanged.
   if (run.status !== "completed" && run.status !== "failed") {
     log.info("cancel →failed", { run: id, from: run.status });
+    // Close out any IN-FLIGHT step (latest event `started`, no terminal) so the
+    // timeline shows it stopped rather than running forever. Steps that already
+    // `passed` (e.g. a completed storyboard) are left untouched, so their status
+    // + artifact survive the cancel — the frontend derives per-step status from
+    // these events, not from the run-level `failed` status.
+    await closeInFlightStepsOnCancel(id);
     await db
       .update(schema.runs)
       .set({

@@ -26,7 +26,7 @@ import {
 } from "../../providers/openai/index.js";
 import { createVideoProvider } from "../../providers/index.js";
 import type { VideoProvider } from "../../providers/video.js";
-import { writeStepEvent } from "../events.js";
+import { latestStepEventStatus, writeStepEvent } from "../events.js";
 import { persistSheet } from "../persist.js";
 import { cropRowsAs2x2 } from "../../lib/image/crop.js";
 import { fetchWithRetry } from "../../lib/http.js";
@@ -320,6 +320,20 @@ async function executeStep(
       if (await persistedFinalVideo(runId)) return {};
       const storyboard = await latestStoryboardSheet(runId);
       if (!storyboard) throw new Error("no storyboard sheet for video");
+      // Bug-guard: never generate a video unless the storyboard step genuinely
+      // PASSED and produced scenes. The video previously ran on mere asset
+      // existence, so a failed/empty storyboard (or a stale draft sheet from an
+      // earlier attempt) could still drive a paid video render.
+      const sbStatus = await latestStepEventStatus(runId, "storyboard");
+      if (sbStatus !== "passed") {
+        throw new Error(
+          `refusing to generate video: storyboard step is "${sbStatus ?? "missing"}", not "passed"`,
+        );
+      }
+      const sbScenes = (storyboard.scenes ?? []) as StoryboardScene[];
+      if (sbScenes.length === 0) {
+        throw new Error("refusing to generate video: storyboard has no scenes");
+      }
       // The video model receives the clean storyboard image (shot order/layout)
       // + the scene descriptions and transcripts (text). When the ad has a
       // person, also pass the person's IDENTITY image — the uploaded face, or
@@ -340,7 +354,7 @@ async function executeStep(
         hasPerson: Boolean(personRef),
         personFaceRef: personRef,
         productSheetRef,
-        scenes: (storyboard.scenes ?? []) as StoryboardScene[],
+        scenes: sbScenes,
         // Pin the presenter's identity in the video prompt. Empty for uploaded
         // persons (no text brief) — the gender-locked scene text carries it then.
         characterAnchor: ctx.personBrief,

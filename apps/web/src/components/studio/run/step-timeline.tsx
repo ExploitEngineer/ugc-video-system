@@ -225,7 +225,12 @@ export function StepTimeline({ run }: { run: RunDetail }) {
         const asset = assetKind
           ? run.assets.findLast((a) => a.kind === assetKind)
           : undefined;
-        const showAsset = asset && (state === "done" || state === "awaiting");
+        // Show the artifact whenever it EXISTS — not only on done/awaiting. A
+        // run cancelled/failed after a step produced its sheet still has that
+        // artifact in the DB, and it must stay visible (the cancel-bug fix).
+        // Only hide while the step is actively generating its first output
+        // (nothing persisted yet anyway).
+        const showAsset = Boolean(asset) && state !== "active";
         // Multi-segment video fan-out: surface live "done/total" progress while
         // the N clips render in parallel, so a minutes-long "Generating" visibly
         // advances as each segment lands (every passed event pushes a snapshot).
