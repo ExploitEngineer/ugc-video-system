@@ -9,6 +9,7 @@
 import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
+  hookSelectionSchema,
   isMultiSegment,
   narrativeOutlineSchema,
   runErrorCodeSchema,
@@ -16,6 +17,7 @@ import {
   stepEventStatusSchema,
 } from "@ugc/shared";
 import type { schema } from "../db/index.js";
+import { FALLBACK_AD_TYPE_ID, getAdType } from "../agents/ad-types/registry.js";
 import { createLogger } from "./log.js";
 
 type AssetRow = typeof schema.assets.$inferSelect;
@@ -172,10 +174,13 @@ export function toRunDetailDto(
     narrativeOutline: outline,
     // The locked visual-style bible (multi-segment only; null for 15s/pre-outline).
     visualStyle: isMultiSegment(run.duration) ? (run.visualStyle ?? null) : null,
-    // Detector outputs (Chunk B columns; populated in Chunk E). Pass through;
-    // null on legacy rows. Shapes are validated/tightened when the detector lands.
-    hooks: run.hooks ?? null,
+    // Detector outputs (Chunk E), surfaced in the run view (Chunk K). Validate
+    // the hooks jsonb at the wire boundary; drop on drift (legacy/null rows).
+    hooks: hookSelectionSchema.safeParse(run.hooks).data ?? null,
     adTypeConfidence: run.adTypeConfidence ?? null,
     detectorMeta: run.detectorMeta ?? null,
+    // Registry-resolved display name + look family for the resolved adType.
+    adTypeDisplayName: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).displayName,
+    lookFamily: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).lookFamily,
   };
 }

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
+  BotIcon,
   CheckCircle2Icon,
   ClapperboardIcon,
   ClockIcon,
@@ -15,8 +16,9 @@ import {
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
   SparklesIcon,
+  TagIcon,
   TriangleAlertIcon,
-  UserIcon,
+  ZapIcon,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -48,6 +50,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
 import { useRunStream } from "@/lib/use-run-stream";
+
+/** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
+function prettyHook(id: string): string {
+  return id
+    .split("-")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
 
 /** A small option pill shown in the user's message bubble. */
 function Chip({
@@ -242,6 +252,9 @@ export function RunView({ runId }: { runId: string }) {
   // Uploaded inputs (shown as thumbnails in the user's message bubble).
   const productUpload = run.assets.find((a) => a.kind === "product_upload");
   const personUpload = run.assets.find((a) => a.kind === "person_upload");
+  // A person sheet with no uploaded person photo ⇒ the person was synthesized.
+  const synthPerson =
+    !personUpload && run.assets.some((a) => a.kind === "person_sheet");
   const hasScript =
     (run.segmentScenes?.length ?? 0) > 0 || (run.scenes?.length ?? 0) > 0;
   const running = run.status === "running" || run.status === "regenerating";
@@ -263,9 +276,25 @@ export function RunView({ runId }: { runId: string }) {
         )}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <Chip icon={ClapperboardIcon}>{run.adStyle}</Chip>
-          <Chip icon={run.adType === "ugc" ? UserIcon : SparklesIcon}>
-            {run.adType === "ugc" ? "UGC" : "Inspirational"}
+          <Chip icon={TagIcon}>
+            {run.adTypeDisplayName}
+            {run.adTypeSource === "user" ? (
+              <span className="text-muted-foreground/70 ml-1">· you chose</span>
+            ) : run.adTypeSource === "auto" ? (
+              <span className="text-muted-foreground/70 ml-1">· auto</span>
+            ) : null}
           </Chip>
+          {run.hooks && (
+            <>
+              <Chip icon={ZapIcon}>
+                Hook: {prettyHook(run.hooks.visualLead.id)}
+              </Chip>
+              {run.hooks.overlay && (
+                <Chip icon={ZapIcon}>+ {prettyHook(run.hooks.overlay.id)}</Chip>
+              )}
+            </>
+          )}
+          {synthPerson && <Chip icon={BotIcon}>AI person</Chip>}
           <Chip icon={isMulti ? FilmIcon : ClockIcon}>
             {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
           </Chip>
