@@ -5,6 +5,7 @@
 // never import the adapter directly and stay unit-testable with a fake.
 
 import type { AdType, AspectRatio, Duration } from "@ugc/shared";
+import type { HookSelection } from "./ad-types/types.js";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
 
@@ -34,8 +35,23 @@ export interface SkillContext {
   runId: string;
   /** Opaque in F4 (caller supplies it); F7's Creative Direction Agent sets it. */
   adStyle: string;
-  /** Ad treatment (ugc | inspirational), inferred from the prompt. */
+  /**
+   * Ad treatment as the LEGACY 2-value enum (ugc | inspirational), derived in
+   * `buildCtx` from the open `runs.ad_type` id via the registry's
+   * `legacyMapping`. The detector (Chunk E) stores the rich open id + hooks on
+   * the run; the prompt builders still consume this 2-value form until Chunk F
+   * dispatches through the registry.
+   */
   adType: AdType;
+  /**
+   * Resolved hook selection from the detector (Chunk E), parsed from
+   * `runs.hooks`. Undefined on legacy/older runs. Consumed by the prompt
+   * builders' hook-opening splice in Chunk F.
+   */
+  hooks?: HookSelection;
+  /** Ground-truth: a product / person image was uploaded for this run. */
+  hasProduct?: boolean;
+  hasPerson?: boolean;
   /**
    * Factual product identity anchor (category / materials / colors / markings),
    * planned once via vision over the upload and persisted to `runs.product_brief`.

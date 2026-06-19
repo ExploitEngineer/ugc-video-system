@@ -15,7 +15,7 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
+import { type AdType, isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
@@ -40,6 +40,9 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
+import { FALLBACK_AD_TYPE_ID, getAdType } from "../ad-types/registry.js";
+import { reconcile } from "../ad-types/reconcile.js";
+import type { HookSelection } from "../ad-types/types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { describeProduct } from "./describe-product/index.js";
 import {
@@ -142,15 +145,33 @@ async function ownsRun(runId: string, myId?: string): Promise<boolean> {
   return run?.lockedBy === myId;
 }
 
-function buildCtx(run: RunRow): SkillContext {
+/**
+ * Map the open `runs.ad_type` id to the LEGACY 2-value treatment the prompt
+ * builders still consume (until Chunk F dispatches through the registry).
+ * `legacyMapping` covers the two seed types; new types fall back by look family
+ * (ugc_authentic → ugc, everything else → inspirational).
+ */
+function legacyAdType(adTypeId: string | null): AdType {
+  const def = getAdType(adTypeId ?? FALLBACK_AD_TYPE_ID);
+  if (def.legacyMapping) return def.legacyMapping;
+  return def.lookFamily === "ugc_authentic" ? "ugc" : "inspirational";
+}
+
+function buildCtx(
+  run: RunRow,
+  uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
+): SkillContext {
   const { openai, video } = providers();
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
-    // `runs.ad_type` is now open `text` (Chunk B). Until the registry/detector
-    // land (Chunks C/E), SkillContext.adType stays the 2-value legacy enum, so
-    // coerce: only the legacy "inspirational" maps through, everything else → "ugc".
-    adType: run.adType === "inspirational" ? "inspirational" : "ugc",
+    // `runs.ad_type` is open `text`; the detector (Chunk E) stores the rich id +
+    // hooks. The builders still read the 2-value form via the registry's
+    // legacyMapping until Chunk F dispatches per-type fragments.
+    adType: legacyAdType(run.adType),
+    hooks: (run.hooks as HookSelection | null) ?? undefined,
+    hasProduct: Boolean(uploads.productUpload),
+    hasPerson: Boolean(uploads.personUpload),
     productBrief: run.productBrief ?? "",
     productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
@@ -695,37 +716,74 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     tag,
   );
 
-  // Phase 0 — interpret the ad style once, when leaving `queued`. The
-  // product-derived person brief is NOT planned here: it's deferred into the
-  // parallel reference phase (concurrent with the product sheet), so the product
-  // sheet — which needs neither the brief nor its vision call — starts at once.
+  // Uploads are immutable for the life of the run — load once and reuse for the
+  // detector ground truth and every ctx build.
+  const uploads = await loadUploads(runId);
+  const hasProduct = Boolean(uploads.productUpload);
+  const personUploaded = Boolean(uploads.personUpload);
+
+  // Phase 0 — interpret the ad style + classify the ad type / hooks once, when
+  // leaving `queued`. The product-derived person brief is NOT planned here: it's
+  // deferred into the parallel reference phase (concurrent with the product
+  // sheet), so the product sheet — which needs neither the brief nor its vision
+  // call — starts at once.
   if (run.status === "queued") {
-    const ctx = buildCtx(run);
+    const ctx = buildCtx(run, uploads);
     logRun(runId, "▶ interpreting ad style …", tag);
     try {
-      const { adStyle, adType } = await interpretAdStyle(ctx, {
+      const detected = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
+        hasProduct,
+        hasPerson: personUploaded,
+        productBrief: run.productBrief ?? "",
+        personBrief: run.personBrief ?? "",
       });
+      // Honor an explicit user dropdown pick (Chunk J): keep the locked adType,
+      // still take the detector's adStyle + hooks. Reconcile still applies asset
+      // safety (a product-required type with no product downgrades).
+      const locked =
+        run.adTypeSource === "user" && run.adType ? run.adType : null;
+      const plan = reconcile(
+        {
+          adType: locked ?? detected.adType,
+          hooks: detected.hooks,
+          confidence: detected.confidence,
+        },
+        hasProduct,
+        personUploaded,
+      );
+      const hookLabel = [plan.hooks.visualLead.id, plan.hooks.overlay?.id]
+        .filter(Boolean)
+        .join("+");
       if (
         !(await setRunIfActive(runId, {
-          adStyle,
-          adType,
+          adStyle: detected.adStyle,
+          adType: plan.adType,
+          adTypeSource: run.adTypeSource ?? "auto",
+          hooks: plan.hooks,
+          adTypeConfidence: detected.confidence,
+          detectorMeta: {
+            rationale: detected.rationale,
+            assetIntent: detected.assetIntent,
+            synthesizePerson: plan.synthesizePerson,
+            detectedHooks: detected.hooks,
+          },
           status: "running",
           currentStep: null,
         }))
       ) {
         return; // cancelled during interpretation — leave it terminal
       }
-      logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`, tag);
+      logRun(
+        runId,
+        `ad style: "${detected.adStyle}" · ad type: ${plan.adType} (${run.adTypeSource ?? "auto"}) · hooks: ${hookLabel}`,
+        tag,
+      );
     } catch (err) {
       await failRun(runId, null, err);
       return;
     }
   }
-
-  // Uploads are immutable for the life of the run — compute the branch once.
-  const { personUpload } = await loadUploads(runId);
-  const personUploaded = Boolean(personUpload);
 
   for (;;) {
     run = await readRun(runId);
@@ -744,7 +802,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       return;
     }
 
-    const ctx = buildCtx(run);
+    const ctx = buildCtx(run, uploads);
 
     // ── regenerating: re-run the generation step of the revised gate, with
     // the user's feedback threaded into the agent prompt ──
@@ -783,7 +841,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
           const sb = master ?? (await latestStoryboardSheet(runId));
           if (sb) currentArtifact = { source: sb.assetUrl, mime: "image/png" };
         } else {
-          currentArtifact = await resolvePersonRef(runId, personUpload);
+          currentArtifact = await resolvePersonRef(runId, uploads.personUpload);
         }
         if (currentArtifact) {
           directive = await planRevision(ctx.openai, {

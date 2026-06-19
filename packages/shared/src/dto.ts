@@ -48,6 +48,51 @@ export const stepEventSchema = z.object({
 });
 export type StepEvent = z.infer<typeof stepEventSchema>;
 
+// ── Detector output (interpretAdStyle) ──────────────────────────────────────
+// The single-call ad-type + hook detector returns this shape. It is validated
+// by `parseJsonObject(reply, adStylePlanSchema)` in the agent. Because the
+// reasoning backend is Claude (no strict JSON-schema mode), the schema is
+// deliberately FORGIVING — every field has a `.catch` default so a slightly-off
+// reply degrades to a safe default instead of failing the whole parse; the
+// registry clamp + reconcile (api `ad-types/reconcile.ts`) own correctness.
+
+/** Hook role in the resolved opening — visual_lead owns frame 1, overlay layers a line/text on it. */
+export const hookRoleSchema = z.enum(["visual_lead", "overlay"]);
+export type HookRole = z.infer<typeof hookRoleSchema>;
+
+/** What the PROMPT TEXT implies about an asset, independent of what was uploaded. */
+export const intentSignalSchema = z.enum(["implied", "absent", "unclear"]);
+export type IntentSignal = z.infer<typeof intentSignalSchema>;
+
+/** One hook the detector picked, with the role hint it assigned (re-derived in compose). */
+export const detectedHookSchema = z.object({
+  id: z.string(),
+  role: hookRoleSchema.catch("overlay"),
+});
+
+export const assetIntentSchema = z.object({
+  product: intentSignalSchema.catch("unclear"),
+  person: intentSignalSchema.catch("unclear"),
+});
+export type AssetIntent = z.infer<typeof assetIntentSchema>;
+
+/**
+ * The detector's output. Reasoning-first key order (adStyle/rationale BEFORE the
+ * discrete adType/hooks/confidence) so the model reasons before committing.
+ */
+export const adStylePlanSchema = z.object({
+  adStyle: z.string().catch(""),
+  rationale: z.string().catch("").optional(),
+  adType: z.string().catch(""),
+  hooks: z.array(detectedHookSchema).catch([]),
+  confidence: z.coerce.number().catch(0),
+  assetIntent: assetIntentSchema.catch({
+    product: "unclear",
+    person: "unclear",
+  }),
+});
+export type AdStylePlan = z.infer<typeof adStylePlanSchema>;
+
 /** A generation job — the authoritative state machine row. */
 export const runSchema = z.object({
   id: z.string(),
