@@ -114,3 +114,64 @@ feature → result); the spoken beat is a short voiceover label for that step.
 Net-new type with no legacy mapping. Do not set `legacyMapping` in the def. Keep
 the function/step emphasis sharp so the detector separates this from the static
 product-showcase reveal.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Product Demo (the product SHOWN being USED, step by step — function first):
+- This is a clean demo_clean sheet: studio/tabletop product photography on a
+  seamless white or soft neutral-gradient sweep, the product the clear hero,
+  shown ACTIVELY IN USE — NOT a static beauty shot, NOT a person reviewing it.
+- The 4 panels are an ORDERED function walkthrough, one concrete step each:
+  Panel 1 — product at rest / closed / its starting state, hero on the sweep,
+    label and key controls readable; transcript: name the product or the setup
+    (e.g. "this is how it works").
+  Panel 2 — hands enter and BEGIN the action: open it, press it, load it; close
+    on the working part; transcript: name the first action ("press once to start").
+  Panel 3 — product MID-ACTION, the key feature or mechanism doing its job, the
+    function visible and large; transcript: name the feature ("it locks in place").
+  Panel 4 — the clear END RESULT / finished state, product at rest again with the
+    outcome shown; transcript: name the result ("done in seconds"), not a sales close.
+- Optional person = HANDS ONLY operating the product; focus stays on the product
+  and what it is doing, its parts/controls/details sharp and macro-readable.
+- If the product carries label text, reproduce it EXACTLY/verbatim from the
+  reference — no invented words, no garbled letters, no extra logos.
+- The four transcript lines read as ONE plain instructive voiceover walkthrough,
+  setup → action → mechanism → result, ending on the outcome, never a hard CTA.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Each transcript line is a short, plain VOICEOVER label for the step shown in
+  that panel — name the action, the feature, or the result it produces; keep it
+  under ~8 words, instructive and direct, never an over-hyped announcer pitch.
+```
+
+### videoVoice
+
+```
+a clear, confident, instructive voiceover
+```
+
+### videoAudioLine
+
+```
+Audio: a clear off-screen VOICEOVER (neutral, instructive, the SAME voice throughout, NOT lip-synced on screen) walks the steps, each line quoted verbatim and short; tactile interaction SFX (click, tap, pour, snap, mechanism) where they fit, light or no music; no garbled product label, keep the product unwarped.
+```
+
+### narrativeTreatment
+
+```
+Treatment: product demo — a function-first walkthrough across four segments: (1) product at rest / setup, (2) hands begin the action, (3) the key feature or mechanism doing its job, (4) the visible end result; each spoken beat is a short voiceover label for that step, closing on the outcome, not a sales close.
+```

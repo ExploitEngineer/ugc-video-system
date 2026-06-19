@@ -109,3 +109,64 @@ spoken beat is a voiceover line moving from problem to relief.
 
 Product is mandatory (it is the "solve"); never let the product appear before the
 pain is established. Keep the agitation honest and relatable, not alarmist.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Problem-Agitate-Solve (a pain-first arc the PRODUCT resolves):
+- Direct the storyboard as a 4-panel narrative arc that runs PROBLEM →
+  AGITATE → SOLVE → RELIEF, one beat per panel, read left-to-right as
+  ordered steps — NOT four glamour angles and NOT a flat product demo.
+- Panel 1 (PROBLEM): dramatize the named pain in a real, lived-in home
+  setting — the messy, slow, broken, or annoying status quo — candid and
+  relatable so the viewer thinks "that's me". POLICY GUARD: the product is
+  ABSENT here; it must not appear before the pain is established.
+- Panel 2 (AGITATE): push in close on the problem — the failed workaround,
+  the repeated hassle, the cost — so the frustration stings; still no product.
+- Panel 3 (SOLVE): the PRODUCT enters as the turning point — hands reaching
+  for it / using it — clearly aimed at the exact pain set up in panels 1-2.
+- Panel 4 (RELIEF): the satisfied better-after with the product visible; the
+  contrast between the agitated problem and the clean solve is the whole point.
+- Keep any on-screen person's identity, wardrobe, and hair consistent across
+  all four panels (ugc_authentic handheld phone look, natural window light).
+- Each scene's `transcript` is that beat's spoken line: panel 1 names the pain
+  ("tired of…"), panel 2 twists the knife, panels 3-4 land the relief ("now…")
+  — short, plain, conversational, one continuous problem-to-relief through-line.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+Each transcript line maps to its PAS beat — name the pain, agitate it, then
+deliver the relief — in plain, conversational, pain-named phrasing ("tired
+of…", "sick of…", "struggling with…" → "now…"). Keep each line short (under
+~16 words) and verbatim-quotable; the lines chain into one through-line.
+```
+
+### videoVoice
+
+```
+an empathetic, relatable voice that turns confident on the solve
+```
+
+### videoAudioLine
+
+```
+Audio: a real human VOICEOVER carries each line in the SAME voice throughout — frustrated/empathetic over the problem, shifting to relieved and confident as the product solves it; quote each line verbatim in its slice, keep it short, with ambient room tone and a cold→warm tonal shift marking the turn; — no music, no logo, no on-screen text, no jitter, no warped hands.
+```
+
+### narrativeTreatment
+
+```
+Treatment: Problem-Agitate-Solve, 4 segments — (1) name the pain in a real everyday setting, (2) agitate it (cost, repeated hassle, failed workaround) so it stings, (3) introduce the PRODUCT as the turning point resolving that exact pain (POLICY GUARD: product never appears before the pain is established), (4) land the relieved better-after with the product visible; each spoken beat is a voiceover line moving frustrated→relieved across the arc.
+```

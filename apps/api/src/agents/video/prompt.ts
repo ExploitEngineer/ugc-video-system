@@ -152,6 +152,10 @@ export function buildVideoPrompt(input: {
     ? `OPENING HOOK (first time-slice only): ${hookOpening(fctx.hooks).videoFirstSlice.join(" ")}`
     : "";
 
+  // Shot-rhythm/pacing — LOOK-driven fragment, joined into one compact line.
+  // Empty for the legacy looks (ugc/cinematic return []) → byte-identical.
+  const pacingLine = def.fragments.videoPacing(fctx).join(" ");
+
   // 60s: the ONE locked visual-style bible, injected VERBATIM.
   const lockedStyle =
     isSegment && visualStyle?.trim() ? visualStyle.trim() : "";
@@ -179,6 +183,7 @@ export function buildVideoPrompt(input: {
     "For EACH slice: ONE plain sentence — the subject, the action/motion in that panel, and ONE camera move (static, pan, tilt, dolly, push or tracking). Concrete and short; say what the product visibly DOES so it reads as genuinely working. Any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
     audioLine,
     hookDirective,
+    pacingLine,
     `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT and front-loaded; lean on the attached images for look and identity instead of re-describing them. No on-screen text, captions or watermark.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
