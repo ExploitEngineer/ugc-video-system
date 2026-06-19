@@ -89,6 +89,22 @@ export type AspectRatio = z.infer<typeof aspectRatioSchema>;
 export const adTypeSchema = z.enum(["ugc", "inspirational"]);
 export type AdType = z.infer<typeof adTypeSchema>;
 
+/**
+ * OPEN ad-type id — validated as SHAPE (non-empty kebab-case), NOT membership,
+ * so adding a new ad type needs no enum migration (the `errorCode` precedent).
+ * Unrecognised ids resolve via the ad-type registry's fallback (Chunk C), not
+ * rejection. The legacy `adTypeSchema` union above is kept for back-compat.
+ */
+export const adTypeIdSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-z][a-z0-9-]*$/, "adType must be a kebab-case id");
+export type AdTypeId = z.infer<typeof adTypeIdSchema>;
+
+/** How the run's adType was set: auto-detected, or an explicit user dropdown pick. */
+export const adTypeSourceSchema = z.enum(["auto", "user"]);
+export type AdTypeSource = z.infer<typeof adTypeSourceSchema>;
+
 /** Approval state of a generated artifact (sheets, video). */
 export const artifactStatusSchema = z.enum(["draft", "approved", "rejected"]);
 export type ArtifactStatus = z.infer<typeof artifactStatusSchema>;

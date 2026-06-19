@@ -6,7 +6,8 @@
 
 import { z } from "zod";
 import {
-  adTypeSchema,
+  adTypeIdSchema,
+  adTypeSourceSchema,
   aspectRatioSchema,
   assetKindSchema,
   durationSchema,
@@ -53,7 +54,10 @@ export const runSchema = z.object({
   projectId: z.string(),
   prompt: z.string(),
   adStyle: z.string(),
-  adType: adTypeSchema,
+  /** OPEN ad-type id (kebab). Legacy rows are `ugc`/`inspirational`. */
+  adType: adTypeIdSchema,
+  /** Whether `adType` was auto-detected or a user dropdown pick; null = legacy. */
+  adTypeSource: adTypeSourceSchema.nullable(),
   mode: modeSchema,
   aspectRatio: aspectRatioSchema,
   /** Target ad length — `15s` (single clip) or `30/45/60s` (N merged clips). */
@@ -144,6 +148,14 @@ export const runDetailSchema = runSchema.extend({
    * `narrative_outline` step lands (and always null for 15s).
    */
   visualStyle: z.string().nullable(),
+  /**
+   * Detector outputs (Chunk B columns; populated by the detector in Chunk E).
+   * `hooks` = resolved selection `{ visualLead, overlay }`; shape kept permissive
+   * here and tightened when the hook registry lands. Null on legacy/pre-feature runs.
+   */
+  hooks: z.unknown().nullable(),
+  adTypeConfidence: z.number().nullable(),
+  detectorMeta: z.unknown().nullable(),
 });
 export type RunDetail = z.infer<typeof runDetailSchema>;
 

@@ -59,7 +59,7 @@ async function main() {
   const ctx: SkillContext = {
     runId,
     adStyle,
-    adType: run.adType ?? "ugc",
+    adType: run.adType === "inspirational" ? "inspirational" : "ugc",
     productBrief: run.productBrief ?? "",
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,

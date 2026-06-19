@@ -82,6 +82,7 @@ export type RunListRow = Pick<
   | "prompt"
   | "adStyle"
   | "adType"
+  | "adTypeSource"
   | "mode"
   | "aspectRatio"
   | "duration"
@@ -103,6 +104,11 @@ export function toRunDto(row: RunListRow): Run {
     adStyle: row.adStyle ?? "",
     // Default to `ugc` until the interpret step fills it in.
     adType: row.adType ?? "ugc",
+    // null on legacy rows (detector source not yet recorded).
+    adTypeSource:
+      row.adTypeSource === "auto" || row.adTypeSource === "user"
+        ? row.adTypeSource
+        : null,
     mode: row.mode,
     aspectRatio: row.aspectRatio,
     duration: row.duration,
@@ -166,5 +172,10 @@ export function toRunDetailDto(
     narrativeOutline: outline,
     // The locked visual-style bible (multi-segment only; null for 15s/pre-outline).
     visualStyle: isMultiSegment(run.duration) ? (run.visualStyle ?? null) : null,
+    // Detector outputs (Chunk B columns; populated in Chunk E). Pass through;
+    // null on legacy rows. Shapes are validated/tightened when the detector lands.
+    hooks: run.hooks ?? null,
+    adTypeConfidence: run.adTypeConfidence ?? null,
+    detectorMeta: run.detectorMeta ?? null,
   };
 }

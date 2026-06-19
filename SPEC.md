@@ -372,13 +372,13 @@ Read first: `research/02`. Touches: `providers/openai/{index.ts,constants.ts}`, 
 
 Read first: `research/00`, `research/02`. Touches: `packages/shared/src/{enums.ts,dto.ts}`, `db/schema.ts`, `db/migrations/`, `routes/runs.ts`.
 
-- [ ] Add open `adTypeIdSchema = z.string().min(1).regex(/^[a-z][a-z0-9-]*$/)`; keep legacy `AdType` union untouched. Typecheck.
-- [ ] Migration: `runs.ad_type` enum → `text` (`USING ad_type::text`), drop the type. Apply local; legacy rows survive.
-- [ ] Migration: add nullable `hooks jsonb`, `ad_type_confidence`, `detector_meta jsonb`. Apply local.
-- [ ] Update `schema.ts` (drop `adTypeEnum`, `adType`→`text`, add cols). Typecheck + smoke insert.
-- [ ] Update `dto.ts` `runSchema.adType` to the open id. Typecheck.
-- [ ] Update run-mapper (`routes/runs.ts`) to surface `adType`/`hooks`/`confidence` (nullable-safe). Manual: GET a run.
-- [ ] PAUSE — existing run loads + fresh `ugc` run completes → commit + PR.
+- [x] Added open `adTypeIdSchema` + `adTypeSourceSchema` (`enums.ts`); legacy `AdType` union kept.
+- [x] Migration `0018`: `runs.ad_type` enum → `text` (`USING "ad_type"::text`), `DROP TYPE ad_type`. Applied local; 53 legacy rows (33 ugc + 20 inspirational) survived.
+- [x] Same migration adds nullable `hooks jsonb`, `ad_type_confidence real`, `detector_meta jsonb`, `ad_type_source text`. Applied + verified via psql.
+- [x] `schema.ts`: dropped `adTypeEnum`, `ad_type`→`text`, added the 4 columns. Coerced `buildCtx` (+ 3 verify scripts) so `SkillContext.adType` stays the 2-value enum until Chunks C/E. Typecheck green.
+- [x] `dto.ts`: `runSchema.adType` → `adTypeIdSchema`; added `adTypeSource` (base) + `hooks`/`adTypeConfidence`/`detectorMeta` (detail, permissive nullable — tightened in E).
+- [x] run-mapper (`mappers.ts`) + `loadRunList` surface `adType`/`adTypeSource` (+ detector fields on detail). Typecheck green.
+- [x] PAUSE — user-tested (existing run loads + fresh `ugc` run completes) + approved 2026-06-19 → committed onto `dev`.
 
 ### Chunk C — Ad-type registry + look families (legacy defs verbatim) — `feat/ad-type-registry-foundation`
 

@@ -147,6 +147,7 @@ async function loadRunList(): Promise<Run[]> {
       prompt: schema.runs.prompt,
       adStyle: schema.runs.adStyle,
       adType: schema.runs.adType,
+      adTypeSource: schema.runs.adTypeSource,
       mode: schema.runs.mode,
       aspectRatio: schema.runs.aspectRatio,
       duration: schema.runs.duration,

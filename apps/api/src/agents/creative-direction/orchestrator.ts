@@ -147,7 +147,10 @@ function buildCtx(run: RunRow): SkillContext {
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
-    adType: run.adType ?? "ugc",
+    // `runs.ad_type` is now open `text` (Chunk B). Until the registry/detector
+    // land (Chunks C/E), SkillContext.adType stays the 2-value legacy enum, so
+    // coerce: only the legacy "inspirational" maps through, everything else → "ugc".
+    adType: run.adType === "inspirational" ? "inspirational" : "ugc",
     productBrief: run.productBrief ?? "",
     productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
