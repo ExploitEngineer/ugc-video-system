@@ -80,8 +80,25 @@ export function CreateRunForm({
     };
   }, []);
 
+  // Per-type asset requirement — drives whether the product upload is required
+  // and the hint shown. Auto-detect stays permissive (the detector adapts to
+  // whatever was uploaded); a specific pick requires a product only when its
+  // policy says so. Person is never a required upload (synthesized when needed).
+  const selectedType =
+    adType === "auto" ? null : (adTypes.find((o) => o.id === adType) ?? null);
+  const productRequired = selectedType?.assetPolicy.product === "required";
+  const assetHint = !selectedType
+    ? "Auto-detect — add a product and/or person image, or none for a text-only ad type."
+    : selectedType.assetPolicy.product === "required"
+      ? `${selectedType.displayName} needs a product image · person optional`
+      : selectedType.assetPolicy.person === "required"
+        ? `${selectedType.displayName} centres on a person (uploaded or auto-generated) · product optional`
+        : `${selectedType.displayName} needs no images — just describe it in your prompt`;
+
   const canSubmit =
-    Boolean(productFile) && prompt.trim().length > 0 && !pending;
+    (!productRequired || Boolean(productFile)) &&
+    prompt.trim().length > 0 &&
+    !pending;
 
   // Auto-grow the composer up to a cap, then scroll.
   // biome-ignore lint/correctness/useExhaustiveDependencies: prompt drives the resize; the ref isn't a dependency
@@ -94,8 +111,10 @@ export function CreateRunForm({
 
   function submit() {
     setError(null);
-    if (!productFile) {
-      setError("A product image is required.");
+    if (productRequired && !productFile) {
+      setError(
+        `The "${selectedType?.displayName ?? "selected"}" ad type needs a product image.`,
+      );
       return;
     }
     if (prompt.trim().length === 0) {
@@ -104,7 +123,7 @@ export function CreateRunForm({
     }
 
     const fd = new FormData();
-    fd.set("productImage", productFile);
+    if (productFile) fd.set("productImage", productFile);
     if (personFile) fd.set("personImage", personFile);
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
@@ -163,7 +182,7 @@ export function CreateRunForm({
               file={productFile}
               onFile={setProductFile}
               onError={setError}
-              required
+              required={productRequired}
             />
             <AttachButton
               label="Person"
@@ -210,6 +229,13 @@ export function CreateRunForm({
           </div>
         </div>
       </div>
+
+      {/* Per-type asset guidance — tells the user which uploads (if any) this
+          ad type needs, so no-image types don't look broken. */}
+      <p className="text-muted-foreground/80 flex items-center gap-1.5 px-1 text-[11px]">
+        <ImageIcon className="size-3 shrink-0 opacity-70" />
+        {assetHint}
+      </p>
 
       <div className="flex min-h-5 items-center justify-between px-1">
         <AnimatePresence mode="wait">
