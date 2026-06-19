@@ -2,9 +2,17 @@
 
 import type { RunDetail, Scene } from "@ugc/shared";
 import { motion } from "framer-motion";
-import { ClapperboardIcon, MicIcon, QuoteIcon } from "lucide-react";
+import { ClapperboardIcon, MicIcon, QuoteIcon, ZapIcon } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
+
+/** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
+function prettyHook(id: string): string {
+  return id
+    .split("-")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
 
 /**
  * Readable layout of the generated script. For a 15s run it's one 4-scene list;
@@ -22,9 +30,17 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
         : null;
   if (!segments) return null;
 
-  const isUgc = run.adType === "ugc";
+  // Spoken (on-camera person) vs voiceover, by the resolved look family.
+  const isUgc = run.lookFamily === "ugc_authentic";
   const lineLabel = isUgc ? "Spoken" : "Voiceover";
   const grouped = segments.length > 1;
+  // The hook(s) open scene 1 only (Chunk F) — surface them on the first scene.
+  const openingHook = run.hooks
+    ? [run.hooks.visualLead.id, run.hooks.overlay?.id]
+        .filter((v): v is string => Boolean(v))
+        .map(prettyHook)
+        .join(" + ")
+    : null;
 
   return (
     <Card>
@@ -33,7 +49,7 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
           <ClapperboardIcon className="text-brand size-4" />
           <h2 className="text-sm font-semibold">Scene script</h2>
           <span className="border-border/60 text-muted-foreground rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-            {isUgc ? "UGC review" : "Inspirational"}
+            {run.adTypeDisplayName}
           </span>
           {grouped && (
             <span className="border-brand/40 text-brand rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
@@ -64,6 +80,7 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
                     delay={i * 0.04}
                     isUgc={isUgc}
                     lineLabel={lineLabel}
+                    hook={segIdx === 0 && i === 0 ? openingHook : null}
                   />
                 ))}
               </ol>
@@ -80,11 +97,14 @@ function SceneRow({
   delay,
   isUgc,
   lineLabel,
+  hook,
 }: {
   scene: Scene;
   delay: number;
   isUgc: boolean;
   lineLabel: string;
+  /** The opening hook label (first scene only); null otherwise. */
+  hook?: string | null;
 }) {
   return (
     <motion.li
@@ -97,6 +117,12 @@ function SceneRow({
         {scene.index}
       </span>
       <div className="min-w-0 flex-1">
+        {hook && (
+          <span className="border-brand/40 text-brand mb-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+            <ZapIcon className="size-3" />
+            Hook · {hook}
+          </span>
+        )}
         <div className="text-muted-foreground mb-1 flex flex-wrap items-center gap-x-2 text-[11px]">
           <span className="font-medium">{scene.cameraAngle}</span>
           {scene.actionMovement && (

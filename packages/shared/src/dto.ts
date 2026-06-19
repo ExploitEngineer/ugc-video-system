@@ -93,6 +93,21 @@ export const adStylePlanSchema = z.object({
 });
 export type AdStylePlan = z.infer<typeof adStylePlanSchema>;
 
+/** A resolved hook (post-compose): id + role + its opening directive. */
+export const resolvedHookSchema = z.object({
+  id: z.string(),
+  role: hookRoleSchema.catch("overlay"),
+  openingDirective: z.string().catch(""),
+});
+export type ResolvedHook = z.infer<typeof resolvedHookSchema>;
+
+/** The resolved hook selection persisted to `runs.hooks` and surfaced in RunDetail. */
+export const hookSelectionSchema = z.object({
+  visualLead: resolvedHookSchema,
+  overlay: resolvedHookSchema.nullable(),
+});
+export type HookSelectionDto = z.infer<typeof hookSelectionSchema>;
+
 /** A generation job — the authoritative state machine row. */
 export const runSchema = z.object({
   id: z.string(),
@@ -194,13 +209,16 @@ export const runDetailSchema = runSchema.extend({
    */
   visualStyle: z.string().nullable(),
   /**
-   * Detector outputs (Chunk B columns; populated by the detector in Chunk E).
-   * `hooks` = resolved selection `{ visualLead, overlay }`; shape kept permissive
-   * here and tightened when the hook registry lands. Null on legacy/pre-feature runs.
+   * Detector outputs (populated in Chunk E, surfaced in Chunk K). `hooks` = the
+   * resolved selection `{ visualLead, overlay }`. Null on legacy/pre-feature runs.
    */
-  hooks: z.unknown().nullable(),
+  hooks: hookSelectionSchema.nullable(),
   adTypeConfidence: z.number().nullable(),
   detectorMeta: z.unknown().nullable(),
+  /** Registry display name for the resolved `adType` (server-mapped) — for the chip. */
+  adTypeDisplayName: z.string(),
+  /** The resolved ad type's look family (server-mapped) — drives the spoken/voiceover label. */
+  lookFamily: z.string(),
 });
 export type RunDetail = z.infer<typeof runDetailSchema>;
 
