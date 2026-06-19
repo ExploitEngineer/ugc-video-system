@@ -288,6 +288,9 @@ runs.post(
     // only if explicitly "true". The studio UI no longer sends this field.
     criticEnabled: body.criticEnabled === "true",
     hasPersonImage: personImage !== null,
+    // Optional ad-type override (Chunk J). FormData omits it / sends "auto" for
+    // the default auto-detect path.
+    ...(body.adType ? { adType: body.adType } : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -295,7 +298,12 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, duration, criticEnabled } = parsed.data;
+  const { prompt, mode, aspectRatio, duration, criticEnabled, adType } =
+    parsed.data;
+  // An explicit pick (anything but "auto") LOCKS the type — the detector still
+  // fills adStyle + hooks but honors this adType (orchestrator). "auto"/omitted
+  // leaves it null for full auto-detection.
+  const userAdType = adType && adType !== "auto" ? adType : null;
 
   // Normalize the person photo BEFORE any DB inserts (a 422 here must not
   // leave an orphaned run): pad/clamp it into BytePlus's CreateAsset limits
@@ -336,6 +344,9 @@ runs.post(
       aspectRatio,
       duration,
       criticEnabled,
+      ...(userAdType
+        ? { adType: userAdType, adTypeSource: "user" as const }
+        : {}),
       status: "queued",
       // Insert the run already LOCKED so the worker can't claim it yet. Without
       // this, the worker (which polls for `queued` rows with a free/stale lock)

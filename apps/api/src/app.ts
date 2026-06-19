@@ -6,6 +6,7 @@ import { cors } from "hono/cors";
 import { env } from "./config/index.js";
 import { onError } from "./lib/errors.js";
 import { createLogger } from "./lib/log.js";
+import { adTypeMenuList } from "./agents/ad-types/menu.js";
 import { runs } from "./routes/runs.js";
 
 export function createApp() {
@@ -34,6 +35,10 @@ export function createApp() {
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // Ad-type menu for the create-form dropdown (Chunk J). Registry-driven, so it
+  // grows automatically as new ad types are registered.
+  app.get("/ad-types", (c) => c.json(adTypeMenuList()));
 
   app.route("/runs", runs);
 

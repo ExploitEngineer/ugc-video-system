@@ -4,7 +4,7 @@
 // optional, and the localhost:3001 fallback is correct for the co-located API
 // in the single-image deploy. (Override it only if the API is a separate host.)
 
-import type { Run, RunDetail } from "@ugc/shared";
+import type { AdTypeMenuItem, Run, RunDetail } from "@ugc/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -27,6 +27,21 @@ export async function createRun(formData: FormData): Promise<RunDetail> {
     throw new Error(body?.error ?? "Failed to start run.");
   }
   return res.json() as Promise<RunDetail>;
+}
+
+/**
+ * The ad-type menu for the create-form dropdown (Chunk J), via the Next proxy
+ * (`/api/ad-types`). Registry-driven on the API, so it grows as new types land.
+ * Returns `[]` on failure so the form falls back to Auto-detect only.
+ */
+export async function fetchAdTypes(): Promise<AdTypeMenuItem[]> {
+  try {
+    const res = await fetch("/api/ad-types", { cache: "no-store" });
+    if (!res.ok) return [];
+    return (await res.json()) as AdTypeMenuItem[];
+  } catch {
+    return [];
+  }
 }
 
 /**

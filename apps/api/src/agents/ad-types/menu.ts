@@ -3,9 +3,27 @@
 // a type (Chunk H) grows this menu automatically. Menu order = stable registry
 // order (kept constant to avoid silent LLM position-bias shifts between deploys).
 
+import type { AdTypeMenuItem } from "@ugc/shared";
 import { REGISTRY } from "./registry.js";
 import type { AdTypeDef, AssetRequirement } from "./types.js";
 import { allHookIds, getHook, hookDefaultRole } from "./hooks/registry.js";
+
+/**
+ * The ad-type menu for the create-form dropdown (Chunk J) — id + displayName +
+ * whenToUse + asset policy, in stable registry order. Grows automatically as
+ * Chunk H registers new types.
+ */
+export function adTypeMenuList(): AdTypeMenuItem[] {
+  return Object.values(REGISTRY).map((def: AdTypeDef) => ({
+    id: def.id,
+    displayName: def.displayName,
+    whenToUse: def.whenToUse,
+    assetPolicy: {
+      product: def.assetPolicy.product,
+      person: def.assetPolicy.person,
+    },
+  }));
+}
 
 const reqMark = (r: AssetRequirement): string =>
   r === "required" ? "R" : r === "forbidden" ? "x" : "o";

@@ -1,6 +1,6 @@
 "use client";
 
-import type { AspectRatio, Duration, Mode } from "@ugc/shared";
+import type { AdTypeMenuItem, AspectRatio, Duration, Mode } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -27,7 +27,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createRun } from "@/lib/api";
+import { createRun, fetchAdTypes } from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -54,9 +54,24 @@ export function CreateRunForm({
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [duration, setDuration] = useState<Duration>("15s");
+  // Ad type — "auto" (default) lets the detector classify; an explicit pick locks it.
+  const [adType, setAdType] = useState<string>("auto");
+  const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load the registry-driven ad-type menu once (best-effort — falls back to
+  // Auto-detect only if the API is unreachable).
+  useEffect(() => {
+    let active = true;
+    fetchAdTypes().then((list) => {
+      if (active) setAdTypes(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const canSubmit =
     Boolean(productFile) && prompt.trim().length > 0 && !pending;
@@ -88,6 +103,7 @@ export function CreateRunForm({
     fd.set("mode", mode);
     fd.set("aspectRatio", aspectRatio);
     fd.set("duration", duration);
+    fd.set("adType", adType);
 
     startTransition(async () => {
       try {
@@ -156,6 +172,9 @@ export function CreateRunForm({
               onAspect={setAspectRatio}
               duration={duration}
               onDuration={setDuration}
+              adType={adType}
+              onAdType={setAdType}
+              adTypes={adTypes}
             />
             <span className="text-muted-foreground hidden items-center pl-1 font-mono text-[11px] tabular-nums sm:inline-flex">
               {duration} · {aspectRatio} · {MODE_LABEL[mode]}
@@ -320,6 +339,9 @@ function OptionsMenu({
   onAspect,
   duration,
   onDuration,
+  adType,
+  onAdType,
+  adTypes,
 }: {
   mode: Mode;
   onMode: (m: Mode) => void;
@@ -327,6 +349,9 @@ function OptionsMenu({
   onAspect: (r: AspectRatio) => void;
   duration: Duration;
   onDuration: (d: Duration) => void;
+  adType: string;
+  onAdType: (t: string) => void;
+  adTypes: AdTypeMenuItem[];
 }) {
   return (
     <Popover>
@@ -346,6 +371,13 @@ function OptionsMenu({
         className="ring-glow w-80 rounded-2xl border-border/70 p-4"
       >
         <div className="flex flex-col gap-4">
+          <Field label="Ad type">
+            <AdTypeSelect
+              value={adType}
+              onChange={onAdType}
+              options={adTypes}
+            />
+          </Field>
           <Field label="Duration">
             <DurationToggle value={duration} onChange={onDuration} />
           </Field>
@@ -375,6 +407,38 @@ function Field({
         {label}
       </span>
       {children}
+    </div>
+  );
+}
+
+/** Ad-type dropdown — "Auto-detect" (default) + the registry's types. An
+ *  explicit pick LOCKS the type; Auto runs the full detector. Native select so
+ *  it scales cleanly from 2 to 16+ types. */
+function AdTypeSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (t: string) => void;
+  options: AdTypeMenuItem[];
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title="Auto-detect reads the ad type from your prompt; pick one to lock it."
+        className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 focus:border-brand/50 w-full cursor-pointer appearance-none rounded-full border px-3 py-1.5 pr-8 text-xs font-medium outline-none transition-colors"
+      >
+        <option value="auto">Auto-detect</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id} title={o.whenToUse}>
+            {o.displayName}
+          </option>
+        ))}
+      </select>
+      <ChevronDownIcon className="pointer-events-none absolute top-1/2 right-2.5 size-3 -translate-y-1/2 opacity-60" />
     </div>
   );
 }
