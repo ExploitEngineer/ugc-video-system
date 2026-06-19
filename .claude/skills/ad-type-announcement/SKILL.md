@@ -103,3 +103,68 @@ headline words animate in.
 Announcement — a motion-graphics reveal of a single piece of news (launch, new
 feature, restock or partnership), carried by a confident voiceover, with no price
 or urgency; each spoken beat announces the on-frame news.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Announcement (a single piece of NEWS revealed as kinetic typography, NO presenter, NO live photography):
+- The ad delivers ONE news beat — a launch, a new product/feature, a restock, a
+  partnership or a milestone — framed as "introducing / now available / it's here /
+  new / we partnered with…". The designed WORDS are the subject; there is no person
+  on camera and no first-person account.
+- POLICY GUARD: announce WHAT is new ONLY. Do NOT show a price, percentage, discount,
+  promo code, countdown, "limited time" or "ends soon" urgency — any deal/deadline
+  angle is promo-offer, not announcement. Keep it newsworthy and confident, never a sale.
+- Layout: a clean 2x2 four-panel grid (15s) or N×4 master grid (30/45/60s), thin white
+  gutters, equal self-contained panels, a small label "1"/"2"/"3"/"4" top-left of each.
+- Panel arc — build intrigue, then drop the headline, then the reason it matters, then
+  where/when:
+  - Panel 1 (intrigue): a restrained teaser line on a minimal brand-color field, large
+    legible bold sans type, generous negative space — e.g. "SOMETHING NEW IS HERE".
+  - Panel 2 (headline): the actual news in oversized type — "INTRODUCING <name>" — the
+    biggest words of the sheet; a clean product cut-out may anchor the frame as an accent.
+  - Panel 3 (the reason): one line stating the single thing that makes it worth knowing —
+    the standout feature, what changed, who it's with — verbatim in quotes, legible.
+  - Panel 4 (availability + lockup): brand wordmark plus a short "AVAILABLE NOW" /
+    "STAY TUNED" / "COMING <date>" line; render every string verbatim, no invented copy.
+- Each panel's `transcript` is the short VOICEOVER line for that panel that announces the
+  on-frame news (e.g. "Something new is here" / "Introducing <name>" / "<the standout
+  thing>" / "Available now"). The four lines read as one cohesive, confident announcement.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Each transcript line is a confident announcement voiceover that states the on-frame
+  news plainly — what's new and where to get it — short enough to render legibly as the
+  matching headline. No first-person "I" story, no price, discount, code or urgency, no
+  hard sales close; let the news be the news.
+```
+
+### videoVoice
+
+```
+a confident, upbeat announcer voiceover, intriguing and premium, the same voice throughout
+```
+
+### videoAudioLine
+
+```
+Audio: Voiceover (confident, premium announcer) announces each line off-screen (no on-screen person, no lip-sync), the SAME voice throughout; quote each line verbatim in its time-slice and keep it short, or run music-only with the on-screen text carrying the news; a cinematic ambient riser builds and a single impact hit lands on the headline reveal as the words animate in. — no people, no jitter, keep all text and numbers legible, no garbled letters.
+```
+
+### narrativeTreatment
+
+```
+Treatment: announcement — a premium kinetic-typography reveal of ONE piece of news, carried by a confident announcer voiceover (or music-only), with NO price, discount, code or urgency (policy guard): 0-15s build intrigue, 15-30s drop the headline news, 30-45s state the single thing that makes it worth knowing, 45-60s land availability and the brand lockup; each summary's spoken beat is a voiceover line announcing the on-frame news.
+```

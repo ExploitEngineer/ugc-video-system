@@ -105,3 +105,67 @@ Promo / offer — a motion-graphics push built around one deal (discount, bundle
 code), stacking the terms and urgency and driving hard to a call-to-action,
 carried by a confident, upbeat voiceover; each spoken beat calls out the on-frame
 offer.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Promo / Offer (a price/discount/urgency push as bold MOTION GRAPHICS, NO live presenter):
+- The deal IS the subject: ONE offer — a discount, sale, bundle (BOGO) or coupon
+  code — pushed with urgency and a hard call-to-action, rendered as flat kinetic
+  typography on solid brand-colour fields. No on-camera person and no first-person
+  story; oversized words, big numbers, strikethrough prices and countdown cues do
+  all the persuading.
+- 4-panel offer-card arc (label each cell "1"/"2"/"3"/"4", thin white gutters,
+  equal self-contained panels): Panel 1 SLAMS the headline saving as the hook —
+  an oversized "40% OFF" / "BUY 1 GET 1 FREE" filling the frame on brand colour.
+  Panel 2 is the urgency card — "SALE ENDS SUNDAY" / "TODAY ONLY" with a subtle
+  countdown/clock motif. Panel 3 is the code/terms card — the promo code in
+  quotes ("USE CODE SAVE20"), strikethrough old price beside the new price; an
+  optional clean product cut-out may anchor this frame as a supporting accent.
+  Panel 4 is the hard-CTA button card — "SHOP NOW" / "CLAIM YOURS" locked centre.
+- Render ALL copy verbatim and perfectly legible — quote each exact string, no
+  duplicate text, no invented words, no garbled numbers; bold geometric sans-serif,
+  high contrast, generous safe margins; flat vector graphics only, never a
+  photographic lifestyle scene.
+- The arc drives to action: open on the headline offer, stack the terms + urgency,
+  END hard on the CTA so the viewer knows exactly what to do and that it expires.
+- Each scene's `transcript` is a short, punchy VOICEOVER line for that panel that
+  calls out the on-frame deal (e.g. "Forty percent off — this weekend only",
+  "Use code SAVE20", "Shop now before it's gone"). One urgent, confident voice.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Each transcript line is a punchy, urgent voiceover that calls out the deal on the
+  frame: name the saving, code, deadline or CTA plainly — short, imperative,
+  action-driving (5-10 words); no first-person "I" story, no soft close.
+```
+
+### videoVoice
+
+```
+a confident, upbeat, high-energy announcer voice
+```
+
+### videoAudioLine
+
+```
+Audio: a natural human VOICEOVER (high-energy announcer, the SAME voice throughout, energetic and urgent) reads each deal line off-screen — NOT lip-synced, no on-screen person — quoting each line verbatim and short; a driving upbeat music bed plus punchy whooshes and a stamp/cash-register impact SFX as the numbers and CTA punch in; keep every deal number and code legible, no garbled letters, no jitter.
+```
+
+### narrativeTreatment
+
+```
+Treatment: promo / offer — a 60s motion-graphics push built around ONE deal, no live presenter: Segment 1 SLAMS the headline saving as the hook; Segment 2 stacks the supporting terms and the promo code; Segment 3 ramps the urgency (deadline + countdown); Segment 4 lands the hard call-to-action; carried throughout by one confident, upbeat voiceover that calls out the on-frame offer.
+```

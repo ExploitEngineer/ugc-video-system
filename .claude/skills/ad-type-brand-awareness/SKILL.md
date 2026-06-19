@@ -106,3 +106,64 @@ words animate in.
 Brand awareness / manifesto — a kinetic-typography statement of the brand's
 belief and values, no product demo and no presenter, carried by a confident
 voiceover; each spoken beat speaks the on-frame manifesto words.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Brand Awareness / Manifesto (a value statement as pure kinetic typography):
+- This is the CANONICAL neither-asset type: author for NO product and NO person on
+  screen. There is no product cut-out and no face anywhere — words, motion graphics,
+  brand colour and abstract shapes/textures carry the WHOLE ad. The typography IS the
+  visual subject in every panel; never a photographic lifestyle scene, never a presenter.
+- Lay the panels as one continuous manifesto that builds rhythm line by line:
+  Panel 1 — the opening slogan / pattern-interrupting belief line set LARGE in bold
+    kinetic type on a solid brand-colour field, the single focal headline of the frame.
+  Panel 2 — the second manifesto line at a DIFFERENT weight and scale, escalating the
+    belief; simple shape or color-block accent, generous safe margins.
+  Panel 3 — the third line building the rhythm and conviction toward the payoff, type
+    pushed for emphasis, still ONE focal headline.
+  Panel 4 — the brand WORDMARK + tagline lockup resolving the statement, the final beat.
+- Every on-frame line is rendered VERBATIM and perfectly legible — quote the exact words,
+  no invented copy, no duplicate text, all kerning crisp; legibility is the #1 failure mode.
+- The arc opens on a pattern-interrupting line, escalates the belief across the middle,
+  and lands on the brand name / tagline as the closing frame.
+- Each scene's `transcript` is a short VOICEOVER line that speaks that panel's on-frame
+  manifesto words exactly (e.g. "We don't make ordinary"). The lines read as one cohesive,
+  confident statement of belief — never a feature list, never a sales close.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Each transcript line is a confident, declarative voiceover that speaks the on-frame
+  manifesto words verbatim — a belief or value stated plainly, punchy and quotable,
+  brand-voiced; not a feature list and not a sales close.
+```
+
+### videoVoice
+
+```
+a resonant, conviction-driven brand voice
+```
+
+### videoAudioLine
+
+```
+Audio: a real human VOICEOVER declares each manifesto line off-screen (there is no face, so nothing is lip-synced), the SAME resonant voice and cadence throughout; quote each line verbatim in its slice and keep it short; an anthemic, building music bed rises as the words animate in — or run music-only with the on-screen text carrying the message. — no people, no product, keep every word legible, no garbled letters.
+```
+
+### narrativeTreatment
+
+```
+Treatment: brand awareness / manifesto — a kinetic-typography statement of the brand's belief carried across four segments with NO product and NO person on screen: open on a pattern-interrupting belief line, escalate the values through the middle two segments, and resolve on the brand wordmark + tagline; a resonant voiceover speaks the on-frame manifesto words verbatim over an anthemic music bed.
+```

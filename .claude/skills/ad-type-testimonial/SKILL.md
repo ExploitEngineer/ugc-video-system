@@ -80,3 +80,61 @@ UGC — a real person casually talking about the product the way they speak.
 
 Behaviour must remain byte-identical to the pre-refactor `ugc` path; do not
 reword the verbatim blocks.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the
+EXACT directive lines spliced into the prompt (one array element per line,
+verbatim). VERBATIM legacy prose — do not reword (guarded by
+`fragment-regression.test.ts`). LOOK-driven seams are omitted (they come from the
+`ugc_authentic` look base).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — UGC (a real person SHOWING the product to camera):
+- The ad is a REAL PERSON talking TO CAMERA about the product the way
+  they'd show it to a friend — relaxed, genuine, off-the-cuff. NOT a
+  scripted ad, review read or sales pitch, and NOT silent lifestyle b-roll.
+- They ACTIVELY DEMONSTRATE the product to the lens across the panels: hold
+  it up close to camera, take it off / put it on (or pick it up / handle
+  it), turn or rotate it to show its key parts and details, point at a
+  feature, and show it actually working — like a creator doing a real
+  hands-on review. The PRODUCT is the focus of most panels, shown clearly
+  and large to camera, NOT just worn or held passively in the background.
+- They look at and address the camera. The flow is natural: show the
+  product → demonstrate / use it → an honest reaction. It ENDS on a real
+  personal verdict, never a sales close or call-to-action.
+- AVOID passive lifestyle filler that hides the product: walking in,
+  dropping a bag, stretching, relaxing, gazing away, or candid moments not
+  addressed to camera.
+- Each scene's `transcript` is one natural spoken line the on-screen
+  person says in that scene (first person, the way people really talk —
+  contractions, casual phrasing, not ad copy), tied to what they're
+  SHOWING/doing with the product. Keep lines short and let their length
+  vary; the lines flow as one continuous, natural bit of talking.
+```
+
+### storyboardSpeakerLabel
+
+```
+the on-screen person
+```
+
+### videoVoice
+
+```
+a warm, conversational, natural-sounding voice
+```
+
+### videoAudioLine
+
+```
+Audio: the on-screen person SPEAKS each line lip-synced in a natural, real human voice (the SAME voice throughout, fitting their apparent age, gender and energy); quote each line verbatim in its slice, keep it short, mouth visible while speaking; light room ambience, no music.
+```
+
+### narrativeTreatment
+
+```
+Treatment: UGC — a real person casually talking about the product the way they actually speak (not a scripted ad or review read). The spoken beat in each summary is a natural first-person line.
+```

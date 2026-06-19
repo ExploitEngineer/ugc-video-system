@@ -394,6 +394,15 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
+  // Newly-wired fragment seams: transcript style (TYPE-driven) + shot direction
+  // + caption style (LOOK-driven). Empty for the two legacy types (their .md
+  // omits transcript and the ugc/cinematic look bases return [] for the others),
+  // so splicing them is byte-identical for legacy and adds per-type direction for
+  // the new ad types.
+  const transcriptStyle = def.fragments.storyboardTranscriptStyle(fctx);
+  const shotDirection = def.fragments.storyboardShotDirection(fctx);
+  const captionStyle = def.fragments.storyboardCaptionStyle(fctx);
+
   // Script grounding — forces the four spoken lines to be specific to THIS
   // product, THIS person and THIS scene, and to never repeat. Kills the
   // generic, interchangeable filler ("I love this", "you'll love it") that
@@ -522,6 +531,7 @@ export function buildStoryboardPrompt({
     ...hookBlock,
     "",
     ...scriptGrounding,
+    ...transcriptStyle,
     "",
     ...useSequenceBlock,
     "",
@@ -564,6 +574,8 @@ export function buildStoryboardPrompt({
     "  frame lifted straight from the finished ad.",
     ...antiRepetition,
     ...keyframeLook,
+    ...shotDirection,
+    ...captionStyle,
     "- Keep the product (and the person, if present) faithfully consistent with",
     "  the attached reference sheets in EVERY panel — the SAME product with all",
     "  its real markings, text and logos intact, the same person, same colors,",

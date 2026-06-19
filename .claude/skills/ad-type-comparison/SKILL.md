@@ -117,3 +117,68 @@ voiceover line.
 
 NET-NEW type — no `legacyMapping`. Keep the brand-safety guard intact in both
 the def prose and this doc whenever revising.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Comparison (a clean studio us-vs-them split-screen that proves ONE advantage):
+- The storyboard is a 4-panel split-screen contrast in clean studio/tabletop
+  product photography. Each panel carries a vertical divider with the product
+  (the WINNER) on one side and a GENERIC unbranded alternative — 'the old way',
+  an 'ordinary [category]', a plain/no-name or blank-label stand-in — on the
+  other. The whole sheet earns one demonstrable verdict: the product wins.
+- BRAND-SAFETY GUARD (carry verbatim): NEVER name, label, depict, or imply a
+  specific real competitor brand, product name, or logo. The rival side is
+  ALWAYS a generic, unbranded placeholder. No recognisable trademarks, no real
+  brand text on the losing side. Use 'OUR WAY' / 'OLD WAY' / 'OTHERS' labels only.
+- Panel 1: the core split — left panel 'OUR WAY' product performs the task
+  cleanly, right panel 'OLD WAY' generic alternative struggles or falls short;
+  vertical divider down the middle, both sides evenly lit so the contrast is fair.
+- Panel 2: macro close-up on the PRODUCT's advantage — the specific point of
+  difference (speed, finish, result, ease) shown sharp on the product itself.
+- Panel 3: matching close-up on the generic 'old way' falling short — plain and
+  underwhelming by contrast, honest, never sabotaged or faked.
+- Panel 4: product hero as the obvious winner, centered on a clean sweep, label
+  crisp and legible, the generic side faded or gone.
+- Each panel's `transcript` is one short VOICEOVER line for that beat that states
+  or sharpens the contrast ('the old way takes twice as long', 'ours, in one
+  pass') — spoken over the visuals, NOT lip-synced by anyone on screen. The lines
+  read as one confident, continuous voiceover building to the verdict.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Transcript lines are punchy comparison copy: short, contrastive, and confident
+  ('vs', 'better', 'why settle'), each naming exactly ONE point of difference.
+- Always pitched against the generic 'old way' / 'ordinary' version — never a
+  named or implied real competitor brand. Build to a one-line winner verdict.
+```
+
+### videoVoice
+
+```
+a confident, persuasive, assured announcer voice
+```
+
+### videoAudioLine
+
+```
+Audio: a confident off-screen VOICEOVER (assured, fair, brisk) narrates each comparison line — same voice throughout, quoted verbatim per slice, short and punchy, never lip-synced on screen; crisp product interaction SFX and a subtle driving music bed under the contrast beats; keep both sides' labels legible, no garbled logo text, no real competitor brand audio or name.
+```
+
+### narrativeTreatment
+
+```
+Treatment: comparison (60s, 4 segments) — 0-15s open on the us-vs-them split, product 'OUR WAY' vs the generic 'OLD WAY', land the first concrete advantage; 15-30s drive the product's winning point in clean macro detail; 30-45s show the generic alternative falling short, honest and unbranded (BRAND-SAFETY GUARD: never name or depict a real competitor brand or logo); 45-60s close on the product hero as the obvious better choice with a one-line verdict. Each spoken beat is a short contrastive voiceover line, same voice throughout.
+```

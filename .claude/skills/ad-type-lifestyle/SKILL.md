@@ -95,3 +95,71 @@ warm, observational voiceover line about the moment.
 
 NET-NEW type — no `legacyMapping`. Keep this doc and the def in sync: the
 TYPE-driven seam prose above must match the strings in `defs/lifestyle.ts`.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Lifestyle (an aspirational real-life USE OCCASION, the product
+woven into a desirable everyday moment, shot like a premium commercial):
+- This is NOT a review or a pitch — no one addresses the lens. The product
+  simply LIVES inside a real occasion (a slow morning, a commute, a trail,
+  a dinner, a workout) and the viewer wants the feeling of owning it.
+- The PRODUCT is REQUIRED and is the hero of the moment: clearly present
+  and in GENUINE use in every panel, never background dressing. Reproduce
+  it exactly from its reference (geometry, label text, logo, colors); only
+  framing, environment and light change between panels.
+- Build the 4-panel arc as a cinematic aspirational through-line:
+  PANEL 1 — establish the moment: a wide, evocative frame of the desirable
+  setting with the product naturally present, golden / soft natural light,
+  shallow depth of field.
+  PANEL 2 — the product enters the action: an optional person reaches for /
+  uses / relies on it in believable everyday use, mid-gesture.
+  PANEL 3 — close beauty detail of the product IN context (in-hand or in
+  the scene), warm graded light catching its texture.
+  PANEL 4 — the payoff beat: a satisfied, lived-in resolution frame, the
+  product still visible, soft negative space for a brand end card.
+- If a person appears, lock their identity (same face, hair, wardrobe)
+  across all four panels and keep real skin texture — they interact with
+  the product naturally, they never review it.
+- Each scene's `transcript` is a VOICEOVER line for that scene (warm,
+  observational, ~1 short sentence) spoken OVER the visuals — never
+  lip-synced by anyone on screen; the lines read as one cohesive VO that
+  names the moment and the feeling the product brings to it.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+Each line is observational and aspirational, naming the moment or the
+feeling the product brings to it — not a feature list or a hard sell.
+Keep it ~1 short sentence, evocative and breezy, reading as one continuous
+voiceover across the scenes.
+```
+
+### videoVoice
+
+```
+a warm, aspirational, breezy narrator voice
+```
+
+### videoAudioLine
+
+```
+Audio: a natural human VOICEOVER narrates each line over the scene (off-screen, never lip-synced on camera), the SAME warm voice verbatim in every slice — quote each line short (5-10 words); light naturalistic ambience of the moment plus a fitting, understated warm music bed. — no on-screen text, no identity drift, no warped face.
+```
+
+### narrativeTreatment
+
+```
+Treatment: lifestyle — a polished, aspirational real-life occasion carried by voiceover across a 60s 4-segment arc: (1) establish the desirable everyday setting with the product naturally present; (2) the moment unfolds and the product enters genuine use; (3) the payoff feeling the occasion delivers, product clearly in context; (4) settle on a satisfied lived-in resolution and a soft brand end card. The product is required and stays the hero in genuine use throughout, never reviewed or hard-sold; each spoken beat is a warm, observational VO line about the moment.
+```

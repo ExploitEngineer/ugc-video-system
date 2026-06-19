@@ -111,3 +111,68 @@ is a confident voiceover line naming one feature or benefit.
 
 Keep the showcase boundary sharp: the instant the brief implies the product
 being operated, used, or stepped through, it belongs to `product-demo`, not here.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Product Showcase (a hero/glamour reveal of the product itself):
+- The ad SHOWS OFF the product as the undisputed star — clean, premium beauty
+  shots that make it look its best. NOT a person reviewing it, NOT a how-to /
+  in-use walkthrough, and NOT a story or lifestyle scene. There is no narrative
+  arc and no step-by-step function: the four panels are a feature/benefit
+  montage, not a sequence of actions.
+- Direct the 4-panel grid as a cohesive glamour SET — keep lighting, background
+  and grade identical across all panels so they read as one shoot. Vary only the
+  camera distance and angle: Panel 1 a confident front three-quarter HERO on a
+  seamless sweep; Panel 2 a tight MACRO of the key feature, texture or finish;
+  Panel 3 a clean top-down FLAT-LAY of the whole product; Panel 4 a dramatic
+  low-angle hero with a soft reflection. The product fills ~50-70% of each frame,
+  centered, large, sharp and unobstructed, with its label/markings legible.
+- Each panel highlights ONE selling point (a standout feature, material or
+  benefit) — call out what that crop is showing off (the finish, the build, a
+  benefit) so the set reads as premium catalog copy in pictures.
+- A person, if present at all, is only a background prop holding or framing the
+  product and never owns the frame. Preserve product geometry, label text, logo
+  and exact colors from the reference in every panel — do not restyle, recolor,
+  re-letter or invent markings.
+- Each scene's `transcript` is ONE short VOICEOVER line (third-person, no "I",
+  no in-use narration) naming the feature or benefit that panel shows off —
+  crisp, confident, benefit-forward premium ad copy. The four lines read as one
+  cohesive voiceover building the product's appeal.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+Each transcript line is third-person product/benefit copy spoken as voiceover
+(no first-person "I", no in-use narration) — one feature or benefit per line,
+short, confident and upscale, like premium ad copy rather than conversation.
+```
+
+### videoVoice
+
+```
+a polished, confident premium-brand announcer voice
+```
+
+### videoAudioLine
+
+```
+Audio: an off-screen VOICEOVER (a calm, confident announcer, measured pace) states each feature/benefit line in the SAME voice throughout, quoted verbatim and kept short (5-10 words); crisp product-foley accents and a subtle, upscale music bed underneath; keep any on-screen product text and logo legible — no garbled logo text, no morphing product.
+```
+
+### narrativeTreatment
+
+```
+Treatment: Product Showcase — a glamour hero montage in four beats, no story arc and no in-use steps: open on the confident hero shot, move to a tight macro of the standout feature/texture, then a clean top-down or alternate angle, and resolve on a dramatic hero with the brand mark; each spoken beat is one short confident voiceover line naming a single feature or benefit.
+```

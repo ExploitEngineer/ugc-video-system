@@ -59,28 +59,34 @@ const cinematic_polished: LookStrategy = {
 // NET-NEW look. No legacy source. Authored to match the graphic_text definition.
 const graphic_text: LookStrategy = {
   keyframeLook: (_ctx) => [
-    "- GRAPHIC/TEXT LOOK — render every panel as a bold motion-graphics frame, NOT",
-    "  live photography: clean kinetic typography as the primary subject, large",
-    "  legible headline words and numbers in a confident sans, designed layouts on",
-    "  flat or subtly-textured brand-colour backgrounds, with simple iconography and",
-    "  shape accents. Product or person imagery, when present, sits as a clean",
-    "  cut-out or inset supporting the type — the words carry the frame. Crisp, high",
-    "  contrast, intentional; never a photographic scene, never cluttered.",
+    "- GRAPHIC/TEXT LOOK — render every panel as a flat motion-graphics /",
+    "  kinetic-typography design, NOT live photography: a bold geometric sans-serif",
+    "  headline is the hero element on a solid brand-colour (or color-blocked)",
+    "  background, crisp clean kerning, high contrast, generous safe margins. Add",
+    "  only simple vector shapes, flat icons and subtle gradient accents; NO live",
+    "  photography, NO real product, NO people. Punchy, modern, broadcast-style",
+    "  layout. Render ALL text and numbers VERBATIM and perfectly legible —",
+    "  legibility is the #1 priority. No watermark, no stock-photo imagery, no 3D",
+    "  realism, no garbled or duplicated letters.",
   ],
   shotDirection: (_ctx) => [
-    "- Compose each panel as a designed graphic layout, not a camera shot:",
-    "  deliberate type hierarchy, generous margins, ONE focal headline per frame.",
+    "- Each panel is a COMPOSED GRAPHIC LAYOUT, not a camera shot: deliberate type",
+    "  hierarchy, ONE focal headline per frame, balanced negative space, the brand",
+    "  palette held constant across panels. Vary scale/weight/position of the type,",
+    "  not a camera angle.",
   ],
   pacing: (_ctx) => [
-    "- Snappy, type-driven cuts synced to the beat — words and numbers punch in and",
-    "  out; quick, rhythmic, energetic transitions between frames.",
+    "- Snappy, beat-synced kinetic typography: words and numbers punch in and out on",
+    "  the rhythm with quick clean transitions. Only the MOTION and cuts may be fast —",
+    "  never a camera move (there is no camera). Keep every word readable as it animates.",
   ],
   captionStyle: (_ctx) => [
-    "- Typography IS the visual: the on-frame words are the hero layer in bold",
-    "  kinetic type, not a thin caption bar tucked at the bottom.",
+    "- Typography IS the visual: the on-frame words are the hero layer in bold kinetic",
+    "  type, rendered verbatim and perfectly legible — not a thin caption bar tucked",
+    "  at the bottom.",
   ],
   closingLookClause: (_ctx) => [
-    "the bold motion-graphics / kinetic-typography look (clean designed frames, brand colour, no live footage).",
+    "the bold motion-graphics / kinetic-typography look (flat designed frames, brand colour, verbatim legible text, no live footage, no people).",
   ],
 };
 
@@ -88,26 +94,33 @@ const graphic_text: LookStrategy = {
 const demo_clean: LookStrategy = {
   keyframeLook: (_ctx) => [
     "- DEMO/CLEAN LOOK — render every panel as crisp studio/tabletop product",
-    "  photography: the product is the clear hero on a clean, uncluttered surface or",
-    "  seamless backdrop, controlled even lighting, accurate colour, sharp macro",
-    "  detail on its key parts and markings, shallow depth where it helps. Polished",
-    "  and precise — a high-end product shot — never a busy lived-in scene, never",
-    "  glossy HDR over-processing that distorts the real material.",
+    "  photography on a seamless white or soft neutral-gradient sweep: the single",
+    "  hero product is the visual subject, centred with generous negative space, lit",
+    "  by soft even softbox light from the upper-left with a gentle realistic contact",
+    "  shadow and a subtle reflection. Crisp focus edge-to-edge, accurate materials",
+    "  and TRUE colour, macro-sharp on the label and texture. Tabletop minimalism —",
+    "  no props, no clutter — a commercial catalog look. Never a busy lived-in scene,",
+    "  never glossy HDR over-processing that distorts the real material; no extra",
+    "  objects, no invented text, no morphing product.",
   ],
   shotDirection: (_ctx) => [
-    "- Controlled product angles — clean front / three-quarter / macro detail shots,",
-    "  the product centred and unobstructed, camera moves minimal and precise.",
+    "- Controlled product angles — clean front / three-quarter / top-down flat-lay /",
+    "  macro detail shots, the product centred and unobstructed, lighting and",
+    "  background held identical across panels; vary only the angle and framing.",
+    "  Camera moves (in video) stay minimal and precise — locked, or a slow",
+    "  orbit/push.",
   ],
   pacing: (_ctx) => [
-    "- Deliberate reveal-and-hold pacing: let each product shot land and breathe;",
-    "  smooth, confident moves, no frantic cutting.",
+    "- Deliberate reveal-and-hold pacing: let each product shot land and breathe with",
+    "  smooth, confident moves and crisp interaction SFX where the product is used;",
+    "  no frantic cutting.",
   ],
   captionStyle: (_ctx) => [
-    "- Minimal, clean sans captions stating ONE spec or benefit at a time; the",
-    "  product, not the text, owns the frame.",
+    "- Minimal, clean sans captions stating ONE spec or benefit at a time, rendered",
+    "  legibly; the product, not the text, owns the frame.",
   ],
   closingLookClause: (_ctx) => [
-    "the clean studio/tabletop product look (crisp lighting, sharp product detail, uncluttered backdrop).",
+    "the clean studio/tabletop product look (seamless sweep, soft even light, sharp macro product detail, true colour, uncluttered).",
   ],
 };
 

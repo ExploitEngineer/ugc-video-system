@@ -120,3 +120,69 @@ degrading split-screen.
 High Meta-policy risk type — the after-forward guard is the load-bearing rule.
 Keep this doc in sync with `defs/before-after.ts` (the sync test greps for the
 def path string above).
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Before / After (a visible RESULT contrast driven by the product):
+- The ad lands one transformation: a worse 'before' state turns into a better
+  'after' result, with the PRODUCT as the agent of change. Arc across the 4
+  panels: (1) establish the BEFORE state of the subject, neutral and honest;
+  (2) the product enters and is applied/in use on that same subject; (3) the
+  improved AFTER result of the same subject; (4) product hero beside the result.
+- Render BEFORE and AFTER in the SAME clean studio/tabletop framing — identical
+  surface, angle, distance and lighting — so the only thing that changes is the
+  result and the contrast reads instantly. It is a RESULT-over-time contrast,
+  NOT a step-by-step how-to (product-demo) and NOT a rival face-off (comparison).
+- Demo_clean look: seamless white / soft neutral sweep, soft even softbox light
+  from upper-left, gentle contact shadow, accurate true colour, macro-sharp on
+  product label and on the changed surface; no props, no clutter, no people
+  required. Lock the product's exact label text, logo, colours and geometry.
+- Label the contrast panels 'BEFORE' / 'AFTER' as verbatim in-image text where
+  used; render any label exactly, no extra characters, no invented copy.
+- META POLICY GUARD (mandatory, do NOT soften): do NOT depict human weight-loss,
+  body, skin, anti-aging or wrinkle transformations, body-part close-ups, or any
+  'implied transformation' (e.g. the product beside a fit/healthy person).
+  Restrict the contrast to PRODUCT, OBJECT, SURFACE or non-health results only,
+  framed POSITIVELY and AFTER-FORWARD — never a degrading 'before' of a body.
+- Each scene's `transcript` is ONE short VOICEOVER line for that panel — not
+  lip-synced by anyone on screen — naming the before pain then the after win and
+  building as one cohesive voice from problem to payoff (e.g. panel 1 names the
+  before, the middle panels carry the product, the last lands the after result).
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Transcript lines are concise voiceover that names the before pain, then the
+  after win — punchy and benefit-led (e.g. 'Before…' / 'After one use…'),
+  5-10 words, never disparaging a person's body or appearance.
+```
+
+### videoVoice
+
+```
+a confident, reassuring voiceover that lands the payoff
+```
+
+### videoAudioLine
+
+```
+Audio: a natural human VOICEOVER narrates each line off-screen (not lip-synced on screen), the SAME measured voice verbatim throughout, building from the before to the satisfying after; a light whoosh on the before→after transition and a subtle uplifting music bed are welcome — no jitter, no morphing between states, no warped or restyled product, no garbled logo text, no degrading body 'before'.
+```
+
+### narrativeTreatment
+
+```
+Treatment: before/after — a 4-segment voiceover arc: (1) establish the worse before state of the subject in the same clean framing; (2) the product enters and acts on it; (3) the improved after result lands in identical framing so the change reads; (4) product hero holds beside the result with the payoff line; each spoken beat is one voiceover line moving problem → payoff, and for any body/skin/weight subject stay positive and after-forward, restricting the contrast to product/object/surface results with no degrading before split-screen (Meta guard).
+```

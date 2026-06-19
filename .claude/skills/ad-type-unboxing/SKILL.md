@@ -117,3 +117,50 @@ of the reveal.
 This is a NET-NEW type (no `legacyMapping`). Keep the def and this doc in sync —
 `defs-skills-sync.test.ts` greps this file's path out of the def header comment
 and checks the seam headings against the FragmentSet.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Unboxing (a real, sealed package opened on camera and revealed for the first time):
+- This is a genuine UNBOXING shot phone-POV, handheld, in a real lived-in room with natural window light — a creator (or just their hands) cracking open the box that just arrived, NOT a polished studio reveal or a clean hero shot.
+- Walk the anticipation-to-reveal arc beat by beat across the 4 panels, each a distinct self-contained cell: panel 1 = the sealed box / mailer / bag held in hands on a desk, label and tape visible, anticipation (no product shown yet); panel 2 = hands opening — tearing tape, lifting the lid, peeling back tissue; panel 3 = the FIRST reveal of the product emerging from the packaging, still nested in tissue/inserts, with a genuine surprised reaction; panel 4 = the product lifted up and held close to camera, turned to show its key parts, on the creator's real first-impression face.
+- Keep the SAME packaging and the SAME product consistent across panels (lock the box's print, color and the product's exact label/geometry to the uploaded reference); keep the room, light and any person's identity identical cell to cell. Real hands with natural skin texture, authentic desk clutter, no glamour.
+- If a person is uploaded they appear on camera reacting; with hands-only the product and packaging carry the reveal and the line is voiceover. The product is the payoff and MUST be present and shown emerging from the box.
+- Each scene's `transcript` is one short, reactive first-person line tied to that exact beat — anticipation as it's held up, the act of opening, naming/reacting to what just appeared, then the genuine first verdict. They flow as one continuous bit of talking through the unbox; end on a real first impression, never a sales close or call-to-action.
+- AVOID skipping straight to a clean packaging-free hero shot, and AVOID passive lifestyle filler that hides the box or the moment of opening.
+```
+
+### storyboardSpeakerLabel
+
+```
+the on-screen person
+```
+
+### storyboardTranscriptStyle
+
+```
+- The spoken line is a live, reactive first-impression anchored to the moment in the box (naming what just appeared or reacting to it) — first person, contractions, the way people really talk while opening something, never a rehearsed review read.
+- Let line length vary and keep each under ~16 words so it lip-syncs cleanly.
+```
+
+### videoVoice
+
+```
+an excited, genuine, first-impressions voice
+```
+
+### videoAudioLine
+
+```
+Audio: the on-screen person SPEAKS each line lip-synced in a natural, excited real human voice (the SAME age/gender/energy descriptor verbatim across every segment), mouth visible while speaking; quote each line verbatim in its time-slice, short and reactive; include the real tactile SFX of opening — tape ripping, cardboard, tissue rustle — plus light room ambience. — no music, no logo, no on-screen text, no jitter, no warped hands.
+```
+
+### narrativeTreatment
+
+```
+Treatment: unboxing — across the four 15s segments a real person opens the just-arrived package on camera and reacts as the product is revealed: (1) sealed box held up, anticipation; (2) hands tearing/lifting it open; (3) the product emerges from the packaging to a genuine first reaction; (4) the product held close and turned, landing on an honest first verdict — never a sales close. Each segment's spoken beat is a natural, reactive first-person line tied to that step of the reveal, in the same voice throughout.
+```

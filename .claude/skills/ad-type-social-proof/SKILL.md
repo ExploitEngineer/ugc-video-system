@@ -97,3 +97,64 @@ allowed as the numbers and stars animate in.
 Social proof — a motion-graphics montage of aggregated ratings, review quotes,
 counts and press logos, carried by a confident voiceover; each spoken beat reads
 the on-frame proof.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Social Proof (aggregated third-party proof as motion graphics, NO person, NO live photography):
+- The ad is a designed 4-panel montage of PROOF rendered as bold kinetic
+  typography on flat brand-colour backgrounds — the words, numbers, stars and
+  logos ARE the subject; there is no presenter and no first-person account.
+- Panel 1 — a big star-rating card: a five gold-star row plus an oversized
+  rating headline (e.g. the literal '4.9/5') filling the frame; transcript is
+  the voiceover opening on the strongest proof, e.g. "Rated four-point-nine out
+  of five."
+- Panel 2 — a wall of stylised review-screenshot cards: short customer quotes
+  in quote marks, each with its own 5-star row stacked in a grid; transcript
+  reads one quote/consensus line aloud, e.g. "Thousands of five-star reviews."
+- Panel 3 — a big-number stat callout in oversized bold sans-serif (e.g.
+  '50,000+ Happy Customers'); transcript states the aggregate count, e.g. "Over
+  fifty thousand people made the switch."
+- Panel 4 — a press / publication logo strip with a pull-quote and the brand
+  mark, landing the aggregate verdict; transcript is the closing VO line, e.g.
+  "Loved everywhere — see why."
+- A clean product cut-out may anchor a single frame as an accent, but the
+  numbers/quotes/logos always carry it. Render every rating, count, quote and
+  source name VERBATIM and perfectly legible; no garbled or invented text.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### storyboardTranscriptStyle
+
+```
+- Each transcript line is a confident voiceover that reads the on-frame proof —
+  cite the rating, count, quote or source plainly and let the numbers convince;
+  keep it short, no first-person "I" story, no hard sales close.
+```
+
+### videoVoice
+
+```
+a confident, credible, upbeat announcer voice
+```
+
+### videoAudioLine
+
+```
+Audio: a real human VOICEOVER (off-screen, NOT lip-synced) reads each proof line in the SAME energetic voice throughout, quoted verbatim and kept short; an upbeat music bed plus soft UI ticks and rating/notification chimes play as stars and numbers animate in. — no people on screen, keep all text and numbers legible, no garbled letters.
+```
+
+### narrativeTreatment
+
+```
+Treatment: social proof — a 60s 4-segment kinetic-typography montage carried by a confident voiceover: open on the strongest star rating, stack a wall of review quotes, hit the big aggregate count, then land the press-logo verdict + brand mark; each spoken beat reads the on-frame proof, NO presenter, NO live footage.
+```

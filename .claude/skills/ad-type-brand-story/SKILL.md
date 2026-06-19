@@ -71,3 +71,49 @@ Inspirational — a cinematic scene carried by voiceover narration.
 ## Notes
 
 Behaviour must remain byte-identical to the pre-refactor `inspirational` path.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the
+EXACT directive lines spliced into the prompt (one array element per line,
+verbatim). VERBATIM legacy prose — do not reword (guarded by
+`fragment-regression.test.ts`). LOOK-driven seams are omitted (they come from the
+`cinematic_polished` look base).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Inspirational (open-ended cinematic):
+- The ad is an evocative, cinematic scene that follows whatever the
+  user describes (mood, journey, lifestyle, story), with the product
+  woven in naturally. The arc builds an emotional through-line over
+  the ~15s.
+- Each scene's `transcript` is a VOICEOVER NARRATION line for that
+  scene (evocative, ~1 short sentence), spoken over the visuals — it is
+  NOT necessarily lip-synced by anyone on screen. The four lines should
+  read as one cohesive voiceover.
+```
+
+### storyboardSpeakerLabel
+
+```
+the voiceover
+```
+
+### videoVoice
+
+```
+a calm, measured narrator
+```
+
+### videoAudioLine
+
+```
+Audio: a natural, real human VOICEOVER narrates each line (not lip-synced on screen), the SAME voice throughout; quote each line verbatim in its slice and keep it short; a light fitting score is allowed.
+```
+
+### narrativeTreatment
+
+```
+Treatment: inspirational — a cinematic scene carried by voiceover narration. The spoken beat in each summary is a voiceover line.
+```

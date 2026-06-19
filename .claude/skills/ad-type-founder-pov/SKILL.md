@@ -116,3 +116,64 @@ a personal line moving the story from where it began to why the product matters.
 The distinguishing signal across all seams is *insider authorship*: the voice
 owns the product's creation. If the voice merely *uses* or *reviews* the product,
 it is `testimonial`; if it only *performs* a pitch, it is `spokesperson`.
+
+## Runtime fragments
+
+Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
+
+### storyboardTypeBlock
+
+```
+AD TYPE — Founder POV (the MAKER telling their own first-person origin/mission story):
+- The ad is the FOUNDER speaking in first person about why this product exists —
+  the origin, the problem they personally hit, the belief that drove building it.
+  They are the INSIDER who MADE it, NOT a customer reviewing a purchase and NOT a
+  hired host reading ad copy. Sincere, grounded, never a hard sell, no hard CTA close.
+- Render a cinematic 2x2 four-panel grid that reads as ONE continuous founder beat:
+  (1) cinematic medium portrait of the founder, soft directional key + rim light,
+  eye contact to camera, shallow depth of field, warm filmic grade;
+  (2) the founder in their authentic origin/workspace setting, wider establishing
+  frame — the world the product came from;
+  (3) hands-on detail of the craft or the product they built, intimate close-up;
+  (4) reflective close-up of the founder, a quiet, earned-conviction expression.
+- IDENTITY LOCK across all four panels: keep the SAME founder — identical face,
+  bone structure, hair, wardrobe and age — treated as fixed source material, never
+  idealized or restyled; real skin texture (pores, fine flyaways), no plastic finish.
+  If a product appears, preserve its exact label/colors verbatim, never reinvent it.
+- Each scene's `transcript` is ONE short first-person founder line (intimate to
+  camera, or as their own voiceover over a filmed beat): "I…", "we…", "that's why…".
+  Keep lines short and varied so the four read as one heartfelt account moving from
+  where it started → the driving problem/belief → what they built and why it matters.
+```
+
+### storyboardSpeakerLabel
+
+```
+the on-screen person
+```
+
+### storyboardTranscriptStyle
+
+```
+- Transcript lines are first-person FOUNDER speech with insider "I/we" framing
+  (e.g. "I built this because…", "that's why we…"), sincere and personal —
+  never a customer's review and never scripted announcer copy; no hard-CTA close.
+```
+
+### videoVoice
+
+```
+a sincere, grounded, personal founder voice
+```
+
+### videoAudioLine
+
+```
+Audio: the founder SPEAKS each line in the SAME sincere human voice throughout (fitting their apparent age, gender and energy) — lip-synced and camera locked while on screen, or as their own intimate voiceover over a filmed beat; quote each line verbatim, keep it short, calm and deliberate, over quiet room tone and a sparse piano underscore; no identity drift, no on-screen text, no loud hard-sell music.
+```
+
+### narrativeTreatment
+
+```
+Treatment: Founder POV — across the four 15s segments the founder narrates their own origin and mission in first person (insider "I/we" framing, sincere not salesy, no hard-CTA close): seg 1 opens intimate to camera on who they are and the spark, seg 2 returns to the origin problem/belief that drove them, seg 3 shows what they built and the craft behind it, seg 4 lands on why it matters now — each spoken beat a short personal founder line in one consistent voice.
+```
