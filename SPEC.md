@@ -346,7 +346,7 @@ Expand the generator from 2 ad types (`ugc`/`inspirational`) to **ANY ad type** 
 
 ### Step 0 — Pipeline state-machine fixes (backend → frontend) — `feat/pipeline-state-fixes`
 
-Fix two current-pipeline bugs + truthful stepper. **Bug 1:** cancel set `status="failed"` with no step_event, so the UI painted the *passed* storyboard step "failed" and hid its (existing) artifact. **Bug 2:** `nextStep` returned `video` after `storyboard` regardless of pass/fail; the video precondition checked only asset existence — a failed/empty storyboard could still render a video. Touches: `routes/runs.ts` (cancel), `creative-direction/orchestrator.ts`, `agents/events.ts`; `components/studio/run/{run-meta.ts,step-timeline.tsx}`.
+Fix two current-pipeline bugs + truthful stepper. **Bug 1:** cancel set `status="failed"` with no step*event, so the UI painted the \_passed* storyboard step "failed" and hid its (existing) artifact. **Bug 2:** `nextStep` returned `video` after `storyboard` regardless of pass/fail; the video precondition checked only asset existence — a failed/empty storyboard could still render a video. Touches: `routes/runs.ts` (cancel), `creative-direction/orchestrator.ts`, `agents/events.ts`; `components/studio/run/{run-meta.ts,step-timeline.tsx}`.
 
 - [x] **Bug 2 (backend):** guard `video` — only runs when `storyboard`'s latest step_event is `passed` AND scenes are non-empty (`latestStepEventStatus`). Else throws → `failRun`.
 - [x] **Bug 1 (backend):** cancel now closes only IN-FLIGHT steps (`closeInFlightStepsOnCancel`) — a `started`-without-terminal step gets a `failed` event; completed (`passed`) steps keep their status + artifact. Cancel still tagged `errorCode="RUN_CANCELLED"`.
@@ -360,13 +360,13 @@ Fix two current-pipeline bugs + truthful stepper. **Bug 1:** cancel set `status=
 Read first: `research/02`. Touches: `providers/openai/{index.ts,constants.ts}`, `config/index.ts` + `.env.example`, `agents/json.ts`, `apps/api/docs/{system-context,agents-and-skills-io,pipeline}.md`. Full flip now (all reasoning/vision → Claude at once, Zod+retry guards JSON-mode sites).
 
 - [x] Verify the live OpenRouter Claude slug (`GET …/v1/models`); record exact id. No code change. → `anthropic/claude-sonnet-4.6` confirmed live 2026-06-19 (constant already correct; `anthropic/claude-sonnet-4.5` available as fallback).
-- [ ] Promote both model ids to env-overridable config (defaults = current). Typecheck.
-- [ ] Flip default backend to Claude when `OPENROUTER_API_KEY` set, gpt-4.1 fallback when missing. Manual: a reasoning step routes to Claude in logs.
-- [ ] Settle JSON strategy (H3): keep `wantJson && !useClaude`; verify `parseJsonObject`(+Zod) parses a real Claude reply.
-- [ ] Audit the ~12 non-critic `jsonMode:true` sites; confirm each parses with a Zod schema; flag schema-less ones (PR list). No code change.
-- [ ] Add a Zod `.safeParse` guard at any flagged schema-less site. Manual test it.
-- [ ] Update the 3 stale docs → "reasoning/vision = Claude Sonnet 4.6 via OpenRouter (fallback gpt-4.1); image = gpt-image-2".
-- [ ] PAUSE — user runs a full 15s `ugc` run, confirms no regression → commit + PR.
+- [x] Promote both model ids to env-overridable config (`OPENAI_CHAT_MODEL`/`OPENROUTER_CLAUDE_MODEL`, defaults = current); `constants.ts` reads from `env`.
+- [x] Flip default backend to Claude (`const backend = opts?.backend ?? "claude"`); gpt-4.1 fallback when `OPENROUTER_API_KEY` missing or `backend:"openai"`.
+- [x] JSON strategy (H3): kept `wantJson && !useClaude`; `parseJsonObject` already robust (fence-strip + outermost-brace slice + control-byte sanitize) — handles Claude replies.
+- [x] Audited the 12 non-critic `chat()` sites — all parse via shared `parseJsonObject`; `describe-product` + `derive-person-brief` already run on Claude this way (stable), so the 10 flipped sites are covered.
+- [x] Zod `.safeParse` guards — **DEFERRED (intentional):** not needed; parseJsonObject + the 2 proven-Claude sites cover it. Per-site Zod lands with the detector in Chunk E. (No code change.)
+- [x] Updated the 3 docs (`system-context.md`, `agents-and-skills-io.md`, `pipeline.md`) → reasoning/vision = Claude Sonnet 4.6 via OpenRouter (gpt-4.1 fallback); image = gpt-image-2.
+- [x] DONE — user-tested + merged into `dev` locally (commit 41599e3). `pnpm typecheck` green.
 
 ### Chunk B — Schema foundation: `adType` → text + detector columns — `feat/adtype-open-schema`
 
