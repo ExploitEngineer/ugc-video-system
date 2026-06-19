@@ -15,7 +15,7 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import { type AdType, isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
+import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
@@ -40,7 +40,7 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
-import { FALLBACK_AD_TYPE_ID, getAdType } from "../ad-types/registry.js";
+import { FALLBACK_AD_TYPE_ID } from "../ad-types/registry.js";
 import { reconcile } from "../ad-types/reconcile.js";
 import type { HookSelection } from "../ad-types/types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
@@ -145,18 +145,6 @@ async function ownsRun(runId: string, myId?: string): Promise<boolean> {
   return run?.lockedBy === myId;
 }
 
-/**
- * Map the open `runs.ad_type` id to the LEGACY 2-value treatment the prompt
- * builders still consume (until Chunk F dispatches through the registry).
- * `legacyMapping` covers the two seed types; new types fall back by look family
- * (ugc_authentic → ugc, everything else → inspirational).
- */
-function legacyAdType(adTypeId: string | null): AdType {
-  const def = getAdType(adTypeId ?? FALLBACK_AD_TYPE_ID);
-  if (def.legacyMapping) return def.legacyMapping;
-  return def.lookFamily === "ugc_authentic" ? "ugc" : "inspirational";
-}
-
 function buildCtx(
   run: RunRow,
   uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
@@ -165,10 +153,10 @@ function buildCtx(
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
-    // `runs.ad_type` is open `text`; the detector (Chunk E) stores the rich id +
-    // hooks. The builders still read the 2-value form via the registry's
-    // legacyMapping until Chunk F dispatches per-type fragments.
-    adType: legacyAdType(run.adType),
+    // Open `runs.ad_type` id (Chunk E detector). The prompt builders dispatch
+    // per-type fragments via the registry (Chunk F); legacy ugc/inspirational
+    // values resolve through the registry's aliases.
+    adType: run.adType ?? FALLBACK_AD_TYPE_ID,
     hooks: (run.hooks as HookSelection | null) ?? undefined,
     hasProduct: Boolean(uploads.productUpload),
     hasPerson: Boolean(uploads.personUpload),

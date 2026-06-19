@@ -69,7 +69,7 @@ export interface FragmentCtx {
   personBrief: string | null; // from plan/derivePersonBrief; null when no person
   hasProduct: boolean; // EXPLICIT — pipeline computed it (assetPolicy + upload)
   hasPerson: boolean; // EXPLICIT — pipeline computed it
-  hooks: HookSelection; // resolved hook(s) for this run
+  hooks?: HookSelection; // resolved hook(s) for this run; spliced at the call site (not read by fragments)
   duration: 15 | 30 | 45 | 60;
   segmentIndex: number | null; // null for 15s; 0-based for master-sheet segments
   segmentCount: number; // 1 for 15s; N for 30/45/60
@@ -143,6 +143,8 @@ export interface LookStrategy {
   shotDirection(ctx: FragmentCtx): string[];
   pacing(ctx: FragmentCtx): string[];
   captionStyle(ctx: FragmentCtx): string[];
+  /** Short look phrase spliced into the storyboard imagePrompt word-budget line. */
+  closingLookClause(ctx: FragmentCtx): string[];
 }
 
 // ---------------------------------------------------------------------------

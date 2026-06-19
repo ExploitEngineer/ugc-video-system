@@ -1,21 +1,15 @@
-import type { AdType, AspectRatio } from "@ugc/shared";
+import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../providers/openai/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
+import { getAdType } from "../ad-types/registry.js";
+import { buildFragmentCtx } from "../ad-types/fragment-ctx.js";
+import { hookOpening } from "../ad-types/hooks/compose.js";
+import type { HookSelection } from "../ad-types/types.js";
 
 /** Per-ratio frame-orientation labels baked into the Seedance directive. */
 const FRAME_LABEL: Record<AspectRatio, { full: string; short: string }> = {
   "16:9": { full: "16:9 widescreen (horizontal)", short: "16:9 widescreen" },
   "9:16": { full: "9:16 vertical (portrait)", short: "9:16 vertical" },
-};
-
-/**
- * Neutral, tunable voice tags — declared ONCE in the audio line and held for the
- * whole clip to keep tone/accent steady. No region/accent word (neutral by
- * design); retune in this one spot if a different voice is wanted.
- */
-const VOICE: Record<AdType, string> = {
-  ugc: "a warm, conversational, natural-sounding voice",
-  inspirational: "a calm, measured narrator",
 };
 
 /** `M:SS` time stamp for the bracketed Seedance shot list. */
@@ -61,7 +55,12 @@ function buildSliceBrackets(durationSec: number, count: number): string[] {
  */
 export function buildVideoPrompt(input: {
   adStyle: string;
-  adType: AdType;
+  /** OPEN ad-type id — dispatched through the ad-type registry. */
+  adType: string;
+  /** Resolved hook selection (Chunk E); spliced into the FIRST time-slice only. */
+  hooks?: HookSelection;
+  /** Whether the ad features a person on screen (presenter logic). */
+  hasPerson?: boolean;
   userPrompt: string;
   scenes: StoryboardScene[];
   durationSec: number;
@@ -106,7 +105,20 @@ export function buildVideoPrompt(input: {
     hasProductSheet,
   } = input;
   const anchor = (input.characterAnchor ?? "").trim();
-  const ugc = adType === "ugc";
+  // Ad-type registry dispatch (Chunk F). `isUgcLook` carries the old `ugc`
+  // label/speaker branches; presenter logic comes from `hasPerson`. Legacy ids
+  // resolve via aliases, so a ugc/inspirational run is byte-identical.
+  const def = getAdType(adType);
+  const isUgcLook = def.lookFamily === "ugc_authentic";
+  const hasPerson = input.hasPerson ?? false;
+  const fctx = buildFragmentCtx({
+    adStyle,
+    hasProduct: Boolean(hasProductSheet),
+    hasPerson,
+    hooks: input.hooks,
+    duration: durationSec >= 30 ? durationSec : 15,
+    segmentIndex,
+  });
   const isSegment = segmentIndex != null;
 
   // @Image role numbering, driven by the submitted content order (text → plain
@@ -116,7 +128,7 @@ export function buildVideoPrompt(input: {
   const boardNo = hasProductSheet ? 2 : 1;
   const boardImg = `@Image ${boardNo}`;
   const faceImg = hasProductSheet ? `@Image ${boardNo + 1}` : "@Image 1";
-  const hasPresenter = Boolean(anchor) || ugc;
+  const hasPresenter = Boolean(anchor) || hasPerson;
 
   // ONE-line identity legend — the load-bearing anchors, nothing more.
   const legend = [
@@ -131,11 +143,14 @@ export function buildVideoPrompt(input: {
     .filter(Boolean)
     .join("; ");
 
-  // ONE short audio line (the user's chosen middle ground — simple shot list +
-  // reliable spoken UGC / voiceover, not a full audio-engineering paragraph).
-  const audioLine = ugc
-    ? "Audio: the on-screen person SPEAKS each line lip-synced in a natural, real human voice (the SAME voice throughout, fitting their apparent age, gender and energy); quote each line verbatim in its slice, keep it short, mouth visible while speaking; light room ambience, no music."
-    : "Audio: a natural, real human VOICEOVER narrates each line (not lip-synced on screen), the SAME voice throughout; quote each line verbatim in its slice and keep it short; a light fitting score is allowed.";
+  // ONE short audio line — TYPE-driven fragment (registry dispatch).
+  const audioLine = def.fragments.videoAudioLine(fctx)[0] ?? "";
+
+  // Opening hook — its directive applies to the FIRST time-slice only. Empty
+  // when no hook resolved → byte-identical to the pre-hook prompt.
+  const hookDirective = fctx.hooks
+    ? `OPENING HOOK (first time-slice only): ${hookOpening(fctx.hooks).videoFirstSlice.join(" ")}`
+    : "";
 
   // 60s: the ONE locked visual-style bible, injected VERBATIM.
   const lockedStyle =
@@ -153,7 +168,7 @@ export function buildVideoPrompt(input: {
 
   const system = [
     "You are a prompt writer for Seedance 2.0, a multi-shot AI video model.",
-    `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${ugc ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
+    `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
     `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4). Panel N is the keyframe for time slice N — follow them in order. Render ONE continuous live-action shot; NEVER show the grid, panel borders, badges or caption text — they are direction only.`,
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
@@ -163,13 +178,14 @@ export function buildVideoPrompt(input: {
     `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
     "For EACH slice: ONE plain sentence — the subject, the action/motion in that panel, and ONE camera move (static, pan, tilt, dolly, push or tracking). Concrete and short; say what the product visibly DOES so it reads as genuinely working. Any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
     audioLine,
+    hookDirective,
     `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT and front-loaded; lean on the attached images for look and identity instead of re-describing them. No on-screen text, captions or watermark.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
     .join(" ");
 
-  const speakerLabel = ugc ? "spoken" : "voiceover";
+  const speakerLabel = isUgcLook ? "spoken" : "voiceover";
   const slices = buildSliceBrackets(durationSec, scenes.length);
   const sceneLines = scenes
     .map((s, i) => {
@@ -220,7 +236,8 @@ export function buildVideoPrompt(input: {
  */
 export function buildDeterministicVideoPrompt(input: {
   adStyle: string;
-  adType: AdType;
+  /** OPEN ad-type id — dispatched through the ad-type registry. */
+  adType: string;
   scenes: StoryboardScene[];
   durationSec: number;
   aspectRatio: AspectRatio;
@@ -231,8 +248,16 @@ export function buildDeterministicVideoPrompt(input: {
   hasProductSheet?: boolean;
 }): string {
   const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
-  const ugc = adType === "ugc";
+  const def = getAdType(adType);
+  const ugc = def.lookFamily === "ugc_authentic";
   const anchor = (input.characterAnchor ?? "").trim();
+  const fctx = buildFragmentCtx({
+    adStyle,
+    hasProduct: Boolean(input.hasProductSheet),
+    hasPerson: Boolean(anchor) || ugc,
+    duration: durationSec >= 30 ? durationSec : 15,
+    segmentIndex: input.segmentIndex,
+  });
   // Same @Image numbering as buildVideoPrompt: product=1, storyboard=2, face=3
   // with a product sheet; storyboard=1, face=2 otherwise.
   const boardNo = input.hasProductSheet ? 2 : 1;
@@ -247,7 +272,7 @@ export function buildDeterministicVideoPrompt(input: {
       : "";
   const voice = anchor
     ? `a natural, real human voice fitting ${anchor}`
-    : VOICE[adType];
+    : (def.fragments.videoVoice(fctx)[0] ?? "");
   const count = scenes.length || 1;
   const slices = buildSliceBrackets(durationSec, count);
   const speak = ugc ? "spoken" : "voiceover";

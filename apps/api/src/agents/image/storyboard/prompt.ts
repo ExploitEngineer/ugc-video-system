@@ -10,15 +10,25 @@
 // video model as the ordered shot guide; the detailed `sceneDescription` and
 // `transcript` ride in the video prompt as text.
 
-import type { AdType, AspectRatio } from "@ugc/shared";
+import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
 import type { ProductUse } from "../../types.js";
+import { getAdType } from "../../ad-types/registry.js";
+import { lookBase } from "../../ad-types/fragments/looks.js";
+import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
+import { hookOpening } from "../../ad-types/hooks/compose.js";
+import type { HookSelection } from "../../ad-types/types.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
 
 export interface StoryboardPromptInput {
   adStyle: string;
-  adType: AdType;
+  /** OPEN ad-type id — dispatched through the ad-type registry for per-type fragments. */
+  adType: string;
+  /** Resolved hook selection (Chunk E); its opening directive is spliced into scene 1 only. */
+  hooks?: HookSelection;
+  /** Whether a product is present (storyboard always has a product sheet → defaults true). */
+  hasProduct?: boolean;
   /**
    * Factual product identity anchor (category / materials / colors / markings)
    * from `runs.product_brief`. Pins what the product IS in TEXT so a drifting
@@ -124,6 +134,8 @@ function directiveBlock(d: RevisionDirective): string[] {
 export function buildStoryboardPrompt({
   adStyle,
   adType,
+  hooks,
+  hasProduct,
   productBrief,
   productUse,
   personBrief,
@@ -143,6 +155,22 @@ export function buildStoryboardPrompt({
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
+
+  // Ad-type registry dispatch (Chunk F): the per-type / per-look prompt fragments
+  // replace the old `adType === "ugc"` ternaries. Legacy ids resolve via aliases,
+  // so a `ugc`/`inspirational` run is byte-identical.
+  const def = getAdType(adType);
+  const fctx = buildFragmentCtx({
+    adStyle: style,
+    productBrief,
+    personBrief,
+    hasProduct: hasProduct ?? true, // a storyboard always has a product sheet
+    hasPerson,
+    hooks,
+    duration: (segmentCount ?? 1) * 15,
+    segmentIndex,
+    segmentCount,
+  });
 
   // ── MULTI-SEGMENT ONE-MASTER mode (full60s): this single sheet is the WHOLE
   // multi-segment storyboard — N×4 panels in an N-row grid of ONE continuous
@@ -272,7 +300,7 @@ export function buildStoryboardPrompt({
         "only the CAMERA (shot type, angle, distance) and the small moment/action move",
         "from panel to panel. Build this arc from the user's prompt and the product —",
         "do NOT split it into separate vignettes.",
-        ...(adType === "ugc"
+        ...(def.lookFamily === "ugc_authentic"
           ? [
               "Because this is UGC, the continuous action IS the person presenting the",
               `product to camera in that one spot — across the ${totalWordLower} panels they keep`,
@@ -352,49 +380,26 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // Ad-type-specific direction for the script + transcripts.
-  const typeBlock =
-    adType === "ugc"
-      ? [
-          "AD TYPE — UGC (a real person SHOWING the product to camera):",
-          "- The ad is a REAL PERSON talking TO CAMERA about the product the way",
-          "  they'd show it to a friend — relaxed, genuine, off-the-cuff. NOT a",
-          "  scripted ad, review read or sales pitch, and NOT silent lifestyle b-roll.",
-          "- They ACTIVELY DEMONSTRATE the product to the lens across the panels: hold",
-          "  it up close to camera, take it off / put it on (or pick it up / handle",
-          "  it), turn or rotate it to show its key parts and details, point at a",
-          "  feature, and show it actually working — like a creator doing a real",
-          "  hands-on review. The PRODUCT is the focus of most panels, shown clearly",
-          "  and large to camera, NOT just worn or held passively in the background.",
-          "- They look at and address the camera. The flow is natural: show the",
-          "  product → demonstrate / use it → an honest reaction. It ENDS on a real",
-          "  personal verdict, never a sales close or call-to-action.",
-          "- AVOID passive lifestyle filler that hides the product: walking in,",
-          "  dropping a bag, stretching, relaxing, gazing away, or candid moments not",
-          "  addressed to camera.",
-          "- Each scene's `transcript` is one natural spoken line the on-screen",
-          "  person says in that scene (first person, the way people really talk —",
-          "  contractions, casual phrasing, not ad copy), tied to what they're",
-          "  SHOWING/doing with the product. Keep lines short and let their length",
-          "  vary; the lines flow as one continuous, natural bit of talking.",
-        ]
-      : [
-          "AD TYPE — Inspirational (open-ended cinematic):",
-          "- The ad is an evocative, cinematic scene that follows whatever the",
-          "  user describes (mood, journey, lifestyle, story), with the product",
-          "  woven in naturally. The arc builds an emotional through-line over",
-          "  the ~15s.",
-          "- Each scene's `transcript` is a VOICEOVER NARRATION line for that",
-          "  scene (evocative, ~1 short sentence), spoken over the visuals — it is",
-          "  NOT necessarily lip-synced by anyone on screen. The four lines should",
-          "  read as one cohesive voiceover.",
-        ];
+  // Ad-type-specific direction for the script + transcripts (registry dispatch).
+  const typeBlock = def.fragments.storyboardTypeBlock(fctx);
+
+  // Opening hook — its directive applies to SCENE 1 ONLY (scenes 2..N carry no
+  // hook). Empty when no hook resolved (legacy/older runs) → byte-identical.
+  const hookBlock = fctx.hooks
+    ? [
+        "",
+        "OPENING HOOK — applies ONLY to scene 1 (the first panel / opening beat);",
+        "scenes 2..N carry NO hook directive:",
+        ...hookOpening(fctx.hooks).storyboardScene1,
+      ]
+    : [];
 
   // Script grounding — forces the four spoken lines to be specific to THIS
   // product, THIS person and THIS scene, and to never repeat. Kills the
   // generic, interchangeable filler ("I love this", "you'll love it") that
   // appears when the model has no concrete anchor.
-  const speaker = adType === "ugc" ? "the on-screen person" : "the voiceover";
+  const speaker =
+    def.fragments.storyboardSpeakerLabel(fctx)[0] ?? "the on-screen person";
   // Anchor the script in what THIS product actually does (from productUse) so two
   // different products yield clearly different scripts — kills cross-ad sameness.
   const benefitAnchor = hasUse
@@ -494,26 +499,9 @@ export function buildStoryboardPrompt({
     "  physically real moment consistent with the use-sequence above.",
   ];
 
-  // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
-  // footage, not a glossy studio commercial (identity/fidelity is unaffected).
-  const keyframeLook =
-    adType === "ugc"
-      ? [
-          "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-          "  a glossy studio commercial: natural / available light from real windows",
-          "  or lamps, a real lived-in everyday setting with ordinary background",
-          "  detail, candid handheld-style framing, the person relaxed and real",
-          "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
-          "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
-          "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
-          "  sheets — only lighting, setting and framing read as real UGC, never",
-          "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
-        ]
-      : [
-          "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
-          "  intentional lighting, rich color and depth, a still lifted straight from a",
-          "  high-end commercial.",
-        ];
+  // Keyframe look — LOOK-driven fragment (registry dispatch). UGC reads as
+  // authentic phone footage, cinematic as a polished commercial keyframe.
+  const keyframeLook = def.fragments.storyboardKeyframeLook(fctx);
 
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
@@ -531,6 +519,7 @@ export function buildStoryboardPrompt({
     ...(product ? [...productAnchor, ""] : []),
     ...(characterAnchor.length ? [...characterAnchor, ""] : []),
     ...typeBlock,
+    ...hookBlock,
     "",
     ...scriptGrounding,
     "",
@@ -630,9 +619,7 @@ export function buildStoryboardPrompt({
       ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
       : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
     "and",
-    adType === "ugc"
-      ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
-      : "the polished cinematic keyframe look.",
+    lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
     hasPerson
       ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? totalWordLower : "four"} panels, faithful to the person sheet.`
       : "",

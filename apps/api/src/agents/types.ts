@@ -4,7 +4,7 @@
 // The OpenAI provider is injected on `ctx` (dependency injection) so skills
 // never import the adapter directly and stay unit-testable with a fake.
 
-import type { AdType, AspectRatio, Duration } from "@ugc/shared";
+import type { AspectRatio, Duration } from "@ugc/shared";
 import type { HookSelection } from "./ad-types/types.js";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
@@ -36,13 +36,13 @@ export interface SkillContext {
   /** Opaque in F4 (caller supplies it); F7's Creative Direction Agent sets it. */
   adStyle: string;
   /**
-   * Ad treatment as the LEGACY 2-value enum (ugc | inspirational), derived in
-   * `buildCtx` from the open `runs.ad_type` id via the registry's
-   * `legacyMapping`. The detector (Chunk E) stores the rich open id + hooks on
-   * the run; the prompt builders still consume this 2-value form until Chunk F
-   * dispatches through the registry.
+   * The OPEN ad-type id (e.g. `testimonial`, `brand-story`, `product-demo`),
+   * straight from `runs.ad_type`. The prompt builders resolve it through the
+   * ad-type registry (`getAdType`) for per-type fragment dispatch (Chunk F);
+   * legacy `ugc`/`inspirational` values resolve via the registry's aliases, so
+   * old rows behave identically.
    */
-  adType: AdType;
+  adType: string;
   /**
    * Resolved hook selection from the detector (Chunk E), parsed from
    * `runs.hooks`. Undefined on legacy/older runs. Consumed by the prompt
