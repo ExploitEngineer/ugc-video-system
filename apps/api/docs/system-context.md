@@ -136,8 +136,11 @@ fills the gaps.
 
 ## 5. Every AI call — master table
 
-Models: **image generation** = `gpt-image-2`; **all reasoning/vision** = `gpt-4.1`;
-**video** = Seedance 2.0 via BytePlus ModelArk. Merge uses ffmpeg (no AI). Every
+Models: **image generation** = `gpt-image-2`; **all reasoning/vision** = **Claude
+Sonnet 4.6 via OpenRouter** (default; `gpt-4.1` fallback when `OPENROUTER_API_KEY`
+is unset, or per-call `backend:"openai"`) — the per-skill `gpt-4.1` labels in the
+table below denote this reasoning slot; **video** = Seedance 2.0 via BytePlus
+ModelArk. Merge uses ffmpeg (no AI). Every
 skill also receives a shared `SkillContext` (`agents/types.ts`):
 `{ runId, adStyle, adType, productBrief, productUse?, personBrief, aspectRatio,
 openai, video }`.
@@ -237,9 +240,12 @@ Client: `new OpenAI({ timeout: 240_000, maxRetries: 4 })` (SDK auto-retries
   - Reference images are **fetched and inlined as base64 data URIs** (OpenAI's
     server times out fetching large Supabase URLs).
   - Internal **5× retry** with backoff (covers truncated-body parse errors).
-- **`chat(messages, { maxTokens?, jsonMode? })`** → `gpt-4.1`,
-  `max_completion_tokens` (default 4096), `response_format: json_object` when
-  `jsonMode`. Vision: image refs inlined as base64 before the call.
+- **`chat(messages, { maxTokens?, jsonMode?, backend? })`** → **Claude Sonnet 4.6
+  via OpenRouter** by default (`gpt-4.1` when `OPENROUTER_API_KEY` is unset or
+  `backend:"openai"`), `max_completion_tokens` (default 4096). `response_format:
+  json_object` is applied ONLY on the gpt-4.1 path — on Claude it's skipped and we
+  rely on the strict-JSON prompt + the forgiving `parseJsonObject`. Vision: image
+  refs inlined as base64 before the call.
 
 ### BytePlus / Seedance 2.0 — `providers/byteplus/index.ts`
 
@@ -350,7 +356,9 @@ Drizzle schema (`apps/api/src/db/schema.ts`); see [database-schema.md](database-
 
 | Key | Default | Purpose |
 |---|---|---|
-| `OPENAI_API_KEY` | — | gpt-4.1 + gpt-image-2 |
+| `OPENAI_API_KEY` | — | gpt-image-2 + the gpt-4.1 reasoning/vision fallback |
+| `OPENROUTER_API_KEY` | — (optional) | Claude Sonnet 4.6 = default reasoning/vision (unset ⇒ gpt-4.1) |
+| `OPENAI_CHAT_MODEL` / `OPENROUTER_CLAUDE_MODEL` | `gpt-4.1` / `anthropic/claude-sonnet-4.6` | model-id overrides |
 | `BYTEPLUS_API_KEY` | — | Seedance inference |
 | `BYTEPLUS_VIDEO_MODEL` | `dreamina-seedance-2-0-260128` | model slug |
 | `BYTEPLUS_VIDEO_RESOLUTION` | `1080p` | `1080p`/`720p`/`480p` |

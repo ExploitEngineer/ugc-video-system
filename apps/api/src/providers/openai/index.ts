@@ -74,9 +74,9 @@ export interface ChatOptions {
    */
   jsonMode?: boolean;
   /**
-   * Reasoning backend. `"openai"` (default) → gpt-4.1. `"claude"` → Claude
-   * Sonnet 4.6 via OpenRouter, for the vision/label-reading steps. If
-   * `OPENROUTER_API_KEY` is unset, `"claude"` silently falls back to gpt-4.1.
+   * Reasoning backend. `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
+   * `"openai"` → forces gpt-4.1. When `OPENROUTER_API_KEY` is unset, the default
+   * silently falls back to gpt-4.1, so the server runs without the key.
    */
   backend?: "openai" | "claude";
 }
@@ -190,10 +190,12 @@ export function createOpenAIProvider(): OpenAIProvider {
     async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
-      // Route to Claude only when asked AND the key is present; otherwise the
-      // step degrades to gpt-4.1 (safe — the Claude steps are best-effort).
-      const useClaude =
-        opts?.backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
+      // Claude Sonnet 4.6 (via OpenRouter) is the DEFAULT reasoning/vision
+      // backend. A call routes to Claude unless it explicitly forces
+      // `backend:"openai"`; if `OPENROUTER_API_KEY` is unset we degrade to
+      // gpt-4.1 (so the server still runs without the key).
+      const backend = opts?.backend ?? "claude";
+      const useClaude = backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
       const apiClient = useClaude ? getOpenRouterClient() : getClient();
       const model = useClaude ? OPENROUTER_CLAUDE_MODEL : OPENAI_CHAT_MODEL;
       // json_object is reliable on gpt-4.1; on Claude-via-OpenRouter it is not

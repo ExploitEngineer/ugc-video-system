@@ -20,9 +20,11 @@ living under `apps/api/src/agents/<agent>/<skill>/`.
 - `text` — plain string prompt/brief.
 - `meta` — JSON metadata carried on the artifact row (not an image).
 - `?` — optional input.
-- **Models:** image generation = `gpt-image-2`; all reasoning/vision = `gpt-4.1`;
-  video = Seedance 2.0 via BytePlus ModelArk; the 60s **merge** step is ffmpeg
-  (no AI).
+- **Models:** image generation = `gpt-image-2`; all reasoning/vision = **Claude
+  Sonnet 4.6 via OpenRouter** (default; `gpt-4.1` fallback when `OPENROUTER_API_KEY`
+  is unset, or per-call `backend:"openai"`) — per-skill `gpt-4.1` labels below
+  denote this reasoning slot; video = Seedance 2.0 via BytePlus ModelArk; the 60s
+  **merge** step is ffmpeg (no AI).
 
 Every skill **also** receives a shared `SkillContext` (`agents/types.ts`):
 `{ runId, adStyle, adType (ugc|inspirational), productBrief, productUse?,
