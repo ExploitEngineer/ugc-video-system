@@ -38,3 +38,7 @@ coverage/
 
 # claude
 .claude
+
+# local research inputs (kept on the author's machine, not committed)
+research/
+research-prompts/

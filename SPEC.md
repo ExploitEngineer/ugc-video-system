@@ -164,16 +164,16 @@ Each agent's prompts are written **inside that agent's own feature** (F4 Image, 
 
 #### `assets`
 
-| Field       | Type           | Notes                                                                                                 |
-| ----------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| id          | uuid PK        |                                                                                                       |
-| runId       | uuid FK → runs |                                                                                                       |
+| Field       | Type           | Notes                                                                                                                                                                       |
+| ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| id          | uuid PK        |                                                                                                                                                                             |
+| runId       | uuid FK → runs |                                                                                                                                                                             |
 | kind        | enum           | `product_upload`, `person_upload`, `product_sheet`, `person_sheet`, `storyboard_sheet`, `storyboard_master`, `final_video`, `segment_video`, `edited_video`, `editor_scene` |
-| storagePath | text           | Supabase Storage object path                                                                          |
-| url         | text           | public or signed URL                                                                                  |
-| mime        | text           |                                                                                                       |
-| meta        | jsonb          | width/height/duration/provider info                                                                   |
-| createdAt   | timestamptz    |                                                                                                       |
+| storagePath | text           | Supabase Storage object path                                                                                                                                                |
+| url         | text           | public or signed URL                                                                                                                                                        |
+| mime        | text           |                                                                                                                                                                             |
+| meta        | jsonb          | width/height/duration/provider info                                                                                                                                         |
+| createdAt   | timestamptz    |                                                                                                                                                                             |
 
 #### `step_events` (audit trail)
 
@@ -336,9 +336,175 @@ Supabase Auth sign-in; set `projects.ownerId` and scope runs/artifacts; owner-ba
 
 A `completed` run's `final_video` can be edited in a client-side editor (img.ly CE.SDK) at `/studio/[runId]/edit`; the export saves as `edited_video` (+ `editor_scene`) via `POST /runs/:id/edited-video`. Post-pipeline (the worker never touches `completed` runs), non-destructive (original `final_video` kept), templates/stock content served by the img.ly CDN (not our backend). Full flow, storage, and config in [apps/api/docs/video-editor.md](apps/api/docs/video-editor.md); implementation notes in the 2026-06-12 Progress Log entry.
 
+## Any-Type Ad Expansion — **In progress (chunked roadmap, 2026-06-19)** · outside F0–F8
+
+Expand the generator from 2 ad types (`ugc`/`inspirational`) to **ANY ad type** — auto-detected from the user's free-text prompt, with an **optional dropdown override** (Auto-detect by default; an explicit pick **locks** the type) — restructured around an **ad-type registry + hook registry + look families** so adding a type is purely additive. Plus: swap reasoning/vision from **gpt-4.1 → Claude Sonnet 4.6 via OpenRouter** (image gen stays `gpt-image-2`); fix two current-pipeline state-machine bugs (**Step 0**); and surface the detected ad type + hooks-per-scene + selected options in the run view (**Chunk K**). Research lives in [`research/`](research/); full plan + cross-cutting hazards (H1–H12) in `.claude/plans/i-have-already-did-streamed-candy.md`.
+
+**Rules:** one chunk = one `feat/…` branch off `main`; implement **one checkbox at a time**, the user manually tests each, commit + PR only on their OK. **Backend first, then frontend**, per chunk. **No critic work** (parked). Auto-detect is the **default**; the dropdown is an **optional override** (Chunk J). Dependency order: **Step 0 → A → B → (C + D) → E → F → G → J → K → H → I**.
+
+> Read-first per chunk: `research/00` = ad taxonomy (16 types, 4 look families, asset matrix); `research/01` = hook library (16 hooks, roles, exclusive sets); `research/02` = detector design (rubric, clamp, reconcile, eval fixtures); `research/04`+`research/05` = Seedance/gpt-image per-type prompt fragments; `research/03-prompt-restructure-and-skills/` = registry+skill architecture (types/registry/compose/sync-test/SKILL.md).
+
+### Step 0 — Pipeline state-machine fixes (backend → frontend) — `feat/pipeline-state-fixes`
+
+Fix two current-pipeline bugs + truthful stepper. **Bug 1:** cancel set `status="failed"` with no step_event, so the UI painted the *passed* storyboard step "failed" and hid its (existing) artifact. **Bug 2:** `nextStep` returned `video` after `storyboard` regardless of pass/fail; the video precondition checked only asset existence — a failed/empty storyboard could still render a video. Touches: `routes/runs.ts` (cancel), `creative-direction/orchestrator.ts`, `agents/events.ts`; `components/studio/run/{run-meta.ts,step-timeline.tsx}`.
+
+- [x] **Bug 2 (backend):** guard `video` — only runs when `storyboard`'s latest step_event is `passed` AND scenes are non-empty (`latestStepEventStatus`). Else throws → `failRun`.
+- [x] **Bug 1 (backend):** cancel now closes only IN-FLIGHT steps (`closeInFlightStepsOnCancel`) — a `started`-without-terminal step gets a `failed` event; completed (`passed`) steps keep their status + artifact. Cancel still tagged `errorCode="RUN_CANCELLED"`.
+- [x] **Bug 1 (frontend):** `stepState()` is now event-authoritative — step events override run-level status, so a passed step stays `done` (with artifact) after a cancel/fail, and a cancelled in-flight step reads `failed`.
+- [x] **Bug 1 (frontend):** artifact shows whenever it EXISTS (gated on asset presence, not `done`/`awaiting`) — storyboard stays visible on a cancelled run.
+- [x] **Step-sync:** stepper tracks true running step via events; cancel already distinguished at the run banner (`RUN_CANCELLED`).
+- [x] PAUSE — user tested (normal run · cancel-after-storyboard · forced storyboard failure) + approved 2026-06-19 → committed + PR.
+
+### Chunk A — Provider swap: Claude Sonnet 4.6 (OpenRouter) as reasoning/vision default — `feat/claude-reasoning-default`
+
+Read first: `research/02`. Touches: `providers/openai/{index.ts,constants.ts}`, `config/index.ts` + `.env.example`, `agents/json.ts`, `apps/api/docs/{system-context,agents-and-skills-io,pipeline}.md`. Full flip now (all reasoning/vision → Claude at once, Zod+retry guards JSON-mode sites).
+
+- [x] Verify the live OpenRouter Claude slug (`GET …/v1/models`); record exact id. No code change. → `anthropic/claude-sonnet-4.6` confirmed live 2026-06-19 (constant already correct; `anthropic/claude-sonnet-4.5` available as fallback).
+- [ ] Promote both model ids to env-overridable config (defaults = current). Typecheck.
+- [ ] Flip default backend to Claude when `OPENROUTER_API_KEY` set, gpt-4.1 fallback when missing. Manual: a reasoning step routes to Claude in logs.
+- [ ] Settle JSON strategy (H3): keep `wantJson && !useClaude`; verify `parseJsonObject`(+Zod) parses a real Claude reply.
+- [ ] Audit the ~12 non-critic `jsonMode:true` sites; confirm each parses with a Zod schema; flag schema-less ones (PR list). No code change.
+- [ ] Add a Zod `.safeParse` guard at any flagged schema-less site. Manual test it.
+- [ ] Update the 3 stale docs → "reasoning/vision = Claude Sonnet 4.6 via OpenRouter (fallback gpt-4.1); image = gpt-image-2".
+- [ ] PAUSE — user runs a full 15s `ugc` run, confirms no regression → commit + PR.
+
+### Chunk B — Schema foundation: `adType` → text + detector columns — `feat/adtype-open-schema`
+
+Read first: `research/00`, `research/02`. Touches: `packages/shared/src/{enums.ts,dto.ts}`, `db/schema.ts`, `db/migrations/`, `routes/runs.ts`.
+
+- [ ] Add open `adTypeIdSchema = z.string().min(1).regex(/^[a-z][a-z0-9-]*$/)`; keep legacy `AdType` union untouched. Typecheck.
+- [ ] Migration: `runs.ad_type` enum → `text` (`USING ad_type::text`), drop the type. Apply local; legacy rows survive.
+- [ ] Migration: add nullable `hooks jsonb`, `ad_type_confidence`, `detector_meta jsonb`. Apply local.
+- [ ] Update `schema.ts` (drop `adTypeEnum`, `adType`→`text`, add cols). Typecheck + smoke insert.
+- [ ] Update `dto.ts` `runSchema.adType` to the open id. Typecheck.
+- [ ] Update run-mapper (`routes/runs.ts`) to surface `adType`/`hooks`/`confidence` (nullable-safe). Manual: GET a run.
+- [ ] PAUSE — existing run loads + fresh `ugc` run completes → commit + PR.
+
+### Chunk C — Ad-type registry + look families (legacy defs verbatim) — `feat/ad-type-registry-foundation`
+
+Read first: `research/00` + `ai-ad-gen` `font-registry.ts` pattern. Touches (new `apps/api/src/agents/ad-types/`): `types.ts`, `registry.ts`, `fragments/{looks,shared}.ts`, `defs/{testimonial,brand-story}.ts`.
+
+- [ ] `types.ts`: `AdTypeDef`/`FragmentSet`/`FragmentCtx`/`LookStrategy`/`HookSelection`/`AssetPolicy`/closed `LookFamily`(4) + `FRAGMENT_SEAMS`(10)/`LOOK_FAMILIES`. Typecheck.
+- [ ] `registry.ts`: `REGISTRY` from `ALL_DEFS`, `getAdType()` with `LEGACY_ALIASES` + `FALLBACK_AD_TYPE_ID="brand-story"` (warns + falls back, never throws). Smoke.
+- [ ] `fragments/looks.ts`: `ugc_authentic`+`cinematic_polished` VERBATIM from storyboard/video; author `graphic_text`+`demo_clean` from research/04+05. Typecheck.
+- [ ] `defs/testimonial.ts` (=`ugc`): `ugc_authentic`, product opt/person req, `legacyMapping:"ugc"`, `// VERBATIM-MOVE` markers.
+- [ ] `defs/brand-story.ts` (=`inspirational`): `cinematic_polished`, both optional, `legacyMapping:"inspirational"`.
+- [ ] Register both in `ALL_DEFS`; verify alias resolution + `allAdTypeIds()`. Typecheck + smoke.
+- [ ] PAUSE — typecheck passes, registry resolves legacy ids → commit + PR (no runtime change).
+
+### Chunk D — Hook registry + composition engine — `feat/hook-registry-compose`
+
+Read first: `research/01`, `research/02` (id map). Touches (new `ad-types/hooks/`): `registry.ts`, `hook-defs.json`, `compose.ts`, `ad-types/__tests__/`.
+
+- [ ] `hook-defs.json` (16 verbatim) + `registry.ts` (`getHook` throws on unknown, `hasHook`). Unit: 16 kebab ids.
+- [ ] Placeholder→canonical id map (`pain_point`→`problem-solution`, `transformation`→`before-after`, `warning`→`negativity-bias`, `social_proof`→type-aware, `unboxing_reveal`→folded). Unit.
+- [ ] `resolveHooks` (a) drop unknown + not-in-`allowedHooks`, dedup. Unit.
+- [ ] (b) asset guardrail (strip testimonial/confession w/o person; demonstration w/o product). Unit.
+- [ ] (c) `EXCLUSIVE_SETS` collapse to higher scorer. Unit.
+- [ ] (d) `score()` (+100 default, +confidence·10, +1 visual_lead) → top 2; (e) roles (one visual-lead + optional overlay, never two visual-leads, empty→fallback). Unit.
+- [ ] `hookOpening()` → labeled visual-lead [+overlay] directive lines as `string[]` (never joined). Unit.
+- [ ] PAUSE — compose unit tests green → commit + PR.
+
+### Chunk E — Detector: extend `interpretAdStyle` + worker reconcile — `feat/ad-type-detector`
+
+Read first: `research/02` (FULL), `research/00`, `research/01`. Touches: `creative-direction/interpret-style/{prompt,index}.ts`, `ad-types/{registry.ts,menu.ts}`, `agents/orchestrator.ts`, `agents/types.ts`, `packages/shared/src/dto.ts`.
+
+- [ ] `renderAdTypeMenu()`+`renderHookMenu()` on the registry (cues + confusable pairs + per-hook cues, derived from defs). Unit.
+- [ ] Detector output Zod schema `{adStyle,rationale,adType,hooks,confidence,assetIntent}` (reasoning-first) in shared. Typecheck.
+- [ ] Rewrite `interpret-style/prompt.ts` → single strict-JSON prompt injecting both menus, reasoning-first, 0.55 confidence semantics; Claude-friendly (no provider `json_schema`).
+- [ ] Update `interpret-style/index.ts` → `chat(prompt,{backend:"claude"})`, `parseJsonObject` WITH the Zod schema; replace 2-value coercion. Manual: 3 prompts return well-formed objects.
+- [ ] Safety net: `clampAdType` (exact→alias→levenshtein≤2→asset-implied default) + `clampHooks`. Unit: garbage clamps; vague defaults.
+- [ ] Persist full result in `orchestrator.ts` to `adType`+`hooks`+`detector_meta`+`confidence`. Manual: inspect a run row.
+- [ ] `reconcile()`: person-required+no-person → `synthesizePerson`; product-required+no-product → look-preserving downgrade chain (terminal `brand-awareness`); strip incompatible hooks; enforce composition. Unit + no-asset prompt.
+- [ ] Wire `SkillContext` to carry `hooks`/`hasProduct`/`hasPerson` in `buildCtx`. Typecheck.
+- [ ] Confirm-mode HITL: the `awaiting_confirmation` reference gate still fires post-interpret. Manual: confirm-mode run pauses.
+- [ ] PAUSE — user runs 4-5 varied prompts (product-led / person-led / neither), confirms detection → commit + PR.
+
+### Chunk F — Replace binary `if(adType)` branches with registry fragment dispatch — `feat/registry-fragment-dispatch`
+
+Read first: image+video branch inventory, restructure design §4, `research/04`+`research/05`. Touches: `image/storyboard/prompt.ts`, `video/prompt.ts` (delete `VOICE` map), `image/storyboard/index.ts`, `video/index.ts`, `narrative-outline/prompt.ts`.
+
+- [ ] Replace storyboard `typeBlock` ternary → `storyboardTypeBlock(ctx)`. Diff `ugc` 15s prompt byte-identical.
+- [ ] Replace `keyframeLook` → `storyboardKeyframeLook` (delegates to `lookBase`). Diff byte-identical for both legacy types.
+- [ ] Replace `speaker`, master-only UGC block, closing look clause. Diff byte-identical.
+- [ ] Delete `VOICE` map; route deterministic voice through `videoVoice`. Diff byte-identical.
+- [ ] Replace LLM-path branches → `videoVoice`/`videoAudioLine` + presenter logic from `hasPerson`. Diff byte-identical.
+- [ ] Replace deterministic-path branches with fragment calls. Diff byte-identical.
+- [ ] Splice hook opening into scene1 / video slice 1 only (scenes/slices 2..N get none). Manual: directive only in frame 1.
+- [ ] Re-point `narrative-outline` `isUgc` → `narrativeTreatment(ctx)` WITHOUT re-activating the dormant step. Typecheck.
+- [ ] Remove now-unused `AdType` union imports where safe; keep `SkillContext.adType` open string. Typecheck.
+- [ ] PAUSE — user runs a 15s `ugc` AND a 15s `inspirational`, confirms output unchanged → commit + PR.
+
+### Chunk G — Conditional product/person step-skipping by asset policy — `feat/conditional-asset-steps`
+
+Read first: `research/00`, `research/02`. Touches: `creative-direction/plan.ts` (`firstStep`/`nextStep`/`gateForNext`/`genStepForRevise`), `agents/orchestrator.ts`, registry `assetPolicy` (read-only).
+
+- [ ] Thread `assetPolicy` + actual upload booleans into `nextStep`/`firstStep` (replace unused `_personUploaded`). Typecheck.
+- [ ] `firstStep()`: product not required + no upload → start at `person_sheet` (or storyboard if person also skipped). Unit.
+- [ ] `nextStep` product skip when `product!=="required" && !hasProductUpload`. Manual: `social-proof` no-product jumps past it.
+- [ ] `nextStep` person: required+no-upload still synthesizes; not-required+no-upload skips. Manual: showcase skips, testimonial synthesizes.
+- [ ] Verify `gateForNext` auto-collapses the matching confirm-mode gate for a skipped step. Confirm-mode no-asset run.
+- [ ] Update `genStepForRevise` so revise on a skipped-step run targets the right step. Manual.
+- [ ] PAUSE — user runs a neither-asset (brand-awareness) run + a product-only run, confirms skips → commit + PR.
+
+### Chunk H — Per-ad-type defs + SKILL.md docs + sync test (14 new types, one at a time) — `feat/ad-type-defs`
+
+One branch, one combined PR; pause + manually test each type before the next. Read first: `research/00`, `research/01`, `research/04`+`research/05`, restructure design §5-6. Touches: `ad-types/defs/<id>.ts`, `.claude/skills/ad-type-<id>/SKILL.md`, `ad-types/registry.ts`, `ad-types/__tests__/defs-skills-sync.test.ts`.
+
+- [ ] FIRST: author `defs-skills-sync.test.ts` (5 invariants) + `SKILL.md` for the 2 legacy types so it passes green.
+- [ ] `product-showcase` (demo_clean, product req). Sync green + manual.
+- [ ] `product-demo` (demo_clean, product req). Sync green + manual.
+- [ ] `before-after` (demo_clean, product req) — **+ Meta policy guard** (no weight-loss/anti-aging split-screen). Sync green + manual.
+- [ ] `comparison` (demo_clean, product req) — **+ named-competitor brand-safety guard**. Sync green + manual.
+- [ ] `unboxing` (ugc_authentic, product req). Sync green + manual.
+- [ ] `lifestyle` (cinematic_polished, product req). Sync green + manual.
+- [ ] `problem-agitate-solve` (ugc_authentic, product req). Sync green + manual.
+- [ ] `founder-pov` (cinematic_polished, person req). Sync green + manual.
+- [ ] `spokesperson` (cinematic_polished, person req). Sync green + manual.
+- [ ] `social-proof` (graphic_text, neither). Sync green + manual (no-asset run).
+- [ ] `explainer` (graphic_text, neither). Sync green + manual.
+- [ ] `promo-offer` (graphic_text, neither). Sync green + manual.
+- [ ] `announcement` (graphic_text, neither). Sync green + manual.
+- [ ] `brand-awareness` (graphic_text, neither — canonical no-product/no-person). Sync green + manual.
+- [ ] FINAL: registry has 16, `renderAdTypeMenu()` lists all 16, detector routes to each → one combined commit + PR.
+
+### Chunk J — Ad-type selection dropdown (registry-driven; backend → frontend) — `feat/ad-type-dropdown`
+
+Create-form dropdown: **default "Auto-detect"** + the registry's types; an explicit pick sets `ad_type_source="user"` and **locks** the type (Chunk E honors it; detector still fills adStyle + hooks). After C (list) + E (lock); auto-grows as H adds types. Touches: `routes/runs.ts` (accept `adType` + set source), a `GET /ad-types` route or shared menu, `create-run-form.tsx` (mirror `ModeToggle`), `lib/api.ts`.
+
+- [ ] Backend: `POST /runs` accepts optional `adType` (+`auto`); store it + set `ad_type_source`. Manual: explicit-type run row.
+- [ ] Expose the ad-type menu (id + displayName + whenToUse + assetPolicy) to web. Manual: hit/import it.
+- [ ] Frontend: dropdown in `OptionsMenu` (default "Auto-detect" + menu types), submit `adType`. Manual: pick + create.
+- [ ] Verify the lock end-to-end (explicit pick honored; "Auto" runs full detection). Manual.
+- [ ] PAUSE — user confirms pick honored + Auto detects → commit + PR.
+
+### Chunk K — Run-view UX: surface ad type + hooks-per-scene + selected options (backend → frontend) — `feat/run-view-detected-options`
+
+Show the chosen/detected ad type (+ user-picked vs auto), the hooks used and **which scene each drives**, asset choices, mode/duration/aspect. Touches: `packages/shared/src/dto.ts` (RunDetail += `hooks`/`adTypeSource`; Scene += hook attribution), `lib/mappers.ts`; `components/studio/run/{run-view.tsx,script-panel.tsx}`.
+
+- [ ] Backend: extend `RunDetail` (`hooks` resolved selection + `adTypeSource`) + `Scene` (hook attribution from Chunk F). Map in `lib/mappers.ts`. Typecheck.
+- [ ] Frontend: registry `displayName` adType chip + "auto / you chose" badge (replaces the 2-value chip). Manual.
+- [ ] Frontend: hook chips (visual-lead + overlay) + per-scene hook label in `script-panel.tsx`. Manual.
+- [ ] Frontend: surface selected options (mode/duration/aspect, asset choices, synthesized-person note). Manual.
+- [ ] PAUSE — user reviews a completed run, info accurate → commit + PR.
+
+### Chunk I — Eval fixtures (detector accuracy seed) — `feat/detector-eval-fixtures`
+
+Read first: `research/02` §6, `research/00`, `research/01`. Touches: `ad-types/__tests__/detector-eval.*`.
+
+- [ ] Encode ≥5 prompts/type + the 4 confusable pairs, each with expected `{adType,hooks,assetIntent}`. Data-only.
+- [ ] OFFLINE assertion test through `clampAdType`+`clampHooks`+`reconcile`, assert final type/hooks (no LLM call). Green.
+- [ ] OPTIONAL live-LLM eval (env-flag gated, off in CI) reporting accuracy %. Manual run, record baseline in PR.
+- [ ] PAUSE — user reviews offline test green + live baseline → commit + PR.
+
 ---
 
 ## Progress Log
+
+### 2026-06-19
+
+- **Step 0 — pipeline state-machine bug fixes (`feat/pipeline-state-fixes`, code complete, user test pending).** Fixed two current-pipeline bugs + made the stepper truthful. **Bug 2 (storyboard fails → video still rendered):** the `video` step now refuses to run unless `storyboard`'s latest `step_event` is `passed` AND the sheet has non-empty scenes — new `latestStepEventStatus()` in `agents/events.ts`, guard in `orchestrator.ts` (a non-passed/empty storyboard now throws → `failRun`, no spurious paid render). **Bug 1 (cancel hid the storyboard + marked the passed step "failed"):** root cause was the cancel route blanket-setting `status="failed"` with no step_event while the UI derived per-step status from `run.status`. Backend — new `closeInFlightStepsOnCancel()` writes a terminal `failed` event ONLY for steps still in-flight (`started`, no terminal), so a completed storyboard keeps its `passed` event + artifact; cancel still tagged `errorCode="RUN_CANCELLED"`. Frontend — `run-meta.ts` `stepState()` is now **event-authoritative** (step events override run-level status; a passed step stays `done` after a cancel/fail, a cancelled in-flight step reads `failed`), and `step-timeline.tsx` shows an artifact whenever it EXISTS (gated on asset presence, not `done`/`awaiting`) so the storyboard stays visible on a cancelled run. The run-banner already distinguished cancellation (`RUN_CANCELLED` hides the error code). Also: `.gitignore`'d `research/` + `research-prompts/` (local inputs); added **Step 0 / Chunk J (ad-type dropdown) / Chunk K (run-view UX)** to the roadmap above and reconciled the **dropdown reversal** (Auto-detect default + optional lock). **Verified:** `pnpm typecheck` (all pkgs) green; changed web files biome-clean. **Pending: user's manual local test** — normal run · cancel-after-storyboard (storyboard stays visible + done) · forced storyboard failure (no video).
+- **Any-Type Ad Expansion — chunked roadmap landed (planning; no feature code yet).** Added the **Any-Type Ad Expansion** Build Status section above: a 9-chunk plan (A–I) to grow the generator from 2 ad types to ANY auto-detected ad type via an ad-type registry + hook registry + 4 look families, with the reasoning/vision model swapped to **Claude Sonnet 4.6 via OpenRouter**. Built from the user's deep research in [`research/`](research/) (16 ad types, 16 hooks, single-call detector design, Seedance/gpt-image per-type prompting, the registry/skill restructure). Verified against live code: the OpenRouter/Claude path **already exists** (`providers/openai/index.ts:195-201`, `OPENROUTER_CLAUDE_MODEL="anthropic/claude-sonnet-4.6"`) but defaults to gpt-4.1 and disables `json_object` on Claude (`:201`) — so the detector uses a strict-JSON prompt + Zod, not provider `json_schema`; `adType` is a native pg enum (`schema.ts:76-79`) that must become `text` before new ids store. Cross-cutting hazards H1–H11 + per-chunk read-first files captured in the section above and in `.claude/plans/i-have-already-did-streamed-candy.md`. **Decisions:** full Claude flip in Chunk A (not staged); Chunk H = one branch/PR for all 14 new types (pause per type). **No critic work** (parked); **no ad-type selector UI** (classification is automatic). Implementing one chunk at a time, one checkbox per step, user manually testing each before commit/PR. Branch `feat/claude-reasoning-default` opens Chunk A.
 
 ### 2026-06-12
 

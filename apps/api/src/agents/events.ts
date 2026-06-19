@@ -7,7 +7,7 @@
 // Append-only audit row: a single insert, no transaction. `status` is
 // constrained to the four values the DB CHECK allows.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Step } from "@ugc/shared";
 import { db, schema } from "../db/index.js";
 import { notifyRunChanged } from "../lib/run-events.js";
@@ -57,4 +57,62 @@ export async function countRegenEvents(runId: string): Promise<number> {
       ),
     );
   return rows[0]?.value ?? 0;
+}
+
+/**
+ * The most recent `step_event` status for a given step on a run (null if the
+ * step never emitted one). Used as the AUTHORITATIVE per-step status — e.g. the
+ * `video` step refuses to run unless `storyboard` last emitted `passed`, so a
+ * failed/empty storyboard can never silently produce a video.
+ */
+export async function latestStepEventStatus(
+  runId: string,
+  step: Step,
+): Promise<StepEventStatus | null> {
+  const [row] = await db
+    .select({ status: schema.stepEvents.status })
+    .from(schema.stepEvents)
+    .where(and(eq(schema.stepEvents.runId, runId), eq(schema.stepEvents.step, step)))
+    .orderBy(desc(schema.stepEvents.createdAt))
+    .limit(1);
+  return (row?.status as StepEventStatus | undefined) ?? null;
+}
+
+/**
+ * On cancel: close out any step still "in flight" (its latest event is
+ * `started`, with no later terminal event) by writing a terminal `failed` event
+ * tagged with the cancel code. This stops the timeline showing a perpetually
+ * "running" step after a cancel. Steps that already completed (latest event
+ * `passed`) are left untouched — so cancelling AFTER a step finished keeps that
+ * step's `passed` status and its artifact. Returns the steps it closed.
+ *
+ * Writes the audit rows directly (no per-row SSE push); the caller pushes one
+ * `notifyRunChanged` after flipping the run status.
+ */
+export async function closeInFlightStepsOnCancel(
+  runId: string,
+  code = "RUN_CANCELLED",
+): Promise<Step[]> {
+  const rows = await db
+    .select({ step: schema.stepEvents.step, status: schema.stepEvents.status })
+    .from(schema.stepEvents)
+    .where(eq(schema.stepEvents.runId, runId))
+    .orderBy(desc(schema.stepEvents.createdAt));
+  // First row per step (rows are newest-first) = that step's latest status.
+  const latestByStep = new Map<Step, string>();
+  for (const r of rows) {
+    if (!latestByStep.has(r.step as Step)) latestByStep.set(r.step as Step, r.status);
+  }
+  const inFlight = [...latestByStep.entries()]
+    .filter(([, status]) => status === "started")
+    .map(([step]) => step);
+  for (const step of inFlight) {
+    await db.insert(schema.stepEvents).values({
+      runId,
+      step,
+      status: "failed",
+      payload: { error: "Run cancelled.", code },
+    });
+  }
+  return inFlight;
 }

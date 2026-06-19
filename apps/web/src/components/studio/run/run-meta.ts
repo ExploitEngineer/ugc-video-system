@@ -237,28 +237,30 @@ export function stepState(run: RunDetail, step: Step): StepState {
     return run.status === "regenerating" ? "regenerating" : "active";
   }
 
+  // Event-authoritative terminal status. Step events are the source of truth and
+  // OVERRIDE the run-level status (which describes the run as a whole). This is
+  // the cancel-bug fix: a PASSED step (e.g. a finished storyboard) stays "done"
+  // with its artifact even after the run is later cancelled/failed; a step closed
+  // out as failed (a genuine failure, or an in-flight step a cancel terminated)
+  // reads "failed" — never inheriting a neighbour's run-level state.
+  const hasFailed = events.some((e) => e.status === "failed");
+  // At a confirm-mode gate the current (passed) step carries the gate state.
+  if (idx === currentIdx && run.status === "awaiting_confirmation")
+    return "awaiting";
+  if (idx === currentIdx && run.status === "regenerating")
+    return "regenerating";
+  if (hasFailed) return "failed";
+  if (hasPassed) return "done";
+
+  // No terminal event for this step → fall back to run-level position/status.
+  // `currentStep` is the LAST COMPLETED step, so the checkpoint reads done while
+  // running; the next step only goes "active" once it writes its own `started`.
   if (idx === currentIdx) {
     if (run.status === "completed") return "done";
     if (run.status === "failed") return "failed";
-    if (run.status === "awaiting_confirmation") return "awaiting";
-    if (run.status === "regenerating") return "regenerating";
-    // `currentStep` is the LAST COMPLETED step — never the in-flight one. The
-    // genuinely-running step is resolved above via activeSteps() (step events).
-    // So while `running`, this checkpoint step is done; the next step only
-    // reads as "Generating" once the backend writes ITS `started` event. This
-    // is what stops a just-approved gate step (e.g. storyboard) from showing
-    // "Generating" while the backend is actually starting the next agent.
     return "done";
   }
-
-  if (idx < currentIdx || (hasPassed && run.status === "completed")) {
-    return "done";
-  }
-
-  // Steps already passed but not yet behind currentStep (e.g. while a later
-  // step is in flight) should read as done, not pending.
-  if (hasPassed) return "done";
-
+  if (idx < currentIdx) return "done";
   return "pending";
 }
 
