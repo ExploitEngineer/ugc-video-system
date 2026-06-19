@@ -77,6 +77,8 @@ async function renderStoryboard(
   const messages = buildStoryboardPrompt({
     adStyle: ctx.adStyle,
     adType: ctx.adType,
+    hooks: ctx.hooks,
+    hasProduct: Boolean(input.productSheetRef),
     productBrief: ctx.productBrief,
     productUse: ctx.productUse,
     personBrief: ctx.personBrief,

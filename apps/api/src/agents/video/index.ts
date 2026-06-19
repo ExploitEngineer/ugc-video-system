@@ -174,6 +174,8 @@ export async function videoBuilder(
     const messages = buildVideoPrompt({
       adStyle: ctx.adStyle,
       adType: ctx.adType,
+      hooks: ctx.hooks,
+      hasPerson: input.hasPerson,
       userPrompt: input.userPrompt,
       scenes: input.scenes,
       durationSec,

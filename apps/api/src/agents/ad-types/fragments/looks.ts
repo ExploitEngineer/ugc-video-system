@@ -36,6 +36,10 @@ const ugc_authentic: LookStrategy = {
   shotDirection: (_ctx) => [],
   pacing: (_ctx) => [],
   captionStyle: (_ctx) => [],
+  // VERBATIM-MOVE: image/storyboard/prompt.ts closing look clause (adType === "ugc").
+  closingLookClause: (_ctx) => [
+    "the authentic UGC phone-captured look (natural light, real setting, candid framing).",
+  ],
 };
 
 const cinematic_polished: LookStrategy = {
@@ -48,6 +52,8 @@ const cinematic_polished: LookStrategy = {
   shotDirection: (_ctx) => [],
   pacing: (_ctx) => [],
   captionStyle: (_ctx) => [],
+  // VERBATIM-MOVE: image/storyboard/prompt.ts closing look clause (else / inspirational).
+  closingLookClause: (_ctx) => ["the polished cinematic keyframe look."],
 };
 
 // NET-NEW look. No legacy source. Authored to match the graphic_text definition.
@@ -73,6 +79,9 @@ const graphic_text: LookStrategy = {
     "- Typography IS the visual: the on-frame words are the hero layer in bold",
     "  kinetic type, not a thin caption bar tucked at the bottom.",
   ],
+  closingLookClause: (_ctx) => [
+    "the bold motion-graphics / kinetic-typography look (clean designed frames, brand colour, no live footage).",
+  ],
 };
 
 // NET-NEW look. No legacy source. Authored to match the demo_clean definition.
@@ -96,6 +105,9 @@ const demo_clean: LookStrategy = {
   captionStyle: (_ctx) => [
     "- Minimal, clean sans captions stating ONE spec or benefit at a time; the",
     "  product, not the text, owns the frame.",
+  ],
+  closingLookClause: (_ctx) => [
+    "the clean studio/tabletop product look (crisp lighting, sharp product detail, uncluttered backdrop).",
   ],
 };
 
