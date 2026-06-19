@@ -217,8 +217,27 @@ export const createRunInputSchema = z.object({
   duration: durationSchema.default("15s"),
   criticEnabled: z.boolean(),
   hasPersonImage: z.boolean(),
+  /**
+   * Optional ad-type override (Chunk J). `"auto"` (or omitted) = let the
+   * detector classify; any other kebab id LOCKS the type (`ad_type_source` =
+   * `"user"`). Validated as an open string; an unknown id resolves via the
+   * registry fallback, never a hard reject.
+   */
+  adType: z.string().trim().optional(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
+
+/** One ad-type the create-form dropdown offers (GET /ad-types). */
+export const adTypeMenuItemSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  whenToUse: z.string(),
+  assetPolicy: z.object({
+    product: z.enum(["required", "optional", "forbidden"]),
+    person: z.enum(["required", "optional", "forbidden"]),
+  }),
+});
+export type AdTypeMenuItem = z.infer<typeof adTypeMenuItemSchema>;
 
 /**
  * Body for `POST /runs/:id/feedback` — the user's free-text reply at a
