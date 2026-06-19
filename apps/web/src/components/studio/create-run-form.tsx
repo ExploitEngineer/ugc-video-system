@@ -23,6 +23,13 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -412,8 +419,9 @@ function Field({
 }
 
 /** Ad-type dropdown — "Auto-detect" (default) + the registry's types. An
- *  explicit pick LOCKS the type; Auto runs the full detector. Native select so
- *  it scales cleanly from 2 to 16+ types. */
+ *  explicit pick LOCKS the type; Auto runs the full detector. Themed shadcn
+ *  DropdownMenu (not a native select) so the open list matches the dark theme;
+ *  scrolls and scales cleanly from 2 to 16+ types. */
 function AdTypeSelect({
   value,
   onChange,
@@ -423,23 +431,44 @@ function AdTypeSelect({
   onChange: (t: string) => void;
   options: AdTypeMenuItem[];
 }) {
+  const label =
+    value === "auto"
+      ? "Auto-detect"
+      : (options.find((o) => o.id === value)?.displayName ?? value);
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        title="Auto-detect reads the ad type from your prompt; pick one to lock it."
-        className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 focus:border-brand/50 w-full cursor-pointer appearance-none rounded-full border px-3 py-1.5 pr-8 text-xs font-medium outline-none transition-colors"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title="Auto-detect reads the ad type from your prompt; pick one to lock it."
+          className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors"
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        sideOffset={6}
+        className="ring-glow max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-2xl border-border/70"
       >
-        <option value="auto">Auto-detect</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id} title={o.whenToUse}>
-            {o.displayName}
-          </option>
-        ))}
-      </select>
-      <ChevronDownIcon className="pointer-events-none absolute top-1/2 right-2.5 size-3 -translate-y-1/2 opacity-60" />
-    </div>
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          <DropdownMenuRadioItem value="auto" className="text-xs">
+            Auto-detect
+          </DropdownMenuRadioItem>
+          {options.map((o) => (
+            <DropdownMenuRadioItem
+              key={o.id}
+              value={o.id}
+              title={o.whenToUse}
+              className="text-xs"
+            >
+              {o.displayName}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
