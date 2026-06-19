@@ -1,7 +1,7 @@
 // Runtime ad-type skill loader (the ai-ad-gen `skills.ts` pattern, per-seam).
 //
 // Each ad type's prompt-fragment prose is the SINGLE SOURCE OF TRUTH in its
-// `.claude/skills/ad-type-<id>/SKILL.md`, under a `## Runtime fragments` section
+// `ad-types/skills/<id>.skill.md`, under a `## Runtime fragments` section
 // whose `### <seamName>` fenced blocks hold the exact directive lines (one array
 // element per line, verbatim). This is loaded + parsed at RUNTIME (readFileSync
 // + cache + frontmatter-strip, mirroring ai-ad-gen) and the def's FragmentSet is
@@ -18,10 +18,10 @@ import { join } from "node:path";
 import { lookBase } from "./fragments/looks.js";
 import type { FragmentCtx, FragmentSet, LookFamily } from "./types.js";
 
-// apps/api/src/agents/ad-types → repo root (5 levels up). The api runs via tsx
-// on src (no bundle), so reading from the repo's .claude/skills at runtime works.
-const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..", "..");
-const SKILLS_DIR = join(REPO_ROOT, ".claude", "skills");
+// Skills are committed source next to this loader (ad-types/skills/<id>.skill.md),
+// the ai-ad-gen layout. The api runs via tsx on src (no bundle), so reading them
+// at runtime needs no copy step.
+const SKILLS_DIR = join(import.meta.dirname, "skills");
 
 type SeamMap = Partial<Record<keyof FragmentSet, string[]>>;
 const cache = new Map<string, SeamMap>();
@@ -63,7 +63,7 @@ function parseRuntimeFragments(body: string): SeamMap {
 export function loadAdTypeFragments(id: string): SeamMap {
   const cached = cache.get(id);
   if (cached) return cached;
-  const path = join(SKILLS_DIR, `ad-type-${id}`, "SKILL.md");
+  const path = join(SKILLS_DIR, `${id}.skill.md`);
   if (!existsSync(path)) {
     const empty: SeamMap = {};
     cache.set(id, empty);

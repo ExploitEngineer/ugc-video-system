@@ -5,7 +5,7 @@
 // product photography). TYPE-driven seams are authored here, concise + on-brand.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-product-showcase/SKILL.md
+//   apps/api/src/agents/ad-types/skills/product-showcase.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

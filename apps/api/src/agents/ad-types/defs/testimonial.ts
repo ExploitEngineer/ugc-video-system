@@ -6,7 +6,7 @@
 // the ugc_authentic look base.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-testimonial/SKILL.md
+//   apps/api/src/agents/ad-types/skills/testimonial.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

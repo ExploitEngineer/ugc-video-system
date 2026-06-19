@@ -6,7 +6,7 @@
 // moment rather than a glossy commercial.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-problem-agitate-solve/SKILL.md
+//   apps/api/src/agents/ad-types/skills/problem-agitate-solve.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

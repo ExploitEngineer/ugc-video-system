@@ -5,7 +5,7 @@
 // the LOOK-driven seams defer to the shared phone-captured base.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-unboxing/SKILL.md
+//   apps/api/src/agents/ad-types/skills/unboxing.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

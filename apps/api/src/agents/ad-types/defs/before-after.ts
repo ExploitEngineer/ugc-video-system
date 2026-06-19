@@ -10,7 +10,7 @@
 // after-forward framing instead. Do not soften that guard when revising.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-before-after/SKILL.md
+//   apps/api/src/agents/ad-types/skills/before-after.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

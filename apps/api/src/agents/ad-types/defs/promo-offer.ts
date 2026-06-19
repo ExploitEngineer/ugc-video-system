@@ -5,7 +5,7 @@
 // graphic_text base; TYPE-driven seams are authored to this offer-led, VO type.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-promo-offer/SKILL.md
+//   apps/api/src/agents/ad-types/skills/promo-offer.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";
