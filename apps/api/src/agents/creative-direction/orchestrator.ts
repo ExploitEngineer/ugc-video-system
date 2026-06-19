@@ -304,12 +304,15 @@ async function executeStep(
     }
 
     case "storyboard": {
+      // Product sheet is optional — no-product ad types (graphic-text manifestos,
+      // explainers, promos…) render text/graphics with no product reference.
       const product = await latestProductSheet(runId);
-      if (!product) throw new Error("no product sheet before storyboard");
       const personSheetRef = await resolvePersonRef(runId, personUpload);
       await writeStepEvent({ runId, step, status: "started" });
       const res = await imageAgent.storyboardGenerator(ctx, {
-        productSheetRef: { source: product.assetUrl, mime: "image/png" },
+        productSheetRef: product
+          ? { source: product.assetUrl, mime: "image/png" }
+          : undefined,
         personSheetRef,
         userPrompt,
         directive,
@@ -429,13 +432,12 @@ async function executeStep(
       //   • revise (directive) → rebuild the whole master and re-crop ALL N
       //     (newest-per-index supersedes the old crop rows; no deletes).
       const segCount = segmentCountFor(ctx.duration);
+      // Product sheet optional (no-product ad types render without it).
       const product = await latestProductSheet(runId);
-      if (!product) throw new Error("no product sheet before segment storyboards");
       const personSheetRef = await resolvePersonRef(runId, personUpload);
-      const productSheetRef: ImageRef = {
-        source: product.assetUrl,
-        mime: "image/png",
-      };
+      const productSheetRef: ImageRef | undefined = product
+        ? { source: product.assetUrl, mime: "image/png" }
+        : undefined;
 
       const haveMaster = await persistedMasterStoryboard(runId);
       const crops = await persistedSegmentStoryboardIndices(runId);

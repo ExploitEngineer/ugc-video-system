@@ -23,7 +23,8 @@ import {
 type StoryboardSheet = typeof schema.storyboardSheets.$inferSelect;
 
 export interface StoryboardInput {
-  productSheetRef: ImageRef;
+  /** Optional — absent for no-product ad types (graphic-text manifestos etc.). */
+  productSheetRef?: ImageRef;
   /** Present whether the person was uploaded or generated. */
   personSheetRef?: ImageRef;
   userPrompt: string;
@@ -134,7 +135,8 @@ async function renderStoryboard(
     : "";
   const imagePrompt = `${plan.imagePrompt}${captionDirective}`;
 
-  const refs: ImageRef[] = [input.productSheetRef];
+  const refs: ImageRef[] = [];
+  if (input.productSheetRef) refs.push(input.productSheetRef);
   if (input.personSheetRef) refs.push(input.personSheetRef);
 
   log.debug("✓ plan ready — generating image", {
@@ -190,7 +192,8 @@ export async function storyboardGenerator(
 
 /** Input for the multi-segment master sheet — one coherent N×4-panel scene. */
 export interface GenerateMasterInput {
-  productSheetRef: ImageRef;
+  /** Optional — absent for no-product ad types (graphic-text manifestos etc.). */
+  productSheetRef?: ImageRef;
   personSheetRef?: ImageRef;
   userPrompt: string;
   /** Confirm-mode storyboard-gate revise — applies to the whole master sheet. */

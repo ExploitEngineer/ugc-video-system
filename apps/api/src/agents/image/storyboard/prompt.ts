@@ -533,10 +533,11 @@ export function buildStoryboardPrompt({
     ...scriptGrounding,
     ...transcriptStyle,
     "",
-    ...useSequenceBlock,
-    "",
-    ...presentationBlock,
-    "",
+    // Product use-sequence + presentation blocks only when a product is present
+    // (no-product ad types skip them). With a product these are unchanged.
+    ...(fctx.hasProduct
+      ? [...useSequenceBlock, "", ...presentationBlock, ""]
+      : []),
     ...scriptStep,
     "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
     "  setting (a real, ordinary place that fits how THIS product is actually",

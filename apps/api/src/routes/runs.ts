@@ -23,6 +23,7 @@ import {
   getOpenAI,
   interpretFeedback,
 } from "../agents/creative-direction/index.js";
+import { getAdType } from "../agents/ad-types/registry.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
 import { db, schema } from "../db/index.js";
@@ -275,7 +276,11 @@ runs.post(
   async (c) => {
   const body = await c.req.parseBody();
 
-  const productImage = validateImage(body.productImage, "productImage", true);
+  // Product + person are BOTH optional uploads now — some ad types (graphic-text
+  // manifestos, explainers, promos…) need neither. The per-type requirement is
+  // enforced below for an explicit pick; person is never a required upload (it is
+  // synthesized when the type needs it).
+  const productImage = validateImage(body.productImage, "productImage", false);
   const personImage = validateImage(body.personImage, "personImage", false);
 
   const parsed = createRunInputSchema.safeParse({
@@ -305,22 +310,37 @@ runs.post(
   // leaves it null for full auto-detection.
   const userAdType = adType && adType !== "auto" ? adType : null;
 
-  // Normalize the person photo BEFORE any DB inserts (a 422 here must not
-  // leave an orphaned run): pad/clamp it into BytePlus's CreateAsset limits
-  // (aspect 0.4–2.5, height 300–6000) so the stored `person_upload` is always
-  // usable as a face asset. The product image is left untouched — it never
-  // reaches CreateAsset, and padding bars would leak into generated stills.
-  const productBytes = await fileToBytes(productImage as File);
-  // Verify the bytes really decode as an allowed image — the declared MIME is
-  // client-controlled and the product image is stored verbatim.
-  await assertImageBytes(productBytes, "productImage");
-  const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [
-    {
+  // Per-type asset requirement: an explicit pick whose policy REQUIRES a product
+  // must include one. Auto-detect stays permissive (the detector + reconcile
+  // handle whatever was uploaded — a product-required type with no product
+  // downgrades to a no-product type).
+  if (
+    userAdType &&
+    getAdType(userAdType).assetPolicy.product === "required" &&
+    !productImage
+  ) {
+    throw badRequest(
+      `The "${getAdType(userAdType).displayName}" ad type needs a product image.`,
+    );
+  }
+
+  // Build the upload set. Product is left untouched (it never reaches BytePlus
+  // CreateAsset, where padding bars would leak into stills). The person photo is
+  // normalized into CreateAsset's limits (aspect 0.4–2.5, height 300–6000) so the
+  // stored `person_upload` is always usable as a face asset. Done BEFORE any DB
+  // insert so a 422 here never leaves an orphaned run.
+  const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [];
+  if (productImage) {
+    const productBytes = await fileToBytes(productImage as File);
+    // Verify the bytes really decode as an allowed image — the declared MIME is
+    // client-controlled and the product image is stored verbatim.
+    await assertImageBytes(productBytes, "productImage");
+    uploads.push({
       kind: "product_upload",
       bytes: productBytes,
       mime: (productImage as File).type,
-    },
-  ];
+    });
+  }
   if (personImage) {
     const norm = await normalizePersonImage(
       await fileToBytes(personImage),
