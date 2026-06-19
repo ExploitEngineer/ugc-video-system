@@ -1,8 +1,8 @@
 // Structural guard so the executable defs and the authoring skill docs never
 // drift. Asserts:
 //   1. exact 1:1 set correspondence between defs/<id>.ts and
-//      .claude/skills/ad-type-<id>/  (no orphan on either side)
-//   2. each SKILL.md frontmatter `name` equals `ad-type-<id>`
+//      skills/<id>.skill.md  (no orphan on either side)
+//   2. each .skill.md frontmatter `name` equals `ad-type-<id>`
 //   3. each def file references its skill in a header comment (cross-link)
 //   4. each registered def implements every FragmentSet seam (returns string[])
 //   5. each registry id has a def file (registry ⇄ filesystem)
@@ -16,9 +16,8 @@ import { type AdTypeDef, type FragmentCtx, FRAGMENT_SEAMS } from "../types.js";
 
 const HERE = import.meta.dirname;
 const DEFS_DIR = path.resolve(HERE, "../defs");
-// __tests__ → ad-types → agents → src → api → apps → repo root.
-const REPO_ROOT = path.resolve(HERE, "../../../../../..");
-const SKILLS_DIR = path.resolve(REPO_ROOT, ".claude/skills");
+// Skills are committed source next to the loader: ad-types/skills/<id>.skill.md.
+const SKILLS_DIR = path.resolve(HERE, "../skills");
 
 const NON_DEF_FILES = new Set(["index.ts"]); // defs/ holds only <id>.ts files
 
@@ -34,13 +33,13 @@ function defIds(): string[] {
 function skillIds(): string[] {
   if (!fs.existsSync(SKILLS_DIR)) return [];
   return fs
-    .readdirSync(SKILLS_DIR, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && d.name.startsWith("ad-type-"))
-    .map((d) => d.name.replace(/^ad-type-/, ""));
+    .readdirSync(SKILLS_DIR)
+    .filter((f) => f.endsWith(".skill.md"))
+    .map((f) => f.replace(/\.skill\.md$/, ""));
 }
 
 function frontmatterName(skillId: string): string | null {
-  const p = path.join(SKILLS_DIR, `ad-type-${skillId}`, "SKILL.md");
+  const p = path.join(SKILLS_DIR, `${skillId}.skill.md`);
   if (!fs.existsSync(p)) return null;
   const src = fs.readFileSync(p, "utf8");
   const m = src.match(/^---\s*[\r\n]([\s\S]*?)[\r\n]---/);
@@ -72,7 +71,7 @@ describe("ad-types defs ⇄ skills are in sync", () => {
   it("every def file cross-links its skill in a header comment", () => {
     for (const id of defIds()) {
       const src = fs.readFileSync(path.join(DEFS_DIR, `${id}.ts`), "utf8");
-      expect(src).toContain(`.claude/skills/ad-type-${id}/SKILL.md`);
+      expect(src).toContain(`skills/${id}.skill.md`);
     }
   });
 

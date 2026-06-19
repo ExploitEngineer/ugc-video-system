@@ -7,7 +7,7 @@
 // function vs static hero glamour).
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-product-demo/SKILL.md
+//   apps/api/src/agents/ad-types/skills/product-demo.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

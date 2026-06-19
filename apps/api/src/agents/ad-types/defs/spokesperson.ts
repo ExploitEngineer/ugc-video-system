@@ -8,7 +8,7 @@
 // LOOK-driven seams defer to the shared cinematic_polished base.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-spokesperson/SKILL.md
+//   apps/api/src/agents/ad-types/skills/spokesperson.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

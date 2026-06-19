@@ -4,7 +4,7 @@
 // LOOK-driven seams defer to the shared `demo_clean` base.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-comparison/SKILL.md
+//   apps/api/src/agents/ad-types/skills/comparison.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

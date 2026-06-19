@@ -5,7 +5,7 @@
 // seams are authored to this typographic, VO-led manifesto type.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-brand-awareness/SKILL.md
+//   apps/api/src/agents/ad-types/skills/brand-awareness.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

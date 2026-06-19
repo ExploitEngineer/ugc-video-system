@@ -5,7 +5,7 @@
 // base; TYPE-driven seams are authored to this kinetic-typography, VO-led type.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-social-proof/SKILL.md
+//   apps/api/src/agents/ad-types/skills/social-proof.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

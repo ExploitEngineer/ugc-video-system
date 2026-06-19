@@ -6,7 +6,7 @@
 // graphic_text base; TYPE-driven seams are authored to this announcement type.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-announcement/SKILL.md
+//   apps/api/src/agents/ad-types/skills/announcement.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";

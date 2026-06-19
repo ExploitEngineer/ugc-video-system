@@ -7,7 +7,7 @@
 // authored to this informational, VO-led type.
 //
 // Companion skill doc (kept 1:1 by defs-skills-sync.test.ts):
-//   .claude/skills/ad-type-explainer/SKILL.md
+//   apps/api/src/agents/ad-types/skills/explainer.skill.md
 
 import type { AdTypeDef } from "../types.js";
 import { buildFragments } from "../skill-loader.js";
