@@ -219,6 +219,14 @@ export const runDetailSchema = runSchema.extend({
   adTypeDisplayName: z.string(),
   /** The resolved ad type's look family (server-mapped) — drives the spoken/voiceover label. */
   lookFamily: z.string(),
+  /**
+   * Reference steps the backend will NOT run for this run — deterministic from
+   * the resolved ad type's asset policy + which images were uploaded (a product
+   * sheet only comes from an upload; a person sheet only when uploaded OR
+   * required). The timeline renders these as "Skipped" immediately instead of
+   * flashing "Generating" during the parallel reference phase.
+   */
+  skippedSteps: z.array(stepSchema).default([]),
 });
 export type RunDetail = z.infer<typeof runDetailSchema>;
 
