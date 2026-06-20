@@ -143,7 +143,7 @@
     "displayName": "Before / After Tease",
     "psychPrinciple": "Contrast effect / transformation salience",
     "description": "Opens on a stark contrast between a 'before' state and the 'after' result, compressing the product's payoff into the first beat. This is the opening hook, distinct from the before-after ad type.",
-    "openingDirective": "Open with a hard cut or split-screen between the 'before' and the 'after' in the first 1–2 seconds — show the worse state, then snap to the improved result. Make the contrast unmistakable in one beat; the product need not be in frame, only the change.",
+    "openingDirective": "Open on the worse 'before' state, then in the very next beat snap to the improved 'after' result with a hard cut — keep each state in its OWN full frame, never a split-screen or two states crammed into one panel. Make the contrast unmistakable across the first 1–2 beats; the product need not be in frame, only the change.",
     "scriptToneNote": "Minimal words; let the visual contrast talk ('Watch this.').",
     "fitsAdTypes": {
       "good": ["before-after"],

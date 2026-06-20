@@ -112,6 +112,9 @@ to the product as it's revealed, building from sealed box to first verdict; each
 summary's spoken beat is a natural, reactive first-person line tied to that step
 of the reveal.
 
+### videoPacing
+(Overrides the look base.) Handheld phone, natural light: hold on the anticipation, move in for the open and the reveal close-up, then pull back as the product is held up. Genuine reaction energy, real cardboard/tape SFX, ambient room tone, no music.
+
 ## Notes
 
 This is a NET-NEW type (no `legacyMapping`). Keep the def and this doc in sync —
@@ -163,4 +166,10 @@ Audio: the on-screen person SPEAKS each line lip-synced in a natural, excited re
 
 ```
 Treatment: unboxing — across the four 15s segments a real person opens the just-arrived package on camera and reacts as the product is revealed: (1) sealed box held up, anticipation; (2) hands tearing/lifting it open; (3) the product emerges from the packaging to a genuine first reaction; (4) the product held close and turned, landing on an honest first verdict — never a sales close. Each segment's spoken beat is a natural, reactive first-person line tied to that step of the reveal, in the same voice throughout.
+```
+
+### videoPacing
+
+```
+- Handheld phone, natural light: hold on the anticipation, move in for the open and the reveal close-up, then pull back as the product is held up. Genuine reaction energy, real cardboard/tape SFX, ambient room tone, no music.
 ```

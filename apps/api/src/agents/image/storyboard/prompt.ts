@@ -262,7 +262,14 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // PANEL LABELS badge range — 01..N×4 vs 01..04.
+  // graphic_text panels ARE the finished ad frames (kinetic typography), so the
+  // production annotations (number badge + descriptive bottom caption bar) must
+  // NOT be burned in — they read as an unfinished "storyboard", not an ad, and
+  // then leak into the video. Every other look is a real storyboard sheet that
+  // keeps its badge + caption bar (the video step now strips them at render).
+  const cleanGraphic = def.lookFamily === "graphic_text";
+
+  // PANEL LABELS badge range — 01..N×4 vs 01..04. Suppressed for graphic_text.
   const labelBadge = isMaster
     ? [
         `- A scene-number BADGE in a top corner of each panel: 01 through ${lastBadge}, in`,
@@ -271,6 +278,39 @@ export function buildStoryboardPrompt({
     : [
         "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
         "  reading order. Small, clean, legible.",
+      ];
+
+  // Panel-labelling block — graphic_text gets clean finished frames (no badge,
+  // no caption bar); every other look keeps the storyboard badge + a SINGLE
+  // uniform caption-bar style across all panels (fixes per-panel colour drift).
+  const panelLabelBlock = cleanGraphic
+    ? [
+        "PANEL FRAMES — each of the 4 panels is a FINISHED, self-contained graphic",
+        "frame (broadcast-ready), separated only by thin plain gutters: NO number",
+        "badge, NO bottom caption bar, NO shot-type label, NO meta/description text.",
+        "The frame's OWN kinetic typography (headline, stat, code, CTA) is the only",
+        "text and must be rendered VERBATIM and perfectly legible. Add NO arrows,",
+        "callouts, timecodes, watermarks, framing brackets or panels-within-a-panel",
+        "— just the four clean designed frames.",
+      ]
+    : [
+        "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
+        ...labelBadge,
+        "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
+        "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
+        "  clean uppercase storyboard lettering — like the supplied example sheet.",
+        "- ALL FOUR caption bars share ONE identical style: the SAME single colour,",
+        "  opacity, height and font on every panel — never a different colour per",
+        "  panel. The badge and caption stay crisp and readable, never overlapping",
+        "  the subject's face or the product's markings.",
+        "Apart from the per-panel number badge and its caption bar, add NO other",
+        "graphics of ANY kind: no titles, subtitles, timecodes, motion or camera",
+        "ARROWS, callouts, hand-drawn marks, logos or watermarks, and NO stray boxes,",
+        "bars, rectangles, color blocks, framing brackets, vignettes or",
+        "panels-within-a-panel anywhere. Convey motion through the imagery itself",
+        "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
+        "uninterrupted photographs — the ONLY non-photographic marks on the whole",
+        "sheet are the four number badges and the four caption bars.",
       ];
 
   // Closing JSON-spec fragments (word budget, layout phrase, badge range, count).
@@ -312,21 +352,29 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // User-block "produce the script" line — N×4 vs 4.
-  const produceLine = isMaster
+  // User-block "produce the script" line — graphic clean frames vs N×4 vs 4.
+  const produceLine = cleanGraphic
     ? [
-        `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
-        "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
-        `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
-        `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
-        "and no arrows.",
+        "Review them, then produce the 4-scene script (each scene's on-frame text as",
+        "its panelCaption) and the composite sheet plan — exactly 4 FINISHED,",
+        "self-contained graphic frames in a 2×2 grid separated by thin gutters; NO",
+        "number badges, NO caption bars, NO arrows — each frame's own typography IS",
+        "the design.",
       ]
-    : [
-        "Review them, then produce the 4-scene script (with spoken transcripts and a",
-        "brief panelCaption per scene) and the composite storyboard-sheet plan —",
-        "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
-        "its panelCaption bar, in order; no other text and no arrows.",
-      ];
+    : isMaster
+      ? [
+          `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
+          "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
+          `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
+          `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
+          "and no arrows.",
+        ]
+      : [
+          "Review them, then produce the 4-scene script (with spoken transcripts and a",
+          "brief panelCaption per scene) and the composite storyboard-sheet plan —",
+          "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+          "its panelCaption bar, in order; no other text and no arrows.",
+        ];
 
   // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
   // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
@@ -345,10 +393,12 @@ export function buildStoryboardPrompt({
     ? [
         "THE PRODUCT IS (authoritative identity — this exact item, nothing else):",
         product,
-        "Every panel MUST show THIS product — the same category, form, materials,",
-        "colors and markings described above AND shown in the product sheet. If the",
-        "product sheet ever looks ambiguous, this text wins: never substitute a",
-        "different kind of item. State this product by name in the `imagePrompt`.",
+        "Every panel MUST show THIS product — the same category, form, materials and",
+        "markings described above AND shown in the product sheet. For exact COLOUR",
+        "and finish the attached product sheet is the sole authority: match its hues",
+        "precisely, never invent, restyle or shift the colour. If the sheet's KIND of",
+        "item ever looks ambiguous, this text wins: never substitute a different kind",
+        "of item. State this product by name in the `imagePrompt`.",
       ]
     : [];
 
@@ -450,7 +500,10 @@ export function buildStoryboardPrompt({
     "- TRUE-TO-LIFE SCALE & PLACEMENT: render it at real-world size relative to the",
     "  hand / body / face (a ring is finger-sized, glasses face-sized, a bottle",
     "  hand-sized), placed exactly where it naturally sits — worn on the correct",
-    "  body part or held in the hand.",
+    "  body part or held in the hand. Make it the hero by FRAMING THE SHOT CLOSE",
+    "  (a close or medium shot filling ~25-40% of the panel), NOT by enlarging the",
+    "  object beyond its real size — it must never float, dominate the frame or",
+    "  dwarf the hand/body that holds it.",
     "- Always the real, solid item from the product sheet — the bare product, the",
     "  ONLY instance in the panel; not a box, packaging, blister pack, pouch or an",
     "  unboxing, and not a print / photo / logo of it on a box, poster or screen.",
@@ -511,6 +564,41 @@ export function buildStoryboardPrompt({
   // Keyframe look — LOOK-driven fragment (registry dispatch). UGC reads as
   // authentic phone footage, cinematic as a polished commercial keyframe.
   const keyframeLook = def.fragments.storyboardKeyframeLook(fctx);
+
+  // The `imagePrompt` board-spec sentence. graphic_text drops the badge +
+  // caption-bar + product clauses (clean designed frames). Every other look
+  // keeps them and pins TRUE-TO-LIFE product scale by FRAMING CLOSE — not by
+  // enlarging the object — so the product reads as the hero without floating or
+  // dominating (the too-big / too-small failure).
+  const boardSpecBody = cleanGraphic
+    ? [
+        `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
+        "enough to be specific, but NOT a rule restatement. It MUST cover: the 2×2",
+        `four-panel layout with thin plain gutters at ${resolutionLabel}; each panel a`,
+        "FINISHED graphic frame with NO number badge and NO bottom caption bar, the",
+        "frame's own kinetic typography rendered VERBATIM and perfectly legible as the",
+        "design; and",
+        lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
+      ]
+    : [
+        `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
+        `enough to be specific, but NOT a rule restatement. It MUST cover: ${layoutPhrase}`,
+        `plain separator borders at ${resolutionLabel}; each panel's number badge`,
+        `${badgeRangePhrase} + a thin uppercase storyboard-style bottom caption bar`,
+        "(the EXACT caption text is appended after your prompt automatically — so",
+        "describe the bar's STYLE and placement only; do NOT write the caption words",
+        'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
+        "other text and NO arrows; the product worn / in real use as the real solid",
+        "item at TRUE real-world scale, FRAMED CLOSE so it reads as the clear hero —",
+        "NOT enlarged beyond its real size (never oversized, dominating, floating, a",
+        "box/packaging/unboxing, or duplicated); each panel showing the product in",
+        "its CORRECT causal state from",
+        hasUse
+          ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
+          : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
+        "and",
+        lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
+      ];
 
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
@@ -579,8 +667,10 @@ export function buildStoryboardPrompt({
     ...captionStyle,
     "- Keep the product (and the person, if present) faithfully consistent with",
     "  the attached reference sheets in EVERY panel — the SAME product with all",
-    "  its real markings, text and logos intact, the same person, same colors,",
-    "  materials and proportions. Do not restyle, garble, or invent product text.",
+    "  its real markings, text and logos intact, the same person, materials and",
+    "  proportions. The reference sheets are the COLOUR authority: match their",
+    "  exact hues and finish, never invent or shift the colour. Do not restyle,",
+    "  garble, or invent product text.",
     ...(hasPerson
       ? [
           "- PERSON: the attached PERSON SHEET IMAGE is the AUTHORITATIVE source for",
@@ -597,42 +687,13 @@ export function buildStoryboardPrompt({
         ]
       : []),
     "",
-    "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
-    ...labelBadge,
-    "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
-    "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
-    "  clean uppercase storyboard lettering — like the supplied example sheet.",
-    "- The badge and caption must be crisp and readable, never overlapping the",
-    "  subject's face or the product's markings.",
-    "Apart from the per-panel number badge and its caption bar, add NO other",
-    "graphics of ANY kind: no titles, subtitles, timecodes, motion or camera",
-    "ARROWS, callouts, hand-drawn marks, logos or watermarks, and NO stray boxes,",
-    "bars, rectangles, color blocks, framing brackets, vignettes or",
-    "panels-within-a-panel anywhere. Convey motion through the imagery itself",
-    "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
-    "uninterrupted photographs — the ONLY non-photographic marks on the whole",
-    "sheet are the four number badges and the four caption bars.",
+    ...panelLabelBlock,
     "",
     `Honor the ad style ("${style}") in framing, pacing, and mood.`,
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
-    `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
-    `enough to be specific, but NOT a rule restatement. It MUST cover: ${layoutPhrase}`,
-    `plain separator borders at ${resolutionLabel}; each panel's number badge`,
-    `${badgeRangePhrase} + a thin uppercase storyboard-style bottom caption bar`,
-    "(the EXACT caption text is appended after your prompt automatically — so",
-    "describe the bar's STYLE and placement only; do NOT write the caption words",
-    'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
-    "other text and NO arrows; the product worn / in real use as",
-    "the real solid item at TRUE real-world scale and correctly placed (never",
-    "oversized, dominating or floating; never a box/packaging/unboxing, never",
-    "duplicated); each panel showing the product in its CORRECT causal state from",
-    hasUse
-      ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
-      : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
-    "and",
-    lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
+    ...boardSpecBody,
     hasPerson
       ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? totalWordLower : "four"} panels, faithful to the person sheet.`
       : "",

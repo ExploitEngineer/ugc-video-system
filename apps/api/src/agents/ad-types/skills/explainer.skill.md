@@ -109,6 +109,9 @@ Explainer — a motion-graphics breakdown of how the product works or why it
 matters, built step by step with diagrams and kinetic type and carried by a clear
 teaching voiceover; each spoken beat narrates the on-frame explanation.
 
+### videoPacing
+(Overrides the look base.) Clean flat-design motion, NO camera: the problem line types in, then three labelled steps (or a simple diagram) enter in causal order with smooth eases, resolving on the payoff and CTA. Keep all text legible, light music bed, soft UI ticks.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -170,4 +173,10 @@ Audio: a friendly, teacherly real human VOICEOVER narrates each explanation line
 
 ```
 Treatment: explainer — a motion-graphics breakdown carried by a friendly teaching voiceover; segment 1 opens on the question/title card, segment 2 walks the labelled how-it-works steps, segment 3 reveals the WHY with a diagram/cutaway, segment 4 lands the clear takeaway and brand mark; no presenter, no real product footage — the spoken beat in each summary narrates the on-frame explanation.
+```
+
+### videoPacing
+
+```
+- Clean flat-design motion, NO camera: the problem line types in, then three labelled steps (or a simple diagram) enter in causal order with smooth eases, resolving on the payoff and CTA. Keep all text legible, light music bed, soft UI ticks.
 ```

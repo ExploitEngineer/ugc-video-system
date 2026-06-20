@@ -104,6 +104,9 @@ Announcement — a motion-graphics reveal of a single piece of news (launch, new
 feature, restock or partnership), carried by a confident voiceover, with no price
 or urgency; each spoken beat announces the on-frame news.
 
+### videoPacing
+(Overrides the look base.) Premium minimal kinetic type, NO camera: a teaser line fades in over high negative space with a slow build, the product name or date reveals on a light sweep, then the logo and a "Coming [date]" line lock center. Keep text crisp, cinematic ambient riser, one impact hit on the reveal.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -167,4 +170,10 @@ Audio: Voiceover (confident, premium announcer) announces each line off-screen (
 
 ```
 Treatment: announcement — a premium kinetic-typography reveal of ONE piece of news, carried by a confident announcer voiceover (or music-only), with NO price, discount, code or urgency (policy guard): 0-15s build intrigue, 15-30s drop the headline news, 30-45s state the single thing that makes it worth knowing, 45-60s land availability and the brand lockup; each summary's spoken beat is a voiceover line announcing the on-frame news.
+```
+
+### videoPacing
+
+```
+- Premium minimal kinetic type, NO camera: a teaser line fades in over high negative space with a slow build, the product name or date reveals on a light sweep, then the logo and a "Coming [date]" line lock center. Keep text crisp, cinematic ambient riser, one impact hit on the reveal.
 ```

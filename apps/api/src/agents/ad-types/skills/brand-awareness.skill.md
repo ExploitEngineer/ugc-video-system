@@ -107,6 +107,9 @@ Brand awareness / manifesto — a kinetic-typography statement of the brand's
 belief and values, no product demo and no presenter, carried by a confident
 voiceover; each spoken beat speaks the on-frame manifesto words.
 
+### videoPacing
+(Overrides the look base.) Bold expressive kinetic type, NO camera: short phrases animate in one at a time on the rhythm, scale and weight shift to build to the core slogan, then the logo resolves. Abstract shapes and textures only, keep every word legible, anthemic music bed.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -166,4 +169,10 @@ Audio: a real human VOICEOVER declares each manifesto line off-screen (there is 
 
 ```
 Treatment: brand awareness / manifesto — a kinetic-typography statement of the brand's belief carried across four segments with NO product and NO person on screen: open on a pattern-interrupting belief line, escalate the values through the middle two segments, and resolve on the brand wordmark + tagline; a resonant voiceover speaks the on-frame manifesto words verbatim over an anthemic music bed.
+```
+
+### videoPacing
+
+```
+- Bold expressive kinetic type, NO camera: short phrases animate in one at a time on the rhythm, scale and weight shift to build to the core slogan, then the logo resolves. Abstract shapes and textures only, keep every word legible, anthemic music bed.
 ```

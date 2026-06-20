@@ -99,6 +99,9 @@ Spokesperson / VSL — a scripted presenter delivers a polished, persuasive pitc
 straight to camera across the run, building from hook to offer to
 call-to-action; each spoken beat is a crisp, benefit-led scripted line.
 
+### videoPacing
+(Overrides the look base.) Polished medium shot, camera LOCKED for clean lip-sync (no head-turns during speech): confident open, hold steady through the scripted segments, end on a direct CTA. Soft three-point light, slightly blurred branded background, authoritative synced dialogue, faint music bed.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -123,6 +126,9 @@ AD TYPE — Spokesperson / VSL (a scripted host pitching straight to camera):
   blurred branded background, shallow depth of field; keep real skin texture
   (pores, fine detail) so the polish never reads waxy. Keep the presenter
   well-lit, well-framed and looking straight at the viewer across all panels.
+- When the presenter shows a phone or screen, their OWN thumb / finger physically
+  performs any interaction (tap, swipe, scroll) — the on-screen content never
+  scrolls, swipes or changes by itself.
 - Each scene's `transcript` is ONE scripted line the presenter says to camera in
   that panel — crisp, persuasive, benefit-led sales copy that flows as one
   continuous pitch (hook → benefit/proof → call-to-act). Keep each line short and
@@ -161,4 +167,10 @@ Audio: the on-screen presenter SPEAKS each line lip-synced in a confident, autho
 
 ```
 Treatment: spokesperson / VSL — a scripted presenter delivers a polished, persuasive pitch straight to camera across four segments: hook (grab attention, eye contact) → benefit (frame the value) → proof (back the claim) → call-to-action (drive the next step); the spoken beat in each summary is a crisp, benefit-led scripted line the presenter says to the lens in the SAME voice throughout.
+```
+
+### videoPacing
+
+```
+- Polished medium shot, camera LOCKED for clean lip-sync (no head-turns during speech): confident open, hold steady through the scripted segments, end on a direct CTA. Soft three-point light, slightly blurred branded background, authoritative synced dialogue, faint music bed.
 ```

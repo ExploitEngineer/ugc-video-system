@@ -98,6 +98,9 @@ Social proof — a motion-graphics montage of aggregated ratings, review quotes,
 counts and press logos, carried by a confident voiceover; each spoken beat reads
 the on-frame proof.
 
+### videoPacing
+(Overrides the look base.) Snappy beat-synced motion graphics, NO camera: star ratings animate in and fill, review cards slide and stack on the rhythm, then the aggregate stat locks center. Keep every number legible, upbeat music bed, soft UI ticks.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -157,4 +160,10 @@ Audio: a real human VOICEOVER (off-screen, NOT lip-synced) reads each proof line
 
 ```
 Treatment: social proof — a 60s 4-segment kinetic-typography montage carried by a confident voiceover: open on the strongest star rating, stack a wall of review quotes, hit the big aggregate count, then land the press-logo verdict + brand mark; each spoken beat reads the on-frame proof, NO presenter, NO live footage.
+```
+
+### videoPacing
+
+```
+- Snappy beat-synced motion graphics, NO camera: star ratings animate in and fill, review cards slide and stack on the rhythm, then the aggregate stat locks center. Keep every number legible, upbeat music bed, soft UI ticks.
 ```

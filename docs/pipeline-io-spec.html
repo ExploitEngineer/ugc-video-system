@@ -821,7 +821,7 @@
     <header>
       <div class="brand">
         <h1>Ad Video Pipeline</h1>
-        <span class="ver">I/O SPEC · v2 — verified vs code 2026-06</span>
+        <span class="ver">I/O SPEC · v3 — any-type + prompt-tuning · 2026-06</span>
       </div>
       <span class="dirty-dot" title="Unsaved edits"></span>
       <div class="search" id="searchWrap">
@@ -893,7 +893,7 @@
     </header>
 
     <div class="legend">
-      <span class="chip blue">gpt-4.1 · reason / vision</span>
+      <span class="chip blue">Claude Sonnet 4.6 (OpenRouter) · reason / vision</span>
       <span class="chip teal">gpt-image-2 · images</span>
       <span class="chip amber">Seedance 2.0 / BytePlus · video</span>
       <span class="chip gray">ffmpeg · merge / extract, no AI</span>
@@ -922,7 +922,7 @@
       "use strict";
       /* ================= data ================= */
       const SPEC_DEFAULT = {
-        title: "UGC / Inspirational Ad Pipeline",
+        title: "Any-Type Ad Video Pipeline",
         stages: [
           {
             n: "IN",
@@ -937,13 +937,15 @@
                 name: "REQUEST (multipart/form-data)",
                 rows: [
                   {
-                    t: "productImage (required) · personImage (optional) — PNG / JPEG / WebP ≤ 10MB",
+                    t: "productImage (optional — required only for product-required ad types) · personImage (optional) — PNG / JPEG / WebP ≤ 10MB",
+                    isNew: true,
                   },
                   {
                     t: "prompt (1–2000) · mode (automatic | confirm) · aspectRatio (16:9 | 9:16)",
                   },
                   {
-                    t: "duration (15s default | 30s | 45s | 60s) · criticEnabled (default false) · hasPersonImage",
+                    t: "adType (auto = detect from prompt | one of 16 ad types the user locks) · duration (15s default | 30s | 45s | 60s) · criticEnabled (default false) · hasPersonImage",
+                    isNew: true,
                   },
                 ],
               },
@@ -961,17 +963,22 @@
           {
             n: "1",
             color: "blue",
-            title: "interpretAdStyle",
-            sub: "gpt-4.1 · chat (JSON) · first tick of a queued run",
-            tag: "gpt-4.1",
+            title: "interpretAdStyle + detect ad type",
+            sub: "Claude Sonnet 4.6 (OpenRouter, gpt-4.1 fallback) · chat (JSON) · resolves ad type + hooks · first tick of a queued run",
+            tag: "CLAUDE 4.6",
             tagc: "blue",
             secs: [
-              { name: "IN", rows: [{ t: "userPrompt" }] },
+              { name: "IN", rows: [{ t: "userPrompt · user-locked adType?" }] },
               {
-                name: "OUT → runs.ad_style / runs.ad_type",
+                name: "OUT → runs.ad_style / ad_type / hooks",
                 rows: [
                   {
-                    t: "adStyle (text) · adType: ugc | inspirational — then status → running, current_step = null",
+                    t: "adStyle (text) · adType ∈ 16 types — auto-detected from the prompt (clamp + confidence-gate + reconcile), or the user's locked pick · ad_type_source = auto | user",
+                    isNew: true,
+                  },
+                  {
+                    t: "hooks { visualLead, overlay } resolved from the type's allowed set · adTypeConfidence — then status → running, current_step = null",
+                    isNew: true,
                   },
                 ],
               },
@@ -987,7 +994,7 @@
                 color: "blue",
                 title: "describeProduct",
                 sub: "gpt-4.1 (asks Claude Sonnet 4.6 via OpenRouter; gpt-4.1 fallback when OPENROUTER_API_KEY unset — current default) · VISION · best-effort (non-fatal)",
-                tag: "gpt-4.1",
+                tag: "CLAUDE 4.6",
                 tagc: "blue",
                 secs: [
                   {
@@ -1012,7 +1019,7 @@
                 color: "blue",
                 title: "planPersonBrief / derivePersonBrief",
                 sub: "gpt-4.1 · VISION — derivePersonBrief (uploaded person) asks Claude Sonnet 4.6 via OpenRouter, gpt-4.1 fallback when key unset",
-                tag: "gpt-4.1",
+                tag: "CLAUDE 4.6",
                 tagc: "blue",
                 secs: [
                   {
@@ -1043,7 +1050,7 @@
                 n: "3",
                 color: "teal",
                 title: "productSheetBuilder",
-                sub: "gpt-4.1 plan → gpt-image-2 · images.edit",
+                sub: "Claude 4.6 plan (retries once on unparseable JSON) → gpt-image-2 · images.edit · skipped when no product uploaded",
                 tag: "gpt-image-2",
                 tagc: "teal",
                 secs: [
@@ -1066,7 +1073,7 @@
                 n: "",
                 color: "teal",
                 title: "generatePersonImage",
-                sub: "gpt-image-2 · generate (invent) | edit (from-upload / edit-revise)",
+                sub: "gpt-image-2 · generate (invent) | edit (from-upload) · SKIPPED when the ad type needs no person & none uploaded — signaled up front via RunDetail.skippedSteps",
                 tag: "gpt-image-2",
                 tagc: "teal",
                 secs: [
@@ -1137,7 +1144,7 @@
             n: "5a",
             color: "teal",
             title: "storyboard",
-            sub: "gpt-4.1 plan → gpt-image-2 · images.edit · 15s only",
+            sub: "Claude 4.6 plan → gpt-image-2 · images.edit · per-type LOOK + neutralized cast · 15s only",
             tag: "gpt-image-2",
             tagc: "teal",
             secs: [
@@ -1153,15 +1160,18 @@
                 name: "IMAGE GEN (gpt-image-2 · images.edit)",
                 rows: [
                   {
-                    t: 'params — size 2K (2048×1152 / 1152×2048) · quality "high" · refs = product sheet (+ person sheet); these refs are the identity + realism source',
+                    t: 'params — size 2K (2048×1152 / 1152×2048) · quality "high" · refs = product sheet (+ person sheet) — the identity + realism source',
+                  },
+                  {
+                    t: "imagePrompt = per-TYPE block (runtime-loaded from agents/ad-types/skills/<id>.skill.md) + one of 4 LOOK families: ugc_authentic · cinematic_polished · graphic_text · demo_clean (real skin, neutral 5500-6000K WB, anti-AI render)",
                     isNew: true,
                   },
                   {
-                    t: "imagePrompt carries an adType-chosen look block — UGC LOOK (authentic phone-shot, true skin texture, NOT waxy/airbrushed AI face) vs CINEMATIC LOOK (storyboard/prompt.ts)",
+                    t: "non-graphic looks burn a UNIFORM bottom caption bar (storyboard/index.ts); graphic_text renders CLEAN finished frames — no 01–04 badges, no caption bars (caption-burn suppressed)",
                     isNew: true,
                   },
                   {
-                    t: "after the gpt-4.1 plan, a caption-burn directive is appended: letter each panel's panelCaption VERBATIM into its bottom bar (storyboard/index.ts)",
+                    t: "product framed CLOSE as the hero at true scale (not enlarged) · neutralizeCast (lib/image/color.ts) ±8%-capped gray-world correction pulls the gpt-image warm cast toward neutral before persist (PNG, best-effort)",
                     isNew: true,
                   },
                 ],
@@ -1170,7 +1180,8 @@
                 name: "OUT → assets(storyboard_sheet) + storyboard_sheets",
                 rows: [
                   {
-                    t: "labelled 2×2 keyframe PNG — badges 01–04 (kept out of frame downstream)",
+                    t: "labelled 2×2 keyframe PNG — badges 01–04 + a uniform caption bar (graphic_text: clean frames, no badges/bars); all annotations stripped at the video step",
+                    isNew: true,
                   },
                   {
                     t: "scenes[4] { index, cameraAngle, actionMovement, sceneDescription, panelCaption, transcript, adStyle } · segment_index = null",
@@ -1204,7 +1215,7 @@
             n: "6a",
             color: "amber",
             title: "video",
-            sub: "gpt-4.1 buildVideoPrompt → BytePlus submitVideo / pollVideo · Seedance 2.0 · 15s only",
+            sub: "Claude 4.6 buildVideoPrompt (look-aware) → BytePlus submitVideo / pollVideo · Seedance 2.0 · 15s only",
             tag: "SEEDANCE 2.0",
             tagc: "amber",
             secs: [
@@ -1213,7 +1224,8 @@
                 rows: [
                   { t: "product sheet — plain reference_image (product identity lock)" },
                   {
-                    t: "storyboard sheet — shot composition + timeline (asset:// when person present)",
+                    t: "storyboard sheet — LOOK reference; rides the asset:// path for ALL live-action looks so a synthetic human clears Seedance's input privacy filter (graphic_text stays a plain ref)",
+                    isNew: true,
                   },
                   {
                     t: "person face asset — asset://<id> (V4-signed) when hasPerson",
@@ -1227,7 +1239,11 @@
                     t: "scenes[] (sceneDescription + transcript) · userPrompt · characterAnchor?",
                   },
                   {
-                    t: "buildVideoPrompt (gpt-4.1) → ONE timestamped shot-list; then appended: role legend (@Image1 product · @Image2 storyboard · @Image3 face) + fixed negatives (avoid jitter, bent/distorted limbs, temporal flicker, identity drift)",
+                    t: "buildVideoPrompt (Claude 4.6) → ONE timestamped shot-list; storyboard = LOOK not timeline (annotations never rendered), camera HOLDS, product RIGID (one instance), ONE voice; graphic_text → kinetic typography (no live action)",
+                    isNew: true,
+                  },
+                  {
+                    t: "appended tail: role legend (@Image1 product · @Image2 storyboard · @Image3 face) + PER-LOOK negatives + --camerafixed true (anti-morph suffix; omitted for graphic_text)",
                     isNew: true,
                   },
                 ],
@@ -1257,7 +1273,7 @@
             n: "5b",
             color: "teal",
             title: "segment_storyboard · generateMaster",
-            sub: "ONE 4×N-panel master sheet → crop into N row strips · gpt-4.1 plan → gpt-image-2",
+            sub: "ONE 4×N-panel master sheet → crop into N row strips · Claude 4.6 plan → gpt-image-2 · shares the per-type LOOK + neutralized cast",
             tag: "gpt-image-2",
             tagc: "teal",
             secs: [
@@ -1316,7 +1332,7 @@
             n: "6b",
             color: "amber",
             title: "segment_video ×N",
-            sub: "parallel · cap = SEGMENT_VIDEO_CONCURRENCY (4) · idempotent — gpt-4.1 buildVideoPrompt → BytePlus · Seedance 2.0",
+            sub: "parallel · cap = SEGMENT_VIDEO_CONCURRENCY (4) · idempotent — Claude 4.6 buildVideoPrompt (look-aware) → BytePlus · Seedance 2.0",
             tag: "SEEDANCE 2.0",
             tagc: "amber",
             secs: [
@@ -1324,7 +1340,8 @@
                 name: "IMAGES — per segment i",
                 rows: [
                   {
-                    t: "this segment's storyboard crop — shot composition + timeline",
+                    t: "this segment's storyboard crop — LOOK reference (always rides the asset:// path: 60s segments are person-content)",
+                    isNew: true,
                   },
                   {
                     t: "SHARED product sheet (same ref in every segment → identity lock)",
@@ -1341,7 +1358,7 @@
                     t: "scenes[] (sceneDescription + transcript) · userPrompt · segmentIndex · segmentCount",
                   },
                   {
-                    t: 'buildVideoPrompt (gpt-4.1) adds continuity ("part i of N… keep SAME person/wardrobe/product/lighting") + otherSummaries; same legend + negatives appended as 15s',
+                    t: 'buildVideoPrompt (Claude 4.6) adds continuity ("part i of N… keep SAME person/wardrobe/product/lighting") + otherSummaries; same look-aware prompt + PER-LOOK negatives + --camerafixed tail as 15s',
                     isNew: true,
                   },
                 ],

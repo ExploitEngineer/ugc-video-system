@@ -111,6 +111,9 @@ Founder POV — the founder narrates their own origin and mission in first perso
 across the beats (insider "I/we" framing, sincere not salesy), each spoken beat
 a personal line moving the story from where it began to why the product matters.
 
+### videoPacing
+(Overrides the look base.) Cinematic medium shot on a subtle gimbal (not handheld), camera locked during the spoken lines for clean lip-sync: settle on eye contact, hold through the delivery, a gentle slow push-in to close. Soft directional key, shallow depth of field, sincere synced dialogue, sparse piano underscore.
+
 ## Notes
 
 The distinguishing signal across all seams is *insider authorship*: the voice
@@ -176,4 +179,10 @@ Audio: the founder SPEAKS each line in the SAME sincere human voice throughout (
 
 ```
 Treatment: Founder POV — across the four 15s segments the founder narrates their own origin and mission in first person (insider "I/we" framing, sincere not salesy, no hard-CTA close): seg 1 opens intimate to camera on who they are and the spark, seg 2 returns to the origin problem/belief that drove them, seg 3 shows what they built and the craft behind it, seg 4 lands on why it matters now — each spoken beat a short personal founder line in one consistent voice.
+```
+
+### videoPacing
+
+```
+- Cinematic medium shot on a subtle gimbal (not handheld), camera locked during the spoken lines for clean lip-sync: settle on eye contact, hold through the delivery, a gentle slow push-in to close. Soft directional key, shallow depth of field, sincere synced dialogue, sparse piano underscore.
 ```

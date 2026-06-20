@@ -76,6 +76,9 @@ The on-screen person SPEAKS each line lip-synced, mouth visible.
 ### narrativeTreatment
 UGC — a real person casually talking about the product the way they speak.
 
+### videoPacing
+(Overrides the look base.) Handheld iPhone micro-shake, eye-level medium shot held on the speaker; small natural head and hand movement, a gentle push-in to close. Natural light, synced lip dialogue, ambient room tone, no music.
+
 ## Notes
 
 Behaviour must remain byte-identical to the pre-refactor `ugc` path; do not
@@ -137,4 +140,10 @@ Audio: the on-screen person SPEAKS each line lip-synced in a natural, real human
 
 ```
 Treatment: UGC — a real person casually talking about the product the way they actually speak (not a scripted ad or review read). The spoken beat in each summary is a natural first-person line.
+```
+
+### videoPacing
+
+```
+- Handheld iPhone micro-shake, eye-level medium shot held on the speaker; small natural head and hand movement, a gentle push-in to close. Natural light, synced lip dialogue, ambient room tone, no music.
 ```

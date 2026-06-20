@@ -107,6 +107,9 @@ Product Showcase — a hero montage showing the product off with glamour shots a
 tight feature/benefit details, no story arc and no in-use steps; each spoken beat
 is a confident voiceover line naming one feature or benefit.
 
+### videoPacing
+(Overrides the look base.) ONE slow camera move per beat: a gentle orbit or push-in that reveals the product, then settle and HOLD the hero shot. Soft studio light, shallow depth of field, crisp product SFX under a subtle music bed.
+
 ## Notes
 
 Keep the showcase boundary sharp: the instant the brief implies the product
@@ -175,4 +178,10 @@ Audio: an off-screen VOICEOVER (a calm, confident announcer, measured pace) stat
 
 ```
 Treatment: Product Showcase — a glamour hero montage in four beats, no story arc and no in-use steps: open on the confident hero shot, move to a tight macro of the standout feature/texture, then a clean top-down or alternate angle, and resolve on a dramatic hero with the brand mark; each spoken beat is one short confident voiceover line naming a single feature or benefit.
+```
+
+### videoPacing
+
+```
+- ONE slow camera move per beat: a gentle orbit or push-in that reveals the product, then settle and HOLD the hero shot. Soft studio light, shallow depth of field, crisp product SFX under a subtle music bed.
 ```

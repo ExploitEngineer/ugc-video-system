@@ -12,6 +12,8 @@ import { padToProviderAspect } from "../../lib/image/normalize.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
+import { getAdType } from "../ad-types/registry.js";
+import { videoNegatives } from "../ad-types/fragments/looks.js";
 
 export interface VideoBuilderInput {
   /**
@@ -77,6 +79,21 @@ const DEFAULT_DURATION_SEC = 15;
 type Video = typeof schema.videos.$inferSelect;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Deterministic non-negative 31-bit seed from a string (FNV-1a). Used to derive
+ * a RUN-STABLE seed from the runId for multi-segment ads: every segment of one
+ * run hashes the SAME runId → the SAME seed, so the synthesized person/voice
+ * stay consistent across the merged clips, while different runs still vary.
+ */
+function stableSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % 2147483647;
+}
 
 /**
  * Make a person-reference URL safe for BytePlus `CreateAsset`, which rejects
@@ -242,7 +259,19 @@ export async function videoBuilder(
     // storyboard. Net numbering: product=1, storyboard=2, face=3 (each shifts
     // down by one when no product sheet is attached).
     const faceUrl = input.hasPerson ? input.personFaceRef?.source : undefined;
-    const storyboardIsPersonContent = input.hasPerson || isSegment;
+    // Any LIVE-ACTION storyboard can contain a real human, and a raw human
+    // image_url trips Seedance's input privacy filter
+    // (InputImageSensitiveContentDetected.PrivacyInformation). Person-OPTIONAL
+    // types (unboxing/lifestyle/PAS/brand-story) hit exactly this when no person
+    // sheet was generated and the board went out as a plain ref → the run failed
+    // PROVIDER_CONTENT_BLOCKED. Route EVERY non-graphic storyboard through the
+    // CreateAsset (asset://) path, which clears moderation; only flat graphic_text
+    // boards (never a person) stay on the cheaper raw path. @Image numbering is
+    // unchanged — boardNo derives from the product sheet, not from which array
+    // the board rides in.
+    const lookFamily = getAdType(ctx.adType).lookFamily;
+    const storyboardIsPersonContent =
+      input.hasPerson || isSegment || lookFamily !== "graphic_text";
 
     referenceImages = productUrl ? [productUrl] : [];
     personReferences = [];
@@ -283,15 +312,20 @@ export async function videoBuilder(
         `@Image${boardNo + 1} (the on-screen face) is the presenter — keep this exact face and identity for the entire shot`,
       );
     }
-    // Standard Seedance 2.0 negatives (per the prompting guide): a short,
-    // relevant set appended at the tail — jitter + bent limbs are the canonical
-    // motion artifacts; temporal flicker matters on ~15s clips; identity drift
-    // guards the face/product consistency this pipeline depends on. Kept to four
-    // (the guide warns too many negatives dull the result) and placed once here
-    // so BOTH the LLM and deterministic prompts carry them.
-    const negatives =
-      "Keep motion natural and physically stable: avoid jitter, avoid bent or distorted limbs, avoid temporal flicker, and avoid identity drift in the face or product.";
-    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}\n\n${negatives}`;
+    // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
+    // positive-rigidity phrasing). The negatives are tailored per look family
+    // (product morph vs warped hands vs identity drift vs garbled type), and
+    // `--camerafixed true` — Seedance's strongest anti-morph lever — is appended
+    // as a documented prompt SUFFIX (silently ignored if unsupported, so it can
+    // never 400 the request the way an unknown body field would). graphic_text
+    // has no camera, so it gets neither camerafixed nor the live-action wrapper.
+    const isGraphic = lookFamily === "graphic_text";
+    const negatives = videoNegatives(lookFamily);
+    const renderDirective = isGraphic
+      ? "Render clean animated motion-graphics frames (no people, no live footage, no camera). Reproduce the board's typography, layout and brand colour but NEVER render its panel-number badges, grid lines, borders or caption/description bars."
+      : "Render ONE continuous live-action take with no cuts. The storyboard is a LOOK reference — reproduce its framing and identity but NEVER render its panel-number badges, grid lines, split-screen dividers, before/after labels, borders or bottom caption bars.";
+    const cameraFixed = isGraphic ? "" : " --camerafixed true";
+    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
 
     const task = await ctx.video.submitVideo({
       referenceImages,
@@ -305,6 +339,11 @@ export async function videoBuilder(
       referenceTag: isSegment
         ? `${ctx.runId}-seg${input.segmentIndex}`
         : ctx.runId,
+      // Multi-segment runs share ONE run-stable seed (same runId → same seed)
+      // so the synthesized person/voice stay consistent across the merged
+      // clips. Single 15s clips omit it for per-run variety; the eval env seed
+      // still overrides either way (handled in the provider).
+      seed: isSegment ? stableSeed(ctx.runId) : undefined,
       prompt,
       durationSec,
       aspectRatio: ctx.aspectRatio,
@@ -459,7 +498,9 @@ export async function videoBuilder(
     const failure = classifyRunError(err, "VIDEO_GENERATION_FAILED");
     const raw = err instanceof Error ? err.message : String(err);
     const elapsedSec =
-      startedAt != null ? Math.round((Date.now() - startedAt) / 1000) : undefined;
+      startedAt != null
+        ? Math.round((Date.now() - startedAt) / 1000)
+        : undefined;
     // Self-contained ERR line: code + which task/clip + how far it got (taskId /
     // lastStatus / elapsedSec are undefined for failures before submit — fmtCtx
     // drops them). `seg` is already bound on the base logger.

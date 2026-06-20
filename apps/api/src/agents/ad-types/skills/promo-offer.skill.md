@@ -106,6 +106,9 @@ code), stacking the terms and urgency and driving hard to a call-to-action,
 carried by a confident, upbeat voiceover; each spoken beat calls out the on-frame
 offer.
 
+### videoPacing
+(Overrides the look base.) Fast-but-clean beat-synced kinetic type, NO camera (only the motion is fast): the offer slams in, supporting terms and a countdown tick in rhythmically, then the CTA and code lock center with a pulse. Keep the deal text and numbers legible, driving music, impact SFX.
+
 ## Runtime fragments
 
 Loaded at runtime by `skill-loader.ts`: each `### <seam>` fenced block holds the exact directive lines spliced into the prompt (one array element per line, verbatim).
@@ -168,4 +171,10 @@ Audio: a natural human VOICEOVER (high-energy announcer, the SAME voice througho
 
 ```
 Treatment: promo / offer — a 60s motion-graphics push built around ONE deal, no live presenter: Segment 1 SLAMS the headline saving as the hook; Segment 2 stacks the supporting terms and the promo code; Segment 3 ramps the urgency (deadline + countdown); Segment 4 lands the hard call-to-action; carried throughout by one confident, upbeat voiceover that calls out the on-frame offer.
+```
+
+### videoPacing
+
+```
+- Fast-but-clean beat-synced kinetic type, NO camera (only the motion is fast): the offer slams in, supporting terms and a countdown tick in rhythmically, then the CTA and code lock center with a pulse. Keep the deal text and numbers legible, driving music, impact SFX.
 ```

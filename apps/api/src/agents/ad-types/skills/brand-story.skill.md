@@ -68,6 +68,9 @@ A natural human VOICEOVER narrates each line (not lip-synced on screen).
 ### narrativeTreatment
 Inspirational — a cinematic scene carried by voiceover narration.
 
+### videoPacing
+(Overrides the look base.) Smooth gimbal or dolly, NEVER handheld: ONE flowing camera move per beat — a slow establishing dolly, smooth tracking through the human and product moments, rising to settle on the logo. Shallow depth of field, rich graded light, a swelling score under natural ambience.
+
 ## Notes
 
 Behaviour must remain byte-identical to the pre-refactor `inspirational` path.
@@ -116,4 +119,10 @@ Audio: a natural, real human VOICEOVER narrates each line (not lip-synced on scr
 
 ```
 Treatment: inspirational — a cinematic scene carried by voiceover narration. The spoken beat in each summary is a voiceover line.
+```
+
+### videoPacing
+
+```
+- Smooth gimbal or dolly, NEVER handheld: ONE flowing camera move per beat — a slow establishing dolly, smooth tracking through the human and product moments, rising to settle on the logo. Shallow depth of field, rich graded light, a swelling score under natural ambience.
 ```

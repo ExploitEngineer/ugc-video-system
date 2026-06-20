@@ -14,6 +14,8 @@ import { PANELS_PER_SEGMENT } from "../../creative-direction/narrative-outline/i
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
+import { getAdType } from "../../ad-types/registry.js";
+import { neutralizeCast } from "../../../lib/image/color.js";
 import {
   buildStoryboardPrompt,
   type StoryboardPlan,
@@ -125,14 +127,20 @@ async function renderStoryboard(
   // never sees the captions and letters its own invented (first-person) lines.
   // Append the real panelCaption strings so the authored shot-type captions are
   // the ones rendered into the bottom bars.
-  const captionDirective = plan.scenes.some((s) => s.panelCaption?.trim())
-    ? `\n\nBOTTOM CAPTION BARS — letter EXACTLY these strings into each panel's bottom bar, one per panel, VERBATIM, uppercase, in order; do NOT paraphrase, shorten, translate, rewrite in first person, merge, or invent different wording:\n${plan.scenes
-        .map(
-          (s, i) =>
-            `Panel ${String(i + 1).padStart(2, "0")}: "${(s.panelCaption ?? "").trim()}"`,
-        )
-        .join("\n")}`
-    : "";
+  // graphic_text sheets are clean finished frames with NO bottom caption bar
+  // (their own typography is the design), so the caption-burn directive is
+  // suppressed for them — otherwise the meta shot-description ("FULL-FRAME
+  // GRAPHIC. …") gets lettered into a bar and ruins the frame.
+  const cleanGraphic = getAdType(ctx.adType).lookFamily === "graphic_text";
+  const captionDirective =
+    !cleanGraphic && plan.scenes.some((s) => s.panelCaption?.trim())
+      ? `\n\nBOTTOM CAPTION BARS — letter EXACTLY these strings into each panel's bottom bar, one per panel, VERBATIM, uppercase, in order; do NOT paraphrase, shorten, translate, rewrite in first person, merge, or invent different wording:\n${plan.scenes
+          .map(
+            (s, i) =>
+              `Panel ${String(i + 1).padStart(2, "0")}: "${(s.panelCaption ?? "").trim()}"`,
+          )
+          .join("\n")}`
+      : "";
   const imagePrompt = `${plan.imagePrompt}${captionDirective}`;
 
   const refs: ImageRef[] = [];
@@ -143,7 +151,7 @@ async function renderStoryboard(
     scenes: plan.scenes.length,
     refs: refs.length,
   });
-  const { bytes, mime } = await ctx.openai.generateImage({
+  const { bytes: rawBytes, mime } = await ctx.openai.generateImage({
     prompt: imagePrompt,
     refs,
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
@@ -151,6 +159,10 @@ async function renderStoryboard(
     // product/label fidelity and per-panel sharpness ride directly into Seedance.
     quality: "high",
   });
+  // Pull the gpt-image warm cast back toward neutral (capped ±8%, PNG-preserving,
+  // best-effort) so the sheet — and the video it drives — reads true-to-life
+  // instead of the unrealistic orange tint. Returns PNG, so `mime` stays correct.
+  const bytes = await neutralizeCast(rawBytes);
   log.debug("✓ image generated", { bytes: bytes.length, mime });
   return { bytes, mime, scenes: plan.scenes, imagePrompt };
 }

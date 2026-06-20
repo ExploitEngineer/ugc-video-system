@@ -31,6 +31,9 @@ const ugc_authentic: LookStrategy = {
     "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
     "  sheets — only lighting, setting and framing read as real UGC, never",
     "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
+    "  Neutral 5500-6000K white balance, true-to-life colour, NO warm / sepia /",
+    "  orange cast. Every panel must look indistinguishable from a real candid",
+    "  phone photo — never a 3D render, a glossy commercial or a polished AI portrait.",
   ],
   // No legacy inline ternary for these seams → [] keeps the legacy path identical.
   shotDirection: (_ctx) => [],
@@ -46,8 +49,12 @@ const cinematic_polished: LookStrategy = {
   // VERBATIM-MOVE: image/storyboard/prompt.ts `keyframeLook` (else / inspirational).
   keyframeLook: (_ctx) => [
     "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
-    "  intentional lighting, rich color and depth, a still lifted straight from a",
-    "  high-end commercial.",
+    "  intentional lighting, rich colour and depth, shallow depth of field, a still",
+    "  lifted straight from a high-end commercial. Keep skin and faces PHOTOGRAPHIC",
+    "  with real texture (visible pores, fine lines) — never waxy, plastic, smoothed",
+    "  or over-retouched, never an uncanny AI face. True-to-life colour and a",
+    "  neutral white balance — no heavy warm / sepia / orange cast. It must read as",
+    "  a real photographed frame, not a 3D render or a glossy AI portrait.",
   ],
   shotDirection: (_ctx) => [],
   pacing: (_ctx) => [],
@@ -133,3 +140,25 @@ export const LOOKS: Record<LookFamily, LookStrategy> = {
 
 /** Convenience: get the LookStrategy base for a def's lookFamily. */
 export const lookBase = (family: LookFamily): LookStrategy => LOOKS[family];
+
+/**
+ * Per-LOOK Seedance negatives — short, failure-tied, positive-rigidity phrasing
+ * (Seedance follows positive constraints more reliably than failure-naming, and
+ * long negative lists get ignored). Appended ONCE to the final video prompt in
+ * `video/index.ts`, after the LLM (or deterministic) prompt body. Tailored per
+ * look family because the failure modes differ: product morph for studio/demo,
+ * warped hands for phone-shot UGC, identity drift for cinematic, garbled type
+ * for motion-graphics.
+ */
+export function videoNegatives(family: LookFamily): string {
+  switch (family) {
+    case "graphic_text":
+      return "Animated text and shapes only — no people, no live footage, no camera move; keep every word and number correct and perfectly legible, no garbled or duplicated letters; never render panel-number badges, grid lines, borders or caption bars.";
+    case "demo_clean":
+      return "The product stays rigid and dimensionally fixed — ONE single instance with identical silhouette, proportions, finish and printed markings in every frame; no duplicate or extra product, no morphing, no garbled label, no extra fingers; motion smooth and stable.";
+    case "ugc_authentic":
+      return "Keep ONE consistent real person and ONE product, identical in every frame; natural, stable motion; no warped or extra hands, no duplicated product, no on-screen text or captions.";
+    case "cinematic_polished":
+      return "Keep ONE consistent face and product identity, stable and rigid in every frame; smooth motion; no jitter, no identity drift, no warped face or product, no on-screen text.";
+  }
+}

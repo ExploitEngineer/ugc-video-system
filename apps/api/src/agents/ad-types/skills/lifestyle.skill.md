@@ -91,6 +91,9 @@ Lifestyle — a polished, aspirational real-life occasion with the product woven
 into the moment in genuine use, carried by voiceover; each spoken beat is a
 warm, observational voiceover line about the moment.
 
+### videoPacing
+(Overrides the look base.) Cinematic but smooth (gimbal, not jittery handheld): slow tracking to establish the moment with the product present, a warm close detail of it in use, then a satisfied beat on the soft end card. Shallow depth of field, sun-kissed grade, ambient real-world sound under a warm music bed.
+
 ## Notes
 
 NET-NEW type — no `legacyMapping`. Keep this doc and the def in sync: the
@@ -162,4 +165,10 @@ Audio: a natural human VOICEOVER narrates each line over the scene (off-screen, 
 
 ```
 Treatment: lifestyle — a polished, aspirational real-life occasion carried by voiceover across a 60s 4-segment arc: (1) establish the desirable everyday setting with the product naturally present; (2) the moment unfolds and the product enters genuine use; (3) the payoff feeling the occasion delivers, product clearly in context; (4) settle on a satisfied lived-in resolution and a soft brand end card. The product is required and stays the hero in genuine use throughout, never reviewed or hard-sold; each spoken beat is a warm, observational VO line about the moment.
+```
+
+### videoPacing
+
+```
+- Cinematic but smooth (gimbal, not jittery handheld): slow tracking to establish the moment with the product present, a warm close detail of it in use, then a satisfied beat on the soft end card. Shallow depth of field, sun-kissed grade, ambient real-world sound under a warm music bed.
 ```

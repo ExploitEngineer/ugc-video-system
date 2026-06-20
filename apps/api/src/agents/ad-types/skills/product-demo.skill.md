@@ -109,6 +109,9 @@ Product demo — a function-first walkthrough that shows the product being used
 step by step. Each summary advances one concrete step (setup → action → key
 feature → result); the spoken beat is a short voiceover label for that step.
 
+### videoPacing
+(Overrides the look base.) Locked or slow-dolly camera: hands perform the core action in real time, a smooth track to the visible result, then settle on the product at rest. Realistic physics, real interaction SFX (click, pour, snap).
+
 ## Notes
 
 Net-new type with no legacy mapping. Do not set `legacyMapping` in the def. Keep
@@ -174,4 +177,10 @@ Audio: a clear off-screen VOICEOVER (neutral, instructive, the SAME voice throug
 
 ```
 Treatment: product demo — a function-first walkthrough across four segments: (1) product at rest / setup, (2) hands begin the action, (3) the key feature or mechanism doing its job, (4) the visible end result; each spoken beat is a short voiceover label for that step, closing on the outcome, not a sales close.
+```
+
+### videoPacing
+
+```
+- Locked or slow-dolly camera: hands perform the core action in real time, a smooth track to the visible result, then settle on the product at rest. Realistic physics, real interaction SFX (click, pour, snap).
 ```

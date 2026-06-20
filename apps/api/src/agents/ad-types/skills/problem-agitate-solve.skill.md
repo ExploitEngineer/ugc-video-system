@@ -105,6 +105,9 @@ Problem-Agitate-Solve — a pain-first arc: early summaries dramatize and agitat
 named frustration, later summaries introduce the product as the resolution; each
 spoken beat is a voiceover line moving from problem to relief.
 
+### videoPacing
+(Overrides the look base.) Handheld, natural light with a cold-to-warm shift at the turn: slouched, frustrated framing on the pain, ONE hard cut to brighter upright energy as the product enters, then a relieved push-in to camera. Synced dialogue, ambient sound, no music.
+
 ## Notes
 
 Product is mandatory (it is the "solve"); never let the product appear before the
@@ -169,4 +172,10 @@ Audio: a real human VOICEOVER carries each line in the SAME voice throughout —
 
 ```
 Treatment: Problem-Agitate-Solve, 4 segments — (1) name the pain in a real everyday setting, (2) agitate it (cost, repeated hassle, failed workaround) so it stings, (3) introduce the PRODUCT as the turning point resolving that exact pain (POLICY GUARD: product never appears before the pain is established), (4) land the relieved better-after with the product visible; each spoken beat is a voiceover line moving frustrated→relieved across the arc.
+```
+
+### videoPacing
+
+```
+- Handheld, natural light with a cold-to-warm shift at the turn: slouched, frustrated framing on the pain, ONE hard cut to brighter upright energy as the product enters, then a relieved push-in to camera. Synced dialogue, ambient sound, no music.
 ```

@@ -115,6 +115,9 @@ before with the improved after driven by the product; each beat moves problem �
 payoff; body/skin/weight subjects stay positive and after-forward with no
 degrading split-screen.
 
+### videoPacing
+(Overrides the look base.) Identical locked framing on both halves: hold the BEFORE state, ONE clean cut or quick wipe at the midpoint, then the AFTER state with a slow push-in on the improvement. Even lighting, stable camera, a light whoosh on the transition.
+
 ## Notes
 
 High Meta-policy risk type — the after-forward guard is the load-bearing rule.
@@ -142,8 +145,10 @@ AD TYPE — Before / After (a visible RESULT contrast driven by the product):
   from upper-left, gentle contact shadow, accurate true colour, macro-sharp on
   product label and on the changed surface; no props, no clutter, no people
   required. Lock the product's exact label text, logo, colours and geometry.
-- Label the contrast panels 'BEFORE' / 'AFTER' as verbatim in-image text where
-  used; render any label exactly, no extra characters, no invented copy.
+- Do NOT burn 'BEFORE' / 'AFTER' heading text — or any title/label overlay —
+  into the panels. The contrast must read from the IMAGERY itself (the worse
+  state versus the improved result in identical framing); the only in-image text
+  is the product's own real label and the standard bottom caption bar.
 - META POLICY GUARD (mandatory, do NOT soften): do NOT depict human weight-loss,
   body, skin, anti-aging or wrinkle transformations, body-part close-ups, or any
   'implied transformation' (e.g. the product beside a fit/healthy person).
@@ -185,4 +190,10 @@ Audio: a natural human VOICEOVER narrates each line off-screen (not lip-synced o
 
 ```
 Treatment: before/after — a 4-segment voiceover arc: (1) establish the worse before state of the subject in the same clean framing; (2) the product enters and acts on it; (3) the improved after result lands in identical framing so the change reads; (4) product hero holds beside the result with the payoff line; each spoken beat is one voiceover line moving problem → payoff, and for any body/skin/weight subject stay positive and after-forward, restricting the contrast to product/object/surface results with no degrading before split-screen (Meta guard).
+```
+
+### videoPacing
+
+```
+- Identical locked framing on both halves: hold the BEFORE state, ONE clean cut or quick wipe at the midpoint, then the AFTER state with a slow push-in on the improvement. Even lighting, stable camera, a light whoosh on the transition.
 ```
