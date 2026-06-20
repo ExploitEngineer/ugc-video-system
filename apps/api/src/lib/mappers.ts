@@ -6,7 +6,7 @@
 // null), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
-import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
+import type { Asset, RunDetail, Scene, Step, StepEvent } from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
   hookSelectionSchema,
@@ -18,6 +18,10 @@ import {
 } from "@ugc/shared";
 import type { schema } from "../db/index.js";
 import { FALLBACK_AD_TYPE_ID, getAdType } from "../agents/ad-types/registry.js";
+import {
+  willGeneratePerson,
+  willGenerateProduct,
+} from "../agents/creative-direction/plan.js";
 import { createLogger } from "./log.js";
 
 type AssetRow = typeof schema.assets.$inferSelect;
@@ -165,6 +169,18 @@ export function toRunDetailDto(
     isMultiSegment(run.duration) && run.narrativeOutline != null
       ? (narrativeOutlineSchema.safeParse(run.narrativeOutline).data ?? null)
       : null;
+  // Reference steps that won't run — same predicates `runReferencePhase` uses to
+  // decide skipping, so the timeline's skip set always matches actual behavior.
+  const policy = getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).assetPolicy;
+  const assetCtx = {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: assets.some((a) => a.kind === "product_upload"),
+    hasPersonUpload: assets.some((a) => a.kind === "person_upload"),
+  };
+  const skippedSteps: Step[] = [];
+  if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
+  if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),
@@ -182,5 +198,6 @@ export function toRunDetailDto(
     // Registry-resolved display name + look family for the resolved adType.
     adTypeDisplayName: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).displayName,
     lookFamily: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).lookFamily,
+    skippedSteps,
   };
 }
