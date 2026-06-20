@@ -8,7 +8,7 @@ import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { type Logger, createLogger } from "../../lib/log.js";
-import { padToProviderAspect } from "../../lib/image/normalize.js";
+import { toProviderImage } from "../../lib/image/normalize.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
@@ -79,15 +79,14 @@ type Video = typeof schema.videos.$inferSelect;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Make a person-reference URL safe for BytePlus `CreateAsset`, which rejects
- * aspect ratios outside 0.4–2.5. Generated sheets/strips (which skip the upload
- * normalizer) occasionally drift out of band → `AspectRatioTooSmall/Large` and
- * the whole run fails before it even starts rendering. Pad a PROVIDER-ONLY copy
- * when needed (the stored original — reused as an OpenAI reference + shown in the
- * UI — stays untouched); in-band images and any fetch/encode hiccup fall back to
- * the original URL unchanged.
+ * Make a reference URL safe to hand to BytePlus/Seedance: (1) the pipeline now
+ * renders sheets as 4K WebP, which Seedance / `CreateAsset` don't accept, so we
+ * re-encode a PROVIDER-ONLY copy to JPEG; (2) `CreateAsset` also rejects aspect
+ * ratios outside 0.4–2.5, so generated sheets/strips are letterboxed into band.
+ * The stored original (reused as an OpenAI reference + shown in the UI) stays
+ * untouched; any fetch/encode hiccup falls back to the original URL unchanged.
  */
-async function providerSafeFaceUrl(
+async function providerSafeRefUrl(
   url: string,
   runId: string,
   kind: AssetKind,
@@ -98,20 +97,20 @@ async function providerSafeFaceUrl(
     if (!res.ok) return url;
     const bytes = new Uint8Array(await res.arrayBuffer());
     const mime = res.headers.get("content-type") ?? "image/png";
-    const norm = await padToProviderAspect(bytes, mime);
+    const norm = await toProviderImage(bytes, mime);
     if (!norm.adjusted) return url;
-    const { url: paddedUrl } = await uploadAsset({
+    const { url: safeUrl } = await uploadAsset({
       runId,
       kind,
       bytes: norm.bytes,
       contentType: norm.mime,
     });
-    log.info("padded face ref into provider aspect band", { kind });
-    return paddedUrl;
+    log.info("uploaded provider-safe (jpeg) ref copy", { kind });
+    return safeUrl;
   } catch (err) {
     // Never let a normalization hiccup mask the real generation — fall back to
-    // the raw URL and let CreateAsset speak if it's genuinely out of band.
-    log.warn("face-ref aspect normalization skipped", {
+    // the raw URL and let the provider speak if it genuinely can't read it.
+    log.warn("provider-safe ref conversion skipped", {
       kind,
       err: err instanceof Error ? err.message : String(err),
     });
@@ -242,28 +241,33 @@ export async function videoBuilder(
     const faceUrl = input.hasPerson ? input.personFaceRef?.source : undefined;
     const storyboardIsPersonContent = input.hasPerson || isSegment;
 
-    referenceImages = productUrl ? [productUrl] : [];
+    // Every Seedance-bound ref must be JPEG (the stored sheets are 4K WebP, which
+    // Seedance / CreateAsset reject) and within the CreateAsset aspect band. This
+    // re-encodes a PROVIDER-ONLY copy per ref; the stored WebP sheets (OpenAI ref
+    // + UI) stay untouched. Order/count are preserved so the @Image legend holds.
+    const productSafe = productUrl
+      ? await providerSafeRefUrl(productUrl, ctx.runId, "product_sheet", log)
+      : undefined;
+    const storyboardSafe = await providerSafeRefUrl(
+      storyboardUrl,
+      ctx.runId,
+      "storyboard_sheet",
+      log,
+    );
+    const faceSafe = faceUrl
+      ? await providerSafeRefUrl(faceUrl, ctx.runId, "person_sheet", log)
+      : undefined;
+
+    referenceImages = productSafe ? [productSafe] : [];
     personReferences = [];
     if (storyboardIsPersonContent) {
-      // Person refs ride the CreateAsset path (aspect 0.4–2.5) — pad a provider
-      // copy first so a stray generated dimension can't fail the run. Order +
-      // count are preserved, so the @Image legend below stays correct.
-      personReferences.push(
-        await providerSafeFaceUrl(
-          storyboardUrl,
-          ctx.runId,
-          "storyboard_sheet",
-          log,
-        ),
-      );
-      if (faceUrl) {
-        personReferences.push(
-          await providerSafeFaceUrl(faceUrl, ctx.runId, "person_sheet", log),
-        );
-      }
+      // Person refs ride the CreateAsset path (aspect 0.4–2.5); the storyboard
+      // (and face) go here. Order + count preserved so the @Image legend holds.
+      personReferences.push(storyboardSafe);
+      if (faceSafe) personReferences.push(faceSafe);
     } else {
       // Plain reference_image (raw image_url, no CreateAsset) — no aspect limit.
-      referenceImages.push(storyboardUrl);
+      referenceImages.push(storyboardSafe);
     }
 
     const boardNo = productUrl ? 2 : 1;
@@ -281,15 +285,16 @@ export async function videoBuilder(
         `@Image${boardNo + 1} (the on-screen face) is the presenter — keep this exact face and identity for the entire shot`,
       );
     }
-    // Standard Seedance 2.0 negatives (per the prompting guide): a short,
-    // relevant set appended at the tail — jitter + bent limbs are the canonical
-    // motion artifacts; temporal flicker matters on ~15s clips; identity drift
-    // guards the face/product consistency this pipeline depends on. Kept to four
-    // (the guide warns too many negatives dull the result) and placed once here
-    // so BOTH the LLM and deterministic prompts carry them.
+    // Positive rigidity phrasing — Seedance follows positive constraints more
+    // reliably than failure-naming negatives, and long negative lists get ignored
+    // (kept short). Placed once here so BOTH the LLM + deterministic prompts carry it.
     const negatives =
-      "Keep motion natural and physically stable: avoid jitter, avoid bent or distorted limbs, avoid temporal flicker, and avoid identity drift in the face or product.";
-    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}\n\n${negatives}`;
+      "The product stays rigid and dimensionally fixed — its silhouette, proportions and printed markings identical in every frame. Keep the face and product identity constant; motion is smooth, slow and physically stable.";
+    // --camerafixed locks the camera — Seedance's strongest anti-morph lever (a
+    // free camera + large moves are the main triggers of product warping). Sent as
+    // the documented prompt suffix (silently ignored if unsupported, so it can't
+    // 400 the request the way an unknown body field might).
+    prompt = `${roles.join(". ")}. Render ONE continuous live-action shot showing only the clean live scene (no grid, badges, caption bars, labels or text).\n\n${videoPrompt}\n\n${negatives} --camerafixed true`;
 
     const task = await ctx.video.submitVideo({
       referenceImages,

@@ -123,7 +123,7 @@ export function buildVideoPrompt(input: {
     hasProductSheet
       ? "@Image 1 is the product — keep its exact shape, colour, finish and markings identical in every shot"
       : "",
-    `${boardImg} is the film storyboard — a 2×2 grid of four keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4); follow the panels in order, one per time slice`,
+    `${boardImg} is the film storyboard — a 2×2 grid of four keyframe panels showing the intended LOOK, framing, product and person for the four beats; use it as the visual/identity reference (match its look), NOT as a timeline — the beat ORDER comes from the timestamped slices`,
     hasPresenter
       ? `${faceImg} is the on-screen person — keep this exact face and identity throughout`
       : "",
@@ -154,16 +154,17 @@ export function buildVideoPrompt(input: {
   const system = [
     "You are a prompt writer for Seedance 2.0, a multi-shot AI video model.",
     `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${ugc ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
-    `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4). Panel N is the keyframe for time slice N — follow them in order. Render ONE continuous live-action shot; NEVER show the grid, panel borders, badges or caption text — they are direction only.`,
+    `A film storyboard is attached as ${boardImg}: a 2×2 grid of four keyframe panels showing the intended LOOK, framing, product and person for the four beats. Use it as the visual + identity reference (match its look and design); it is NOT a timeline and must NEVER appear in the output (no grid, panel borders, badges or captions).`,
+    "The TIMELINE comes from the timestamped slices below, NOT from the grid. Render ONE continuous live-action take with NO cuts — the beats flow smoothly into one another (no jump-cuts, no scene jumps).",
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
       ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
       : "",
-    "FORMAT — return EXACTLY this shape as ONE single-line string:",
-    `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
-    "For EACH slice: ONE plain sentence — the subject, the action/motion in that panel, and ONE camera move (static, pan, tilt, dolly, push or tracking). Concrete and short; say what the product visibly DOES so it reads as genuinely working. Any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
+    "FORMAT — return ONE single-line string of this shape:",
+    `"One continuous live-action take, no cuts. The product stays rigid and dimensionally fixed — its shape, colour, finish and printed markings identical in every frame. ${exampleSlices}. Match the look, palette and design of the reference; no grid, panels, captions or text."`,
+    "For EACH slice: ONE plain sentence — the subject and the action in that beat. The CAMERA mostly HOLDS steady; describe the subject's/product's motion within the frame, kept SLOW and physically stable (avoid fast or large movement — it warps the product). Say what the product visibly DOES so it reads as genuinely working; any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
     audioLine,
-    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT and front-loaded; lean on the attached images for look and identity instead of re-describing them. No on-screen text, captions or watermark.`,
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT (~one short sentence per slice); lean on the attached images for look and identity instead of re-describing them. Put the render constraints (no on-screen text, captions or watermark) at the END.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
@@ -269,9 +270,9 @@ export function buildDeterministicVideoPrompt(input: {
     ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, the same voice throughout, mouth visible while speaking; light room ambience, no music.`
     : `Audio: ${voice} narrates each line as voiceover, the same voice throughout; a light score is allowed.`;
   return (
-    `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4), one per time slice in order. Render ONE continuous, photorealistic live-action ad in the "${adStyle}" style; show only the clean live scene (no grid, badges or captions). ${productPin}${presenterPin}` +
+    `One continuous live-action take, no cuts, photorealistic, in the "${adStyle}" style. ${boardRef} is the film storyboard (a 2×2 grid of four keyframe panels) — match its look, framing, product and person, but show only the clean live scene (no grid, badges or captions). The product stays rigid — its shape, colour, finish and markings identical in every frame. ${productPin}${presenterPin}` +
     `${shots}. ` +
     `Show the product genuinely working (its real motion); any prep comes in an earlier slice and its changed state persists. ${audio} ` +
-    `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME person and product across all beats. No on-screen text, captions or watermark${ugc ? "; no background music" : ""}.`
+    `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME person and product across all beats; the camera mostly holds steady and all motion stays slow. No on-screen text, captions or watermark${ugc ? "; no background music" : ""}.`
   );
 }

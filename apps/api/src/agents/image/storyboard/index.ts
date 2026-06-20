@@ -6,6 +6,7 @@
 // (c) persist: storage → assets(storyboard_sheet) → storyboard_sheets
 
 import { schema } from "../../../db/index.js";
+import { neutralizeCast } from "../../../lib/image/color.js";
 import { createLogger } from "../../../lib/log.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
 import { IMAGE_SIZE_BY_RATIO } from "../../../providers/openai/constants.js";
@@ -132,6 +133,11 @@ async function renderStoryboard(
     : "";
   const imagePrompt = `${plan.imagePrompt}${captionDirective}`;
 
+  // Product sheet FIRST: gpt-image-2 retains the richest detail/texture from the
+  // FIRST reference image. The PRODUCT (its printed markings + true geometry) is
+  // the fragile asset; the person's face survives the second slot reliably (it
+  // read fine there before), so the product wins the high-fidelity first slot.
+  // (Round-2 research finding — product-second was garbling labels/markings.)
   const refs: ImageRef[] = [input.productSheetRef];
   if (input.personSheetRef) refs.push(input.personSheetRef);
 
@@ -139,7 +145,7 @@ async function renderStoryboard(
     scenes: plan.scenes.length,
     refs: refs.length,
   });
-  const { bytes, mime } = await ctx.openai.generateImage({
+  const { bytes: rawBytes, mime } = await ctx.openai.generateImage({
     prompt: imagePrompt,
     refs,
     size: IMAGE_SIZE_BY_RATIO[ctx.aspectRatio],
@@ -147,7 +153,13 @@ async function renderStoryboard(
     // product/label fidelity and per-panel sharpness ride directly into Seedance.
     quality: "high",
   });
-  log.debug("✓ image generated", { bytes: bytes.length, mime });
+  // Mildly neutralize gpt-image's warm cast on the final keyframes (capped, safe).
+  const bytes = await neutralizeCast(rawBytes);
+  log.debug("✓ image generated", {
+    raw: rawBytes.length,
+    bytes: bytes.length,
+    mime,
+  });
   return { bytes, mime, scenes: plan.scenes, imagePrompt };
 }
 
