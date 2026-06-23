@@ -1,7 +1,7 @@
 // The ad-type registry. A plain `Record<string, AdTypeDef>` (NOT keyed by a
 // closed union) plus `getAdType(id)` which:
-//   - resolves legacy persisted ids ("ugc" → "testimonial",
-//     "inspirational" → "brand-story") so old runs keep working unchanged,
+//   - resolves the legacy persisted id "ugc" → "testimonial" so old runs keep
+//     working unchanged ("inspirational" is now its own registered id),
 //   - falls back to a default def when the id is unknown, so widening the type
 //     set never crashes a lookup and never requires an exhaustive switch.
 
@@ -9,6 +9,7 @@ import type { AdTypeDef } from "./types.js";
 
 import { testimonial } from "./defs/testimonial.js";
 import { brandStory } from "./defs/brand-story.js";
+import { inspirational } from "./defs/inspirational.js";
 import { productShowcase } from "./defs/product-showcase.js";
 import { productDemo } from "./defs/product-demo.js";
 import { beforeAfter } from "./defs/before-after.js";
@@ -35,7 +36,8 @@ export { adTypeIdSchema } from "@ugc/shared";
 // ---------------------------------------------------------------------------
 const ALL_DEFS: AdTypeDef[] = [
   testimonial, // legacyMapping: "ugc"
-  brandStory, // legacyMapping: "inspirational"
+  brandStory,
+  inspirational, // legacyMapping: "inspirational"
   productShowcase,
   productDemo,
   beforeAfter,
@@ -56,18 +58,18 @@ export const REGISTRY: Readonly<Record<string, AdTypeDef>> = Object.freeze(
   Object.fromEntries(ALL_DEFS.map((d) => [d.id, d])),
 );
 
-// The default the lookup falls back to for unknown ids. `brand-story` is the
-// most permissive filmed type (product optional, person optional) and is the
-// home of legacy `inspirational`, so an unrecognised id degrades to the safest
-// open-ended treatment rather than a product- or person-required one.
+// The default the lookup falls back to for unknown ids. `brand-story` is a
+// permissive filmed type (product optional, person optional), so an unrecognised
+// id degrades to a safe open-ended treatment rather than a product- or
+// person-required one.
 export const FALLBACK_AD_TYPE_ID = "brand-story";
 
 // Legacy persisted values → current ids. Applied before lookup so existing
-// `runs.ad_type` rows written as "ugc"/"inspirational" resolve correctly and
-// behaviour stays byte-identical for them.
+// `runs.ad_type` rows written as "ugc" still resolve. "inspirational" is now a
+// real registered id (its own def), so it needs no alias — old rows written as
+// "inspirational" resolve straight to the inspirational def.
 const LEGACY_ALIASES: Readonly<Record<string, string>> = {
   ugc: "testimonial",
-  inspirational: "brand-story",
 };
 
 /**

@@ -21,11 +21,12 @@ describe("clampAdType", () => {
   it("passes a canonical id through", () => {
     expect(clampAdType("testimonial", true)).toBe("testimonial");
     expect(clampAdType("brand-story", false)).toBe("brand-story");
+    // `inspirational` is now its own registered id, not an alias.
+    expect(clampAdType("inspirational", false)).toBe("inspirational");
   });
 
   it("resolves a legacy alias to its canonical id", () => {
     expect(clampAdType("ugc", true)).toBe("testimonial");
-    expect(clampAdType("inspirational", false)).toBe("brand-story");
   });
 
   it("snaps a near-miss (edit distance ≤2) to the registered id", () => {

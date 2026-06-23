@@ -25,6 +25,8 @@ export interface InterpretAdStyleInput {
   hasPerson: boolean;
   productBrief?: string;
   personBrief?: string;
+  /** Unresolved bracket placeholders in the prompt (Fix 8); empty when none. */
+  unresolvedPlaceholders?: string[];
 }
 
 /** The detector's result after parse + early adType clamp (pre-reconcile). */
@@ -35,6 +37,8 @@ export interface DetectedPlan {
   confidence: number; // 0–1
   assetIntent: AdStylePlan["assetIntent"];
   rationale: string;
+  topCandidates: string[]; // Fix 9: top-2 near-miss ids when confidence < 0.8
+  inventedValues: string[]; // Fix 8: values invented for unresolved placeholders
 }
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n));
@@ -52,6 +56,7 @@ export async function interpretAdStyle(
     adTypeMenu: renderAdTypeMenu(),
     hookMenu: renderHookMenu(),
     confusableRules: CONFUSABLE_RULES,
+    unresolvedPlaceholders: input.unresolvedPlaceholders,
   });
 
   // Two attempts; a Zod/JSON failure is treated as a model error (retry once,
@@ -78,6 +83,8 @@ export async function interpretAdStyle(
       confidence: 0,
       assetIntent: { product: "unclear", person: "unclear" },
       rationale: "",
+      topCandidates: [],
+      inventedValues: [],
     };
   }
 
@@ -88,5 +95,8 @@ export async function interpretAdStyle(
     confidence: clamp01(plan.confidence),
     assetIntent: plan.assetIntent,
     rationale: (plan.rationale ?? "").trim(),
+    // Surface near-miss candidates only when the model was actually unsure.
+    topCandidates: clamp01(plan.confidence) < 0.8 ? plan.topCandidates : [],
+    inventedValues: plan.inventedValues,
   };
 }

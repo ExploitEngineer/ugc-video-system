@@ -149,6 +149,11 @@ the on-screen person
   confident, benefit-led and persuasive (not casual peer chat), driving toward
   the action — short and punchy (~5-10 words), still natural enough to perform
   out loud, the lines flowing together as one continuous pitch.
+- Even when polished, talk like a real person: use contractions (you'll, it's,
+  we're), and NEVER read a statistic, price, percentage or URL aloud — those go
+  on-screen as text.
+- BAD: "Experience unparalleled, revolutionary performance today." GOOD: "You'll
+  feel the difference by tomorrow morning — I mean it."
 ```
 
 ### videoVoice

@@ -4,12 +4,15 @@
 // block, all `cinematic_polished` types share one polished block, etc.
 //
 // Provenance:
-//   ugc_authentic       — keyframeLook is VERBATIM from the storyboard UGC branch
-//                         (legacy `ugc` look). The other LOOK seams had no inline
-//                         legacy ternary, so they return [] (no-op) to keep the
-//                         legacy path byte-identical.
-//   cinematic_polished  — keyframeLook is VERBATIM from the storyboard
-//                         inspirational branch (legacy `inspirational` look).
+//   ugc_authentic       — keyframeLook began VERBATIM from the storyboard UGC
+//                         branch (legacy `ugc` look); a photoreal-skin block was
+//                         APPENDED (Fix 3) and the legacy fixtures re-baselined,
+//                         so it is no longer byte-identical to the pre-refactor
+//                         string. The other LOOK seams had no inline legacy
+//                         ternary, so they return [] (no-op).
+//   cinematic_polished  — keyframeLook began VERBATIM from the storyboard
+//                         inspirational branch (legacy `inspirational` look); the
+//                         same photoreal-skin block was APPENDED (Fix 3).
 //   graphic_text        — NET-NEW. No legacy string exists; authored from the
 //                         look definition (kinetic typography, no live footage).
 //   demo_clean          — NET-NEW. Authored from the look definition (clean
@@ -34,6 +37,11 @@ const ugc_authentic: LookStrategy = {
     "  Neutral 5500-6000K white balance, true-to-life colour, NO warm / sepia /",
     "  orange cast. Every panel must look indistinguishable from a real candid",
     "  phone photo — never a 3D render, a glossy commercial or a polished AI portrait.",
+    "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
+    "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
+    "  natural oil sheen on the high points, faint 35mm film grain — and NO beauty",
+    "  filter, NO AI glow, NO porcelain finish, NO over-smoothing, NO perfect",
+    "  symmetry, NO toothpaste-ad teeth.",
   ],
   // No legacy inline ternary for these seams → [] keeps the legacy path identical.
   shotDirection: (_ctx) => [],
@@ -55,6 +63,11 @@ const cinematic_polished: LookStrategy = {
     "  or over-retouched, never an uncanny AI face. True-to-life colour and a",
     "  neutral white balance — no heavy warm / sepia / orange cast. It must read as",
     "  a real photographed frame, not a 3D render or a glossy AI portrait.",
+    "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
+    "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
+    "  natural oil sheen on the high points, faint 35mm film grain — and NO beauty",
+    "  filter, NO AI glow, NO porcelain finish, NO over-smoothing, NO perfect",
+    "  symmetry, NO toothpaste-ad teeth.",
   ],
   shotDirection: (_ctx) => [],
   pacing: (_ctx) => [],

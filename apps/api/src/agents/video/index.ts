@@ -319,13 +319,22 @@ export async function videoBuilder(
     // as a documented prompt SUFFIX (silently ignored if unsupported, so it can
     // never 400 the request the way an unknown body field would). graphic_text
     // has no camera, so it gets neither camerafixed nor the live-action wrapper.
+    // ugc_authentic is an INTENTIONALLY handheld look — locking the camera there
+    // produces an uncanny "static but candid" frame, so it is excluded too; only
+    // the deliberately-controlled looks (demo_clean, cinematic_polished) get it.
     const isGraphic = lookFamily === "graphic_text";
+    const isHandheld = lookFamily === "ugc_authentic";
     const negatives = videoNegatives(lookFamily);
     const renderDirective = isGraphic
       ? "Render clean animated motion-graphics frames (no people, no live footage, no camera). Reproduce the board's typography, layout and brand colour but NEVER render its panel-number badges, grid lines, borders or caption/description bars."
       : "Render ONE continuous live-action take with no cuts. The storyboard is a LOOK reference — reproduce its framing and identity but NEVER render its panel-number badges, grid lines, split-screen dividers, before/after labels, borders or bottom caption bars.";
-    const cameraFixed = isGraphic ? "" : " --camerafixed true";
-    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
+    // Ad-level closer for text-carrying ads (kinetic-typography): stop invented
+    // marks and keep any real figure legible.
+    const textCloser = isGraphic
+      ? " No invented logos and no extra on-screen text beyond the board's own wording; keep any stated price or number legible."
+      : "";
+    const cameraFixed = isGraphic || isHandheld ? "" : " --camerafixed true";
+    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${textCloser}${cameraFixed}`;
 
     const task = await ctx.video.submitVideo({
       referenceImages,

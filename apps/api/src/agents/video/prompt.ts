@@ -205,14 +205,14 @@ export function buildVideoPrompt(input: {
     `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
     isGraphic
       ? "For EACH slice: ONE plain sentence describing how that frame's text and graphics animate in (slide, fade, pop, count-up) over a held brand-colour background — only the motion and cuts may be quick, there is NO camera move; keep every word and number correct and legible the whole time."
-      : "For EACH slice: ONE plain sentence — the subject and its action in that beat. The CAMERA mostly HOLDS steady; describe the product's/subject's motion WITHIN the frame, kept SLOW and physically stable (fast or large moves warp the product). The product stays rigid and dimensionally fixed — ONE single instance, the same shape, proportions, finish and exact part-count in every frame. Any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
+      : "For EACH slice: ONE plain sentence — state the camera's ONE move first (or that it HOLDS steady), then the subject's own motion WITHIN the frame, kept SLOW and physically stable. ONE primary camera move per slice; never write 'fast camera' (large or fast moves warp the product) — 'quick cut' is for editing only. In the FIRST time-slice, LEAD with the product's physical behaviour and the single hardest constraint, where the model's attention is highest. The product is ONE solid object: it does not bend, stretch, melt, duplicate or change shape; hands touch its outer surface only and never pass through it; the same shape, proportions, finish and exact part-count in every frame. Any prep step (opening, unclasping) goes in an EARLIER slice and its changed state persists.",
     audioLine,
     hasPresenter
       ? "Audio uses ONE single voice for the whole ad — the on-screen person's own voice, matching their apparent age and gender, the SAME voice in every beat; never a second or overlapping voice."
       : "Audio uses ONE consistent voiceover — a single voice for the whole ad, the same in every beat; never a second or overlapping voice.",
     hookDirective,
     pacingLine,
-    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT — about 60–100 words total — and front-loaded (Seedance weights the first sentence most and ignores long prompts); lean on the attached images for look and identity instead of re-describing them. Put render constraints LAST: no on-screen text, captions, panel badges, grid lines or watermark.`,
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt SHORT — about 80–100 words total — and front-loaded (Seedance weights the first sentence most and ignores long prompts); do NOT re-describe the character's appearance or wardrobe — the storyboard crop and reference sheets carry that. Put render constraints LAST: no on-screen text, captions, panel badges, grid lines or watermark.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
@@ -340,7 +340,7 @@ export function buildDeterministicVideoPrompt(input: {
   return (
     `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them. ${productPin}${presenterPin}` +
     `${shots}. ` +
-    `The camera mostly holds steady and all motion stays slow and physically stable; the product stays rigid and dimensionally fixed — ONE single instance with the same shape, finish and exact part-count in every frame; any prep comes in an earlier slice and its changed state persists. ${audio} ` +
+    `The camera makes at most ONE slow move per beat (or holds steady) and all motion stays slow and physically stable; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio} ` +
     `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. No on-screen text, captions, badges, panel grid or watermark${ugc ? "; no background music" : ""}.`
   );
 }

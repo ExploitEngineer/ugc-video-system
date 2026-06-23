@@ -90,6 +90,17 @@ export const adStylePlanSchema = z.object({
     product: "unclear",
     person: "unclear",
   }),
+  /**
+   * Near-miss disambiguation (Fix 9): the top-2 candidate ad-type ids, recorded
+   * when confidence is low so the close call is visible in detector_meta.
+   */
+  topCandidates: z.array(z.string()).catch([]),
+  /**
+   * Values the model invented for unresolved bracket placeholders (Fix 8) — e.g.
+   * a brand name, price, URL or statistic the prompt left as a slot. Surfaced in
+   * detector_meta so a fabricated figure is never silently rendered as fact.
+   */
+  inventedValues: z.array(z.string()).catch([]),
 });
 export type AdStylePlan = z.infer<typeof adStylePlanSchema>;
 

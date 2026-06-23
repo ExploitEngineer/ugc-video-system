@@ -500,13 +500,24 @@ export function buildStoryboardPrompt({
     "- TRUE-TO-LIFE SCALE & PLACEMENT: render it at real-world size relative to the",
     "  hand / body / face (a ring is finger-sized, glasses face-sized, a bottle",
     "  hand-sized), placed exactly where it naturally sits — worn on the correct",
-    "  body part or held in the hand. Make it the hero by FRAMING THE SHOT CLOSE",
-    "  (a close or medium shot filling ~25-40% of the panel), NOT by enlarging the",
-    "  object beyond its real size — it must never float, dominate the frame or",
-    "  dwarf the hand/body that holds it.",
+    "  body part or held in the hand. Read it as the subject by FRAMING THE SHOT",
+    "  CLOSE (a close or medium shot), NOT by enlarging the object beyond its real",
+    "  size — it must never float, dominate the frame or dwarf the hand/body that",
+    "  holds it.",
+    "- PHYSICAL SIZE ANCHOR: in every panel that shows the product, describe its",
+    "  size RELATIVE to a known object in frame — the hand, the desk, a standard",
+    '  mug, the person\'s body (e.g. "held in one hand, reaching from fingertips to',
+    '  mid-palm", or "on the desk, about as tall as the mug beside it").',
+    "- The product appears at its true real-world size relative to the hand / desk /",
+    "  person in frame. Never enlarge, inflate, or scale up the product for emphasis;",
+    "  it must look physically plausible next to the objects around it.",
     "- Always the real, solid item from the product sheet — the bare product, the",
     "  ONLY instance in the panel; not a box, packaging, blister pack, pouch or an",
     "  unboxing, and not a print / photo / logo of it on a box, poster or screen.",
+    "- ONE SOLID OBJECT: the product is a single solid item with fixed geometry —",
+    "  hands grip its OUTER SURFACE and never pass through it. Show it doing exactly",
+    "  ONE clear, real, physically-correct action per panel; it does not morph,",
+    "  stretch or sprout shape-shifting parts.",
     "- Operate it the REAL way: if its use needs opening (twist off a cap, flip a",
     "  lid, unclasp a strap), SHOW that action as a natural beat; it stays the same",
     "  single real item (not shattered or split into separate loose pieces).",
@@ -568,8 +579,8 @@ export function buildStoryboardPrompt({
   // The `imagePrompt` board-spec sentence. graphic_text drops the badge +
   // caption-bar + product clauses (clean designed frames). Every other look
   // keeps them and pins TRUE-TO-LIFE product scale by FRAMING CLOSE — not by
-  // enlarging the object — so the product reads as the hero without floating or
-  // dominating (the too-big / too-small failure).
+  // enlarging the object — so the product reads as the clear subject without
+  // floating or dominating (the too-big / too-small failure).
   const boardSpecBody = cleanGraphic
     ? [
         `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
@@ -589,8 +600,9 @@ export function buildStoryboardPrompt({
         "describe the bar's STYLE and placement only; do NOT write the caption words",
         'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
         "other text and NO arrows; the product worn / in real use as the real solid",
-        "item at TRUE real-world scale, FRAMED CLOSE so it reads as the clear hero —",
-        "NOT enlarged beyond its real size (never oversized, dominating, floating, a",
+        "item at TRUE real-world scale, FRAMED CLOSE so it reads as the clear subject",
+        "at its true size relative to the hand / desk / person — NOT enlarged beyond",
+        "its real size (never oversized, dominating, floating, a",
         "box/packaging/unboxing, or duplicated); each panel showing the product in",
         "its CORRECT causal state from",
         hasUse
@@ -630,9 +642,13 @@ export function buildStoryboardPrompt({
     "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
     "  setting (a real, ordinary place that fits how THIS product is actually",
     "  used — not a styled studio or stock-commercial cliché), the key action, and",
-    "  what the PRODUCT visibly DOES to show it is genuinely working (substitute",
-    "  THIS product's real motion — a watch's hand sweeping; a cap twisted off and",
-    "  the liquid level dropping; a shoe flexing).",
+    "  what the PRODUCT visibly DOES to show it is genuinely working. When the",
+    "  product is being USED, STATE THE MECHANICAL INTERACTION explicitly — which",
+    "  part moves, in which direction, and what the product physically does",
+    '  (e.g. "index finger depresses the pump; fine mist sprays forward and',
+    '  slightly left"), never a vague "using the product". Substitute THIS',
+    "  product's real motion — a watch's hand sweeping; a cap twisted off and",
+    "  the liquid level dropping; a shoe flexing.",
     "  Keep it LEAN — no padding, no second/extra clauses; richer than the",
     "  panelCaption but close to it in spirit. It feeds the video step, which does",
     "  BETTER with short, focused direction than long paragraphs — do NOT write a",

@@ -8,6 +8,7 @@
 import type { AssetKind } from "@ugc/shared";
 import {
   createRunInputSchema,
+  detectPlaceholders,
   feedbackInputSchema,
   isMultiSegment,
 } from "@ugc/shared";
@@ -305,6 +306,10 @@ runs.post(
   }
   const { prompt, mode, aspectRatio, duration, criticEnabled, adType } =
     parsed.data;
+  // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
+  // they surface immediately in detector_meta (the worker re-derives + enriches
+  // this with any invented values once the detector runs).
+  const unresolvedPlaceholders = detectPlaceholders(prompt);
   // An explicit pick (anything but "auto") LOCKS the type — the detector still
   // fills adStyle + hooks but honors this adType (orchestrator). "auto"/omitted
   // leaves it null for full auto-detection.
@@ -366,6 +371,9 @@ runs.post(
       criticEnabled,
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
+        : {}),
+      ...(unresolvedPlaceholders.length
+        ? { detectorMeta: { unresolvedPlaceholders } }
         : {}),
       status: "queued",
       // Insert the run already LOCKED so the worker can't claim it yet. Without

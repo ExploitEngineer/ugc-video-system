@@ -7,3 +7,6 @@ export * from "./enums";
 
 // API DTO schemas (Run / Asset / StepEvent / RunDetail / CreateRunInput).
 export * from "./dto";
+
+// Bracket-placeholder detection ([SHOCK STAT], [PRICE], …) for the ad prompt.
+export * from "./placeholders";

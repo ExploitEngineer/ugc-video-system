@@ -150,9 +150,13 @@ the voiceover
 ### storyboardTranscriptStyle
 
 ```
-- Each transcript line is a punchy, urgent voiceover that calls out the deal on the
-  frame: name the saving, code, deadline or CTA plainly — short, imperative,
-  action-driving (5-10 words); no first-person "I" story, no soft close.
+- Each transcript line is a punchy, urgent spoken line driving to the deal —
+  short, imperative, action-driving (5-10 words), with contractions; no
+  first-person "I" story, no soft close.
+- The actual saving, code, price, deadline or URL stays ON-SCREEN as text; the
+  SPOKEN line creates urgency WITHOUT reading the number, price, code or URL aloud.
+- BAD: "Get 40% off with code SAVE40 at checkout." GOOD: "Tap the link — this
+  price isn't sticking around."
 ```
 
 ### videoVoice

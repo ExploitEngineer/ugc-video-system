@@ -152,8 +152,12 @@ the voiceover
 ```
 Each transcript line maps to its PAS beat — name the pain, agitate it, then
 deliver the relief — in plain, conversational, pain-named phrasing ("tired
-of…", "sick of…", "struggling with…" → "now…"). Keep each line short (under
-~16 words) and verbatim-quotable; the lines chain into one through-line.
+of…", "sick of…", "struggling with…" → "now…"), with contractions and the
+fragmented rhythm of real stressed speech. Keep each line short (under ~16
+words) and verbatim-quotable; the lines chain into one through-line. Never read
+a statistic or price aloud — those go on-screen as text.
+BAD: "Our users report a 3x reduction in wasted time." GOOD: "I kept losing
+whole afternoons to this — not anymore."
 ```
 
 ### videoVoice

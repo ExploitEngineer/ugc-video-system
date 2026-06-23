@@ -15,7 +15,12 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
+import {
+  detectPlaceholders,
+  isMultiSegment,
+  segmentCountFor,
+  type Step,
+} from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
@@ -757,12 +762,17 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     const ctx = buildCtx(run, uploads);
     logRun(runId, "▶ interpreting ad style …", tag);
     try {
+      // Fix 8: bracket fill-in slots ([SHOCK STAT], [PRICE], …) the user left
+      // unresolved. Surfaced to the detector so it records anything it invents,
+      // and persisted into detector_meta below.
+      const unresolvedPlaceholders = detectPlaceholders(run.prompt);
       const detected = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
         hasProduct,
         hasPerson: personUploaded,
         productBrief: run.productBrief ?? "",
         personBrief: run.personBrief ?? "",
+        unresolvedPlaceholders,
       });
       // Honor an explicit user dropdown pick (Chunk J): keep the locked adType,
       // still take the detector's adStyle + hooks. Reconcile still applies asset
@@ -793,6 +803,17 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
             assetIntent: detected.assetIntent,
             synthesizePerson: plan.synthesizePerson,
             detectedHooks: detected.hooks,
+            // Fix 9 near-miss + Fix 8 placeholder/invented-value telemetry —
+            // omitted when empty so the shape stays clean for confident runs.
+            ...(detected.topCandidates.length
+              ? { topCandidates: detected.topCandidates }
+              : {}),
+            ...(unresolvedPlaceholders.length
+              ? { unresolvedPlaceholders }
+              : {}),
+            ...(detected.inventedValues.length
+              ? { inventedValues: detected.inventedValues }
+              : {}),
           },
           status: "running",
           currentStep: null,
