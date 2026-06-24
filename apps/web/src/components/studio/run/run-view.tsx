@@ -59,7 +59,7 @@ function prettyHook(id: string): string {
     .join(" ");
 }
 
-/** A small option pill shown in the user's message bubble. */
+/** A small option/creative pill (user options + the AI's creative-direction tags). */
 function Chip({
   icon: Icon,
   children,
@@ -274,27 +274,8 @@ export function RunView({ runId }: { runId: string }) {
             )}
           </div>
         )}
+        {/* Only the options the USER picked live in the user's bubble. */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Chip icon={ClapperboardIcon}>{run.adStyle}</Chip>
-          <Chip icon={TagIcon}>
-            {run.adTypeDisplayName}
-            {run.adTypeSource === "user" ? (
-              <span className="text-muted-foreground/70 ml-1">· you chose</span>
-            ) : run.adTypeSource === "auto" ? (
-              <span className="text-muted-foreground/70 ml-1">· auto</span>
-            ) : null}
-          </Chip>
-          {run.hooks && (
-            <>
-              <Chip icon={ZapIcon}>
-                Hook: {prettyHook(run.hooks.visualLead.id)}
-              </Chip>
-              {run.hooks.overlay && (
-                <Chip icon={ZapIcon}>+ {prettyHook(run.hooks.overlay.id)}</Chip>
-              )}
-            </>
-          )}
-          {synthPerson && <Chip icon={BotIcon}>AI person</Chip>}
           <Chip icon={isMulti ? FilmIcon : ClockIcon}>
             {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
           </Chip>
@@ -312,6 +293,50 @@ export function RunView({ runId }: { runId: string }) {
           </Chip>
         </div>
       </UserMessage>
+
+      {/* Creative Direction agent — the AI's reading of the brief (the adStyle
+          summary + the resolved ad type / hook / cast). Rendered as the agent's
+          OWN output, not inside the user's bubble where it read as if the user
+          wrote it. Appears once detection has set `adStyle`. */}
+      {run.adStyle && (
+        <AgentMessage label="Creative direction">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start gap-2">
+              <ClapperboardIcon className="text-brand mt-0.5 size-4 shrink-0" />
+              <p className="text-foreground/90 text-sm leading-relaxed text-pretty">
+                {run.adStyle}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Chip icon={TagIcon}>
+                {run.adTypeDisplayName}
+                {run.adTypeSource === "user" ? (
+                  <span className="text-muted-foreground/70 ml-1">
+                    · you chose
+                  </span>
+                ) : run.adTypeSource === "auto" ? (
+                  <span className="text-muted-foreground/70 ml-1">
+                    · detected
+                  </span>
+                ) : null}
+              </Chip>
+              {run.hooks && (
+                <>
+                  <Chip icon={ZapIcon}>
+                    Hook: {prettyHook(run.hooks.visualLead.id)}
+                  </Chip>
+                  {run.hooks.overlay && (
+                    <Chip icon={ZapIcon}>
+                      + {prettyHook(run.hooks.overlay.id)}
+                    </Chip>
+                  )}
+                </>
+              )}
+              {synthPerson && <Chip icon={BotIcon}>AI character</Chip>}
+            </div>
+          </div>
+        </AgentMessage>
+      )}
 
       {/* Agent — live progress + the pipeline timeline. */}
       <AgentMessage label="Pipeline">
