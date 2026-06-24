@@ -56,10 +56,10 @@ Decisions:
 - [x] Distinct service path in orchestrator/plan: `creative_brief → storyboard → video` (skips product/person sheets); detector + create-form default to `service`; timeline shows "Creative brief" (hidden for product runs).
 - [x] Verify: typecheck + 86 tests + offline smoke; real service run passes end-to-end, brief jsonb is sane. _(user manual test passed — video quality not yet brief-driven, expected)_
 
-**S2 — multi-scene storyboard from the brief** (next)
+**S2 — multi-scene storyboard from the brief ✅**
 
-- [ ] `storyboard/prompt.ts` consumes `ctx.creativeBrief` for the service type: render the brief's cast (identity blocks) across distinct per-scene panels, color-grade shifts, on-screen text (hook stat / end card) in quotes.
-- [ ] Verify: service storyboard sheet shows the planned multi-scene story with a consistent synthesized cast.
+- [x] `storyboard/prompt.ts` consumes `ctx.creativeBrief`: a PLANNED STORY block renders the cast identity blocks + 4 scenes (scene i → panel i) with per-scene setting, colour-grade shift, who/dialogue, and on-screen text verbatim; a script directive ties each panel's sceneDescription/transcript to its planned scene. Brief nudged to exactly 4 scenes. `storyboard/index.ts` passes the brief.
+- [x] Verify: typecheck + 86 tests; real service storyboard renders the planned multi-scene story with a consistent synthesized cast. _(user manual test passed)_
 
 **S3 — multi-scene service video** (Seedance)
 

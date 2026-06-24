@@ -13,7 +13,7 @@
 import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
-import type { ProductUse } from "../../types.js";
+import type { CreativeBrief, ProductUse } from "../../types.js";
 import { getAdType } from "../../ad-types/registry.js";
 import { lookBase } from "../../ad-types/fragments/looks.js";
 import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
@@ -88,6 +88,13 @@ export interface StoryboardPromptInput {
    * prompts) so the whole ad shares one grade/lens/lighting/palette.
    */
   visualStyle?: string;
+  /**
+   * SERVICE ads only — the creative-director brief (`runs.creative_brief`). When
+   * present with real scenes it is the AUTHORITATIVE multi-scene story the sheet
+   * renders (scene i → panel i, synthesized cast held constant). Absent ⇒ the
+   * planner invents the script as before (the product ad-types).
+   */
+  creativeBrief?: CreativeBrief;
 }
 
 export interface StoryboardScene {
@@ -150,6 +157,7 @@ export function buildStoryboardPrompt({
   visualStyle,
   full60s,
   segmentCount,
+  creativeBrief,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
@@ -647,6 +655,65 @@ export function buildStoryboardPrompt({
         lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
       ];
 
+  // SERVICE ads — the creative-director brief is the AUTHORITATIVE multi-scene
+  // story (no product/person upload to anchor from). Render it scene i → panel i
+  // with the synthesized cast held identical across panels. Absent ⇒ the planner
+  // invents the script as before (the product ad-types).
+  const brief =
+    creativeBrief && creativeBrief.scenes.some((s) => s.action?.trim())
+      ? creativeBrief
+      : undefined;
+  const plannedStoryBlock = brief
+    ? [
+        "PLANNED STORY (authored by the creative director — RENDER THIS EXACT",
+        "STORY, scene i → panel i, in order; do NOT invent a different story):",
+        ...(brief.concept ? [`- Concept: ${brief.concept}`] : []),
+        ...(brief.cast.length
+          ? [
+              "- Cast — these people are SYNTHESIZED (no reference photo), so keep",
+              "  each one's face, hair, build and wardrobe IDENTICAL in every panel",
+              "  they appear in:",
+              ...brief.cast.map((c) => `  - ${c.name}: ${c.identity}`),
+            ]
+          : []),
+        "- Scenes (each is ONE panel, in play order):",
+        ...brief.scenes.map((s, i) => {
+          const who = s.charactersPresent?.length
+            ? ` | who: ${s.charactersPresent.join(", ")}`
+            : "";
+          const say = s.dialogue?.length
+            ? ` | says: ${s.dialogue
+                .map((d) => `${d.speaker}: "${d.line}"`)
+                .join(" / ")}`
+            : "";
+          const txt = s.onScreenText
+            ? ` | on-screen text: "${s.onScreenText}"`
+            : "";
+          const place = [s.setting, s.lighting]
+            .filter((x) => x?.trim())
+            .join(" — ");
+          return `  ${i + 1}. ${place}${who} | action: ${s.action}${say}${txt}`;
+        }),
+        "- MULTI-SCENE: each panel is its OWN setting + lighting/grade — the world",
+        "  CHANGES between panels as the story moves (a colour-grade shift is fine),",
+        "  while each cast member's face, hair and wardrobe stay IDENTICAL across",
+        "  panels. The panels connect CAUSALLY into one continuous story.",
+        "- Where a scene lists on-screen text, letter that copy VERBATIM into the",
+        "  panel (a stat, a price or the end-card line); keep it short and legible.",
+        "",
+      ]
+    : [];
+  const plannedScriptDirective = brief
+    ? [
+        "RENDER THE PLANNED STORY — for EACH panel i, take its setting, lighting,",
+        "who-is-present, action and spoken line from PLANNED STORY scene i above;",
+        "write that panel's `sceneDescription` and `transcript` from it and a",
+        "matching `panelCaption`. Do NOT invent a different story, reorder, drop or",
+        "merge scenes.",
+        "",
+      ]
+    : [];
+
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
     "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity.",
@@ -667,6 +734,7 @@ export function buildStoryboardPrompt({
     ...(product ? [...productAnchor, ""] : []),
     ...(uploadedProductFocus.length ? [...uploadedProductFocus, ""] : []),
     ...(characterAnchor.length ? [...characterAnchor, ""] : []),
+    ...plannedStoryBlock,
     ...typeBlock,
     ...hookBlock,
     "",
@@ -678,6 +746,7 @@ export function buildStoryboardPrompt({
     ...(fctx.hasProduct
       ? [...useSequenceBlock, "", ...presentationBlock, ""]
       : []),
+    ...plannedScriptDirective,
     ...scriptStep,
     "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
     "  setting (a real, ordinary place that fits how THIS product is actually",
