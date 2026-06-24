@@ -36,6 +36,9 @@ const VISUAL_LEAD_IDS = new Set<string>([
   "before-after",
   "relatable-scenario",
   "confession",
+  // Service/B2B cold-opens — own the opening beat (a bold stat / a sharp question).
+  "stat",
+  "question",
 ]);
 
 export const hookDefaultRole = (id: string): HookRole =>

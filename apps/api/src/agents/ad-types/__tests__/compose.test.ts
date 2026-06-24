@@ -17,13 +17,13 @@ const mkDef = (allowedHooks: string[], defaultHooks: string[]): AdTypeDef =>
 const testimonial = getAdType("testimonial");
 
 describe("hook registry", () => {
-  it("has exactly 7 kebab-case hook ids", () => {
+  it("has exactly 9 kebab-case hook ids", () => {
     const ids = allHookIds();
-    expect(ids.length).toBe(7);
+    expect(ids.length).toBe(9);
     for (const id of ids) expect(id).toMatch(/^[a-z][a-z0-9-]*$/);
   });
 
-  it("classifies the 6 visual-lead hooks; curiosity-gap is the overlay", () => {
+  it("classifies the visual-lead hooks; curiosity-gap is the overlay", () => {
     const leads = allHookIds().filter(
       (id) => hookDefaultRole(id) === "visual_lead",
     );
@@ -33,7 +33,9 @@ describe("hook registry", () => {
         "confession",
         "pattern-interrupt",
         "problem-solution",
+        "question",
         "relatable-scenario",
+        "stat",
         "striking-visual",
       ].sort(),
     );

@@ -24,9 +24,11 @@ export const service: AdTypeDef = {
       "Service ads upload neither a product nor a person; the cast is synthesized from the creative brief and the story carries the ad.",
   },
   lookFamily: "cinematic_polished",
-  defaultHooks: ["problem-solution", "striking-visual"],
+  defaultHooks: ["problem-solution", "stat"],
   allowedHooks: [
     "problem-solution",
+    "stat",
+    "question",
     "striking-visual",
     "pattern-interrupt",
     "curiosity-gap",

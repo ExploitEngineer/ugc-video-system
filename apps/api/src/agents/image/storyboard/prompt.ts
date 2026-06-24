@@ -676,6 +676,11 @@ export function buildStoryboardPrompt({
               ...brief.cast.map((c) => `  - ${c.name}: ${c.identity}`),
             ]
           : []),
+        ...(brief.hook?.line
+          ? [
+              `- OPENING HOOK — scene 1 (panel 1) MUST open on this (${brief.hook.type}): "${brief.hook.line}"`,
+            ]
+          : []),
         "- Scenes (each is ONE panel, in play order):",
         ...brief.scenes.map((s, i) => {
           const who = s.charactersPresent?.length

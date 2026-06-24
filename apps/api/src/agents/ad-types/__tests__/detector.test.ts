@@ -124,11 +124,11 @@ describe("detector menus", () => {
     expect(menu).toContain("look:");
   });
 
-  it("renderHookMenu lists all 7 cold-open hooks", () => {
+  it("renderHookMenu lists all 9 cold-open hooks", () => {
     const menu = renderHookMenu();
-    expect(menu.split("\n").length).toBe(7);
+    expect(menu.split("\n").length).toBe(9);
     expect(menu).toContain("problem-solution");
-    expect(menu).toContain("striking-visual");
+    expect(menu).toContain("stat");
   });
 
   it("CONFUSABLE_RULES is non-empty", () => {

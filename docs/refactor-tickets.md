@@ -65,9 +65,11 @@ Decisions:
 
 - [x] `video/prompt.ts` (both builders) + `video/index.ts` branch on service: clean CUTS between distinct scenes (not one continuous take), dialogue `speaks in English: "..."` one speaker per shot, service negatives (multi-character, on-screen text kept) instead of the cinematic ones, no product-object constraints. Non-service stays byte-identical (fragment-regression green). _(user manual test passed; brand prefix deferred to Chunk 5)_
 
-**S4 — service hooks (stat/question/pain) + dynamic selection**
+**S4 — service hooks (stat/question/pain) + dynamic selection ✅**
 
-- [ ] Re-add stat/question/pain hooks for `service`; dynamic pick by awareness stage from the brief.
+- [x] Re-added `stat` + `question` cold-opens (service-only via allowedHooks; `problem-solution` covers pain); `VISUAL_LEAD_IDS` updated; service `defaultHooks` lead with problem-solution/stat. The brief's chosen hook is rendered in the storyboard opening (dynamic pick by awareness stage). _(user manual test passed)_
+
+**Chunk S is complete** — short prompt → creative-director brief → 4-scene storyboard (cast + hook) → multi-scene skit video with cuts + dialogue. Known minor follow-up: unify the creative-direction chip hook (detector) with the brief's hook for service.
 
 ---
 

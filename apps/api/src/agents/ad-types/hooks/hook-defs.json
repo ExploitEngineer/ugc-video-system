@@ -93,5 +93,27 @@
     },
     "worksWithoutProduct": true,
     "worksWithoutPerson": true
+  },
+  {
+    "id": "stat",
+    "displayName": "Stat Shock",
+    "psychPrinciple": "Anchoring / loss aversion",
+    "description": "Open on a bold, specific statistic that frames the cost of the problem (a shocking number). Service/B2B cold-open.",
+    "openingDirective": "Open on a bold, specific STAT that frames the problem — a shocking number stated and shown large on-screen for a beat (e.g. a wasted-spend or lost-hours figure) — before the scene resolves toward the service.",
+    "scriptToneNote": "Lead with the number; concrete, not hype.",
+    "fitsAdTypes": { "good": ["service"], "clashes": [] },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "question",
+    "displayName": "Bold Question",
+    "psychPrinciple": "Self-referential / open loop",
+    "description": "Open on a sharp, direct question that names the viewer's pain and demands an answer. Service/B2B cold-open.",
+    "openingDirective": "Open on a sharp, direct QUESTION to the viewer that names their pain ('Still losing hours to X?') — spoken or shown in the first beat — that the rest of the ad answers.",
+    "scriptToneNote": "One pointed question; make them feel seen.",
+    "fitsAdTypes": { "good": ["service"], "clashes": [] },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
   }
 ]
