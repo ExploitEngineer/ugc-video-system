@@ -16,7 +16,7 @@ export const productDemo: AdTypeDef = {
   id: "product-demo",
   displayName: "Product Demo",
   description:
-    "Shows the product being used / how it works — function-first, step-by-step ('how it works', 'in action', 'watch it work'). Differs from product-showcase (visible in-use function and clear steps, NOT a static hero glamour shot) and how-to (a demo proves the product works rather than teaching a general skill).",
+    "Shows the product being used / how it works — function-first, step-by-step ('how it works', 'in action', 'watch it work'). The product-led catch-all: also covers hero showcase and unboxing. Hands or a presenter may operate it.",
   whenToUse: "consideration",
   assetPolicy: {
     product: "required",

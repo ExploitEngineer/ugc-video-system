@@ -16,7 +16,7 @@ export const brandStory: AdTypeDef = {
   id: "brand-story",
   displayName: "Brand Story",
   description:
-    "Cinematic, emotionally-driven narrative about brand VALUES, origin, world, or a customer journey — a polished, structured mood piece with voiceover. Differs from inspirational (an open, evocative mood/feeling piece without a required through-story), founder-pov (no named speaker required) and brand-awareness (graphics/text manifesto, not filmed scenes).",
+    "Cinematic, emotionally-driven narrative about brand VALUES, origin, world, or a customer journey — a polished, structured mood piece with voiceover. Differs from inspirational (an open, evocative mood/feeling piece without a required through-story) and founder-pov (no named speaker required).",
   whenToUse: "awareness",
   assetPolicy: {
     product: "optional",

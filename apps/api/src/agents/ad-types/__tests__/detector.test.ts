@@ -11,9 +11,9 @@ import {
 import { CONFUSABLE_RULES, renderAdTypeMenu, renderHookMenu } from "../menu.js";
 
 describe("assetImpliedDefault", () => {
-  it("product → product-showcase, none → brand-awareness", () => {
-    expect(assetImpliedDefault(true)).toBe("product-showcase");
-    expect(assetImpliedDefault(false)).toBe("brand-awareness");
+  it("product → product-demo, none → brand-story", () => {
+    expect(assetImpliedDefault(true)).toBe("product-demo");
+    expect(assetImpliedDefault(false)).toBe("brand-story");
   });
 });
 
@@ -34,9 +34,9 @@ describe("clampAdType", () => {
   });
 
   it("falls back to the asset-implied default for garbage", () => {
-    expect(clampAdType("totally-unknown-xyz", false)).toBe("brand-awareness");
-    expect(clampAdType("totally-unknown-xyz", true)).toBe("product-showcase");
-    expect(clampAdType("", true)).toBe("product-showcase");
+    expect(clampAdType("totally-unknown-xyz", false)).toBe("brand-story");
+    expect(clampAdType("totally-unknown-xyz", true)).toBe("product-demo");
+    expect(clampAdType("", true)).toBe("product-demo");
   });
 });
 
@@ -46,33 +46,35 @@ describe("confidenceGate", () => {
   });
 
   it("overrides a low-confidence pick of a different look family", () => {
-    // testimonial (ugc_authentic) vs the no-asset default (brand-awareness → cinematic_polished fallback)
+    // testimonial (ugc_authentic) vs the no-asset default brand-story (cinematic_polished)
     expect(confidenceGate("testimonial", 0.3, false, false)).toBe(
-      "brand-awareness",
+      "brand-story",
     );
   });
 
   it("keeps a low-confidence pick that shares the default's look + is asset-compatible", () => {
-    // explainer shares the graphic_text look of the no-asset default
-    // (brand-awareness) and needs no assets → kept, not overridden.
-    expect(confidenceGate("explainer", 0.3, false, false)).toBe("explainer");
+    // inspirational shares the cinematic_polished look of the no-asset default
+    // (brand-story) and needs no assets → kept, not overridden.
+    expect(confidenceGate("inspirational", 0.3, false, false)).toBe(
+      "inspirational",
+    );
   });
 });
 
 describe("downgradeTarget (look-preserving chain)", () => {
-  it("routes product-demo → explainer", () => {
-    expect(downgradeTarget("product-demo", false, false)).toBe("explainer");
+  it("routes product-demo (no product) → lifestyle", () => {
+    expect(downgradeTarget("product-demo", false, false)).toBe("lifestyle");
   });
-  it("routes lifestyle → brand-story", () => {
-    expect(downgradeTarget("lifestyle", false, false)).toBe("brand-story");
+  it("routes testimonial (no product, person present) → founder-pov", () => {
+    expect(downgradeTarget("testimonial", false, true)).toBe("founder-pov");
   });
-  it("routes before-after → social-proof", () => {
-    expect(downgradeTarget("before-after", false, false)).toBe("social-proof");
+  it("skips a person-required link when no person → brand-story", () => {
+    // testimonial's chain is [founder-pov, brand-story]; founder-pov needs a
+    // person, so with neither asset it falls through to brand-story.
+    expect(downgradeTarget("testimonial", false, false)).toBe("brand-story");
   });
-  it("falls to brand-awareness for an unknown source", () => {
-    expect(downgradeTarget("no-such-type", false, false)).toBe(
-      "brand-awareness",
-    );
+  it("falls to brand-story for an unknown source", () => {
+    expect(downgradeTarget("no-such-type", false, false)).toBe("brand-story");
   });
 });
 
@@ -112,7 +114,7 @@ describe("reconcile", () => {
       true,
       false,
     );
-    expect(out.adType).toBe("product-showcase");
+    expect(out.adType).toBe("product-demo");
   });
 });
 

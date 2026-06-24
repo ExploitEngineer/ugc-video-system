@@ -22,13 +22,13 @@
 export type LookFamily =
   | "ugc_authentic" // phone-captured, handheld, native (legacy `ugc` look)
   | "cinematic_polished" // produced, color-graded, VO-led (legacy `inspirational` look)
-  | "graphic_text" // motion-graphics / kinetic type; runs with no live footage
   | "demo_clean"; // clean studio/tabletop product photography
+// `graphic_text` (motion-graphics / kinetic type) was removed in the ad-gen
+// refactor — the system only generates realistic live-action ads now.
 
 export const LOOK_FAMILIES: readonly LookFamily[] = [
   "ugc_authentic",
   "cinematic_polished",
-  "graphic_text",
   "demo_clean",
 ] as const;
 

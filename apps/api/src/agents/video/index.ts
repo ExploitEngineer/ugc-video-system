@@ -259,42 +259,23 @@ export async function videoBuilder(
     // storyboard. Net numbering: product=1, storyboard=2, face=3 (each shifts
     // down by one when no product sheet is attached).
     const faceUrl = input.hasPerson ? input.personFaceRef?.source : undefined;
-    // Any LIVE-ACTION storyboard can contain a real human, and a raw human
-    // image_url trips Seedance's input privacy filter
-    // (InputImageSensitiveContentDetected.PrivacyInformation). Person-OPTIONAL
-    // types (unboxing/lifestyle/PAS/brand-story) hit exactly this when no person
-    // sheet was generated and the board went out as a plain ref → the run failed
-    // PROVIDER_CONTENT_BLOCKED. Route EVERY non-graphic storyboard through the
-    // CreateAsset (asset://) path, which clears moderation; only flat graphic_text
-    // boards (never a person) stay on the cheaper raw path. @Image numbering is
-    // unchanged — boardNo derives from the product sheet, not from which array
-    // the board rides in.
+    // Every storyboard is now LIVE-ACTION and can contain a real human, and a raw
+    // human image_url trips Seedance's input privacy filter
+    // (InputImageSensitiveContentDetected.PrivacyInformation → the run failed
+    // PROVIDER_CONTENT_BLOCKED). So route the sheet through the CreateAsset
+    // (asset://) path, which clears moderation and accepts aspect 0.4–2.5. Pad a
+    // provider copy first so a stray generated dimension can't fail the run.
+    // Order + count are preserved, so the @Image legend below stays correct.
     const lookFamily = getAdType(ctx.adType).lookFamily;
-    const storyboardIsPersonContent =
-      input.hasPerson || isSegment || lookFamily !== "graphic_text";
-
     referenceImages = productUrl ? [productUrl] : [];
     personReferences = [];
-    if (storyboardIsPersonContent) {
-      // Person refs ride the CreateAsset path (aspect 0.4–2.5) — pad a provider
-      // copy first so a stray generated dimension can't fail the run. Order +
-      // count are preserved, so the @Image legend below stays correct.
+    personReferences.push(
+      await providerSafeFaceUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
+    );
+    if (faceUrl) {
       personReferences.push(
-        await providerSafeFaceUrl(
-          storyboardUrl,
-          ctx.runId,
-          "storyboard_sheet",
-          log,
-        ),
+        await providerSafeFaceUrl(faceUrl, ctx.runId, "person_sheet", log),
       );
-      if (faceUrl) {
-        personReferences.push(
-          await providerSafeFaceUrl(faceUrl, ctx.runId, "person_sheet", log),
-        );
-      }
-    } else {
-      // Plain reference_image (raw image_url, no CreateAsset) — no aspect limit.
-      referenceImages.push(storyboardUrl);
     }
 
     const boardNo = productUrl ? 2 : 1;
@@ -314,27 +295,19 @@ export async function videoBuilder(
     }
     // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
     // positive-rigidity phrasing). The negatives are tailored per look family
-    // (product morph vs warped hands vs identity drift vs garbled type), and
-    // `--camerafixed true` — Seedance's strongest anti-morph lever — is appended
-    // as a documented prompt SUFFIX (silently ignored if unsupported, so it can
-    // never 400 the request the way an unknown body field would). graphic_text
-    // has no camera, so it gets neither camerafixed nor the live-action wrapper.
-    // ugc_authentic is an INTENTIONALLY handheld look — locking the camera there
-    // produces an uncanny "static but candid" frame, so it is excluded too; only
-    // the deliberately-controlled looks (demo_clean, cinematic_polished) get it.
-    const isGraphic = lookFamily === "graphic_text";
+    // (product morph vs warped hands vs identity drift), and `--camerafixed true`
+    // — Seedance's strongest anti-morph lever — is appended as a documented prompt
+    // SUFFIX (silently ignored if unsupported, so it can never 400 the request the
+    // way an unknown body field would). ugc_authentic is an INTENTIONALLY handheld
+    // look — locking the camera there produces an uncanny "static but candid"
+    // frame, so it is excluded; only the deliberately-controlled looks (demo_clean,
+    // cinematic_polished) get it.
     const isHandheld = lookFamily === "ugc_authentic";
     const negatives = videoNegatives(lookFamily);
-    const renderDirective = isGraphic
-      ? "Render clean animated motion-graphics that FILL the frame — one design at a time, no people, no camera; reproduce the board's typography and brand colour, never its badges or panel grid."
-      : "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
-    // Ad-level closer for text-carrying ads (kinetic-typography): stop invented
-    // marks and keep any real figure legible.
-    const textCloser = isGraphic
-      ? " No invented logos and no extra on-screen text beyond the board's own wording; keep any stated price or number legible."
-      : "";
-    const cameraFixed = isGraphic || isHandheld ? "" : " --camerafixed true";
-    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${textCloser}${cameraFixed}`;
+    const renderDirective =
+      "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
+    const cameraFixed = isHandheld ? "" : " --camerafixed true";
+    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
 
     const task = await ctx.video.submitVideo({
       referenceImages,

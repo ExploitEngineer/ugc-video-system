@@ -267,7 +267,10 @@ export function buildStoryboardPrompt({
   // NOT be burned in — they read as an unfinished "storyboard", not an ad, and
   // then leak into the video. Every other look is a real storyboard sheet that
   // keeps its badge + caption bar (the video step now strips them at render).
-  const cleanGraphic = def.lookFamily === "graphic_text";
+  // graphic_text was removed (ad-gen refactor); no surviving type is a clean
+  // graphic sheet, so this is always false. The dead graphic branches it gates
+  // are pruned in the Chunk 6 storyboard rework.
+  const cleanGraphic = false;
 
   // PANEL LABELS badge range — 01..N×4 vs 01..04. Suppressed for graphic_text.
   const labelBadge = isMaster

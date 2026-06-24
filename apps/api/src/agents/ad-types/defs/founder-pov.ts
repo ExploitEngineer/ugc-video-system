@@ -12,9 +12,9 @@ import { buildFragments } from "../skill-loader.js";
 
 export const founderPov: AdTypeDef = {
   id: "founder-pov",
-  displayName: "Founder POV",
+  displayName: "Founder Story",
   description:
-    "The founder tells their first-person origin/mission story ('I started this', 'why we built it') — an insider, not a customer. Polished, VO-led, intimate-to-camera or over filmed scenes. Differs from testimonial (a customer/creator review) and spokesperson (a hired host reading a script).",
+    "The founder tells their first-person origin/mission story ('I started this', 'why we built it') — an insider, not a customer. Polished, VO-led, intimate to camera or over filmed scenes. Absorbs the old spokesperson type (a host addressing the viewer). Differs from testimonial (a customer/creator review).",
   whenToUse: "awareness|consideration",
   assetPolicy: {
     product: "optional",

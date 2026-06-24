@@ -17,7 +17,7 @@ export const inspirational: AdTypeDef = {
   id: "inspirational",
   displayName: "Inspirational",
   description:
-    "An evocative, cinematic mood piece that follows the feeling or journey the user describes, carried by voiceover over filmed scenes — product and person BOTH optional. Differs from brand-story (a structured narrative about brand values/origin/world) and brand-awareness (graphics/text manifesto, not filmed scenes).",
+    "An evocative, cinematic mood piece that follows the feeling or journey the user describes, carried by voiceover over filmed scenes — product and person BOTH optional. Differs from brand-story (a structured narrative about brand values/origin/world).",
   whenToUse: "awareness",
   assetPolicy: {
     product: "optional",

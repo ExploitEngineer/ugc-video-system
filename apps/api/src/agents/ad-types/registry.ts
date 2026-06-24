@@ -10,20 +10,9 @@ import type { AdTypeDef } from "./types.js";
 import { testimonial } from "./defs/testimonial.js";
 import { brandStory } from "./defs/brand-story.js";
 import { inspirational } from "./defs/inspirational.js";
-import { productShowcase } from "./defs/product-showcase.js";
 import { productDemo } from "./defs/product-demo.js";
-import { beforeAfter } from "./defs/before-after.js";
-import { comparison } from "./defs/comparison.js";
-import { unboxing } from "./defs/unboxing.js";
 import { lifestyle } from "./defs/lifestyle.js";
-import { problemAgitateSolve } from "./defs/problem-agitate-solve.js";
 import { founderPov } from "./defs/founder-pov.js";
-import { spokesperson } from "./defs/spokesperson.js";
-import { socialProof } from "./defs/social-proof.js";
-import { explainer } from "./defs/explainer.js";
-import { promoOffer } from "./defs/promo-offer.js";
-import { announcement } from "./defs/announcement.js";
-import { brandAwareness } from "./defs/brand-awareness.js";
 // Adding a type = one import + one REGISTRY entry below. Purely additive.
 
 // The open ad-type id schema lives in @ugc/shared (the `errorCode` precedent) so
@@ -34,24 +23,17 @@ export { adTypeIdSchema } from "@ugc/shared";
 // ---------------------------------------------------------------------------
 // Registry map. OPEN: keyed by string, not by a union of ids.
 // ---------------------------------------------------------------------------
+// Tight realistic core (6). The motion-graphics/banner/explainer `graphic_text`
+// family and several overlapping realistic types were dropped in the ad-gen
+// refactor (docs/refactor-tickets.md); dropped ids resolve via LEGACY_ALIASES so
+// old persisted runs keep working.
 const ALL_DEFS: AdTypeDef[] = [
-  testimonial, // legacyMapping: "ugc"
+  testimonial, // legacyMapping: "ugc" — UGC / Testimonial
   brandStory,
   inspirational, // legacyMapping: "inspirational"
-  productShowcase,
   productDemo,
-  beforeAfter,
-  comparison,
-  unboxing,
   lifestyle,
-  problemAgitateSolve,
-  founderPov,
-  spokesperson,
-  socialProof,
-  explainer,
-  promoOffer,
-  announcement,
-  brandAwareness,
+  founderPov, // Founder Story (absorbs spokesperson)
 ];
 
 export const REGISTRY: Readonly<Record<string, AdTypeDef>> = Object.freeze(
@@ -70,6 +52,19 @@ export const FALLBACK_AD_TYPE_ID = "brand-story";
 // "inspirational" resolve straight to the inspirational def.
 const LEGACY_ALIASES: Readonly<Record<string, string>> = {
   ugc: "testimonial",
+  // Dropped types (ad-gen refactor) → nearest surviving core type, so old
+  // persisted `runs.ad_type` rows and any stray detector output still resolve.
+  "product-showcase": "product-demo",
+  unboxing: "product-demo",
+  comparison: "product-demo",
+  "before-after": "product-demo",
+  "problem-agitate-solve": "testimonial",
+  spokesperson: "founder-pov",
+  "social-proof": "brand-story",
+  explainer: "brand-story",
+  "promo-offer": "brand-story",
+  announcement: "brand-story",
+  "brand-awareness": "brand-story",
 };
 
 /**

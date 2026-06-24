@@ -184,28 +184,17 @@ export function buildVideoPrompt(input: {
     .map((s, i) => `${s}: <panel ${i + 1} action>`)
     .join("; ");
 
-  // graphic_text ads are kinetic typography — no live footage, no people, no
-  // camera. Every other look is photoreal live action. The framing, the
-  // storyboard role and the per-slice instruction all branch on this.
-  const isGraphic = def.lookFamily === "graphic_text";
-
   const system = [
     "You are a prompt writer for Seedance 2.0, a multi-shot AI video model.",
-    isGraphic
-      ? `Write ONE short, SIMPLE motion-graphics video prompt for a ~${durationSec}s kinetic-typography ad in the "${adStyle}" style — animated text, numbers and simple vector shapes only, NO live footage, NO people, NO real camera.`
-      : `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
-    isGraphic
-      ? `A design board is attached as ${boardImg}: a 2×2 grid of FOUR graphic frames in reading order (01→04). MATCH each frame's typography, layout, brand colour and wording, but it is a LOOK reference, NOT a timeline — its panel-number badges, grid lines and bottom caption/description bars are PRODUCTION ANNOTATIONS: NEVER render any badge, number, grid line, border or caption bar. Animate the four frames in order as one clean continuous sequence, showing ONE full-frame frame at a time — never all four panels at once as a grid, split-screen or collage.`
-      : `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (01→04). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. Render ONE continuous live-action take with NO cuts, the beats flowing smoothly into one another. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid itself, never split the frame into panels or a side-by-side/collage. The sheet's panel-number badges, grid lines, split-screen dividers, before/after labels and bottom caption bars are PRODUCTION ANNOTATIONS — NEVER render any of them in the frame.`,
+    `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
+    `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (01→04). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. Render ONE continuous live-action take with NO cuts, the beats flowing smoothly into one another. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid itself, never split the frame into panels or a side-by-side/collage. The sheet's panel-number badges, grid lines, split-screen dividers, before/after labels and bottom caption bars are PRODUCTION ANNOTATIONS — NEVER render any of them in the frame.`,
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
       ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
       : "",
     "FORMAT — return EXACTLY this shape as ONE single-line string:",
     `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
-    isGraphic
-      ? "For EACH slice: ONE plain sentence describing how that frame's text and graphics animate in (slide, fade, pop, count-up) over a held brand-colour background — only the motion and cuts may be quick, there is NO camera move; keep every word and number correct and legible the whole time."
-      : "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the spoken line in quotes. Keep motion slow and stable; the product holds ONE fixed shape (no morph or duplicate); any prep (opening, unclasping) comes in an EARLIER slice and persists. Do NOT restate the person's look, wardrobe, lighting or style in each slice — the reference images carry that; no adjective stacking.",
+    "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the spoken line in quotes. Keep motion slow and stable; the product holds ONE fixed shape (no morph or duplicate); any prep (opening, unclasping) comes in an EARLIER slice and persists. Do NOT restate the person's look, wardrobe, lighting or style in each slice — the reference images carry that; no adjective stacking.",
     audioLine,
     hasPresenter
       ? "Audio uses ONE single voice for the whole ad — the on-screen person's own voice, matching their apparent age and gender, the SAME voice in every beat; never a second or overlapping voice."
@@ -326,17 +315,7 @@ export function buildDeterministicVideoPrompt(input: {
   const audio = ugc
     ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.`
     : `Audio: ${voice} narrates each line as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.`;
-  // graphic_text → kinetic typography (no live footage / people / camera);
-  // every other look → one continuous photoreal live-action take.
-  const isGraphic = def.lookFamily === "graphic_text";
-  if (isGraphic) {
-    return (
-      `Generate a motion-graphics sequence from the attached design board ${boardRef} — a 2×2 grid of four graphic frames (01→04). MATCH each frame's typography, layout, brand colour and wording, but it is a LOOK reference: NEVER render its panel-number badges, grid lines, borders or caption bars. Animate the four frames in order as one clean continuous sequence in the "${adStyle}" style, showing ONE full-frame frame at a time — animated text, numbers and simple shapes only, NO people, NO live footage, NO camera move. ` +
-      `${shots}. ` +
-      `Keep every word and number correct and legible. ${audio} ` +
-      `Frame for ${FRAME_LABEL[aspectRatio].short}. No camera and no people; show ONE full-frame frame at a time, never all four panels at once as a grid, split-screen or collage; never render badges, a panel grid, borders or caption bars; no watermark.`
-    );
-  }
+  // Every look is one continuous photoreal live-action take.
   return (
     `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them. ${productPin}${presenterPin}` +
     `${shots}. ` +

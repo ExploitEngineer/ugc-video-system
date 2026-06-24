@@ -14,7 +14,7 @@ export const CONFIDENCE_FLOOR = 0.55;
 
 /** The always-buildable default for an empty/garbage classification. */
 export function assetImpliedDefault(hasProduct: boolean): string {
-  return hasProduct ? "product-showcase" : "brand-awareness";
+  return hasProduct ? "product-demo" : "brand-story";
 }
 
 // ── adType clamp ────────────────────────────────────────────────────────────
@@ -98,17 +98,15 @@ export function confidenceGate(
 
 // ── product-required downgrade (look-preserving, terminal brand-awareness) ───
 
-// research/02 §5 table. Targets may be unregistered until Chunk H; getAdType
-// resolves them safely. demo_clean has no neither-capable member, so those types
-// route through their nearest text-capable cousin to graphic_text.
+// Look-preserving downgrade when a product-required type has no product upload.
+// Only the surviving core types appear here (ad-gen refactor). `founder-pov` is
+// person-led (no product needed); `brand-story` is the terminal neither-required
+// safe default (also FALLBACK_AD_TYPE_ID).
 const DOWNGRADE_CHAIN: Readonly<Record<string, readonly string[]>> = {
-  "product-showcase": ["explainer", "brand-awareness"],
-  "product-demo": ["explainer", "brand-awareness"],
-  "before-after": ["social-proof", "brand-awareness"],
-  comparison: ["explainer", "brand-awareness"],
-  unboxing: ["announcement", "brand-awareness"],
-  "problem-agitate-solve": ["explainer", "brand-awareness"],
-  lifestyle: ["brand-story", "brand-awareness"],
+  // UGC needs a product AND a person; with no product, keep a person-led
+  // treatment first, then the open cinematic default.
+  testimonial: ["founder-pov", "brand-story"],
+  "product-demo": ["lifestyle", "brand-story"],
 };
 
 export function downgradeTarget(
@@ -118,7 +116,7 @@ export function downgradeTarget(
 ): string {
   const chain = DOWNGRADE_CHAIN[type] ?? [];
   for (const t of chain) if (assetCompatible(t, hasProduct, hasPerson)) return t;
-  return "brand-awareness";
+  return "brand-story"; // terminal neither-required default (= FALLBACK_AD_TYPE_ID)
 }
 
 // ── hooks ───────────────────────────────────────────────────────────────────

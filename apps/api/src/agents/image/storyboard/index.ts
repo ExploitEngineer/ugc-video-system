@@ -14,7 +14,6 @@ import { PANELS_PER_SEGMENT } from "../../creative-direction/narrative-outline/i
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext, SkillResult } from "../../types.js";
 import { persistSheet } from "../../persist.js";
-import { getAdType } from "../../ad-types/registry.js";
 import { neutralizeCast } from "../../../lib/image/color.js";
 import {
   buildStoryboardPrompt,
@@ -127,13 +126,8 @@ async function renderStoryboard(
   // never sees the captions and letters its own invented (first-person) lines.
   // Append the real panelCaption strings so the authored shot-type captions are
   // the ones rendered into the bottom bars.
-  // graphic_text sheets are clean finished frames with NO bottom caption bar
-  // (their own typography is the design), so the caption-burn directive is
-  // suppressed for them — otherwise the meta shot-description ("FULL-FRAME
-  // GRAPHIC. …") gets lettered into a bar and ruins the frame.
-  const cleanGraphic = getAdType(ctx.adType).lookFamily === "graphic_text";
   const captionDirective =
-    !cleanGraphic && plan.scenes.some((s) => s.panelCaption?.trim())
+    plan.scenes.some((s) => s.panelCaption?.trim())
       ? `\n\nBOTTOM CAPTION BARS — letter EXACTLY these strings into each panel's bottom bar, one per panel, VERBATIM, uppercase, in order; do NOT paraphrase, shorten, translate, rewrite in first person, merge, or invent different wording:\n${plan.scenes
           .map(
             (s, i) =>

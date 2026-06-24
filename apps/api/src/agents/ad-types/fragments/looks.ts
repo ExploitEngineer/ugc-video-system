@@ -76,40 +76,6 @@ const cinematic_polished: LookStrategy = {
   closingLookClause: (_ctx) => ["the polished cinematic keyframe look."],
 };
 
-// NET-NEW look. No legacy source. Authored to match the graphic_text definition.
-const graphic_text: LookStrategy = {
-  keyframeLook: (_ctx) => [
-    "- GRAPHIC/TEXT LOOK — render every panel as a flat motion-graphics /",
-    "  kinetic-typography design, NOT live photography: a bold geometric sans-serif",
-    "  headline is the hero element on a solid brand-colour (or color-blocked)",
-    "  background, crisp clean kerning, high contrast, generous safe margins. Add",
-    "  only simple vector shapes, flat icons and subtle gradient accents; NO live",
-    "  photography, NO real product, NO people. Punchy, modern, broadcast-style",
-    "  layout. Render ALL text and numbers VERBATIM and perfectly legible —",
-    "  legibility is the #1 priority. No watermark, no stock-photo imagery, no 3D",
-    "  realism, no garbled or duplicated letters.",
-  ],
-  shotDirection: (_ctx) => [
-    "- Each panel is a COMPOSED GRAPHIC LAYOUT, not a camera shot: deliberate type",
-    "  hierarchy, ONE focal headline per frame, balanced negative space, the brand",
-    "  palette held constant across panels. Vary scale/weight/position of the type,",
-    "  not a camera angle.",
-  ],
-  pacing: (_ctx) => [
-    "- Snappy, beat-synced kinetic typography: words and numbers punch in and out on",
-    "  the rhythm with quick clean transitions. Only the MOTION and cuts may be fast —",
-    "  never a camera move (there is no camera). Keep every word readable as it animates.",
-  ],
-  captionStyle: (_ctx) => [
-    "- Typography IS the visual: the on-frame words are the hero layer in bold kinetic",
-    "  type, rendered verbatim and perfectly legible — not a thin caption bar tucked",
-    "  at the bottom.",
-  ],
-  closingLookClause: (_ctx) => [
-    "the bold motion-graphics / kinetic-typography look (flat designed frames, brand colour, verbatim legible text, no live footage, no people).",
-  ],
-};
-
 // NET-NEW look. No legacy source. Authored to match the demo_clean definition.
 const demo_clean: LookStrategy = {
   keyframeLook: (_ctx) => [
@@ -147,7 +113,6 @@ const demo_clean: LookStrategy = {
 export const LOOKS: Record<LookFamily, LookStrategy> = {
   ugc_authentic,
   cinematic_polished,
-  graphic_text,
   demo_clean,
 };
 
@@ -168,8 +133,6 @@ export function videoNegatives(family: LookFamily): string {
   // named repeatedly only PRIMES it to render the grid). ONE "full-frame scene"
   // cue per look does the anti-grid work without re-describing the layout.
   switch (family) {
-    case "graphic_text":
-      return "Animated text and shapes only — no people, no camera; every word and number legible, no garbled letters; one full-frame design at a time, no panel grid or caption bars.";
     case "demo_clean":
       return "ONE product, fixed shape and markings every frame — no morph, duplicate or garbled label; smooth stable motion; one full-frame scene.";
     case "ugc_authentic":

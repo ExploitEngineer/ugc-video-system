@@ -62,10 +62,8 @@ export function renderHookMenu(): string {
  * in the prompt (gpt-4.1/Claude weight later instructions more heavily).
  */
 export const CONFUSABLE_RULES = [
-  "showcase vs demo → static hero/benefit framing = product-showcase; visible in-use function/steps = product-demo.",
-  "testimonial vs spokesperson → genuine first-person CUSTOMER experience = testimonial; scripted/hosted pitch (incl. AI avatar) = spokesperson.",
-  "brand-story vs brand-awareness → cinematic FILMED scenes = brand-story; typography/no footage, text-led = brand-awareness. (no product, no person, text-led → brand-awareness.)",
+  "testimonial(UGC) vs founder-pov → a genuine first-person CUSTOMER review to camera = testimonial; the FOUNDER's own 'why we built it' insider story = founder-pov.",
   "brand-story vs inspirational → both are cinematic voiceover; a STRUCTURED through-story about the brand (values/origin/world/journey) = brand-story; an OPEN evocative mood/feeling montage with no required story = inspirational.",
-  "promo-offer vs announcement → has price/discount/urgency = promo-offer; new-thing/news without a deal = announcement.",
-  "founder-pov vs testimonial → insider/founder ('why WE built') = founder-pov; customer ('I bought') = testimonial.",
+  "product-demo vs lifestyle → visible in-use FUNCTION/steps with the product as the subject = product-demo; the product woven naturally into an aspirational real-life scene = lifestyle.",
+  "testimonial vs lifestyle → a person REVIEWS the product to camera = testimonial; the product just LIVES in the scene with nobody reviewing it = lifestyle.",
 ].join("\n");

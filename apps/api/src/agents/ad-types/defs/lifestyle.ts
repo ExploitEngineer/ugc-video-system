@@ -17,10 +17,10 @@ export const lifestyle: AdTypeDef = {
     "Aspirational real-life use occasion — the product woven naturally into a desirable everyday scene, shot cinematically and carried by voiceover. Differs from testimonial (no one reviews to camera; the product just lives in the moment) and brand-story (a concrete product-in-use occasion, not an abstract values/mood piece).",
   whenToUse: "awareness",
   assetPolicy: {
-    product: "required",
+    product: "optional",
     person: "optional",
     rationale:
-      "The product is the hero that must be seen in use; a person makes the occasion relatable but the scene can read aspirationally without one.",
+      "The product usually anchors the occasion but the scene can read aspirationally without a clear hero product; a person makes it relatable but is optional.",
   },
   lookFamily: "cinematic_polished",
   defaultHooks: ["relatable-scenario", "pattern-interrupt"],
