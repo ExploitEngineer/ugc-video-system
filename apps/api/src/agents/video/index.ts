@@ -303,9 +303,17 @@ export async function videoBuilder(
     // frame, so it is excluded; only the deliberately-controlled looks (demo_clean,
     // cinematic_polished) get it.
     const isHandheld = lookFamily === "ugc_authentic";
-    const negatives = videoNegatives(lookFamily);
-    const renderDirective =
-      "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
+    // Service ads are a multi-scene skit (cuts between distinct scenes, multiple
+    // synthesized characters, wanted on-screen stat/end-card text) — the per-look
+    // negatives ("ONE consistent face… no on-screen text") fight that, so service
+    // gets its own directive + negatives.
+    const isService = ctx.adType === "service";
+    const negatives = isService
+      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen; keep any on-screen stat/end-card text from the keyframes legible, never invent other text."
+      : videoNegatives(lookFamily);
+    const renderDirective = isService
+      ? "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene — each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels."
+      : "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
     prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
 

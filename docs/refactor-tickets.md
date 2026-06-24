@@ -61,9 +61,9 @@ Decisions:
 - [x] `storyboard/prompt.ts` consumes `ctx.creativeBrief`: a PLANNED STORY block renders the cast identity blocks + 4 scenes (scene i → panel i) with per-scene setting, colour-grade shift, who/dialogue, and on-screen text verbatim; a script directive ties each panel's sceneDescription/transcript to its planned scene. Brief nudged to exactly 4 scenes. `storyboard/index.ts` passes the brief.
 - [x] Verify: typecheck + 86 tests; real service storyboard renders the planned multi-scene story with a consistent synthesized cast. _(user manual test passed)_
 
-**S3 — multi-scene service video** (Seedance)
+**S3 — multi-scene service video (Seedance) ✅**
 
-- [ ] `video/prompt.ts` for service: per-scene beats, dialogue `speaks in English: "..."` (one speaker/shot), brand prefix, no restated identity.
+- [x] `video/prompt.ts` (both builders) + `video/index.ts` branch on service: clean CUTS between distinct scenes (not one continuous take), dialogue `speaks in English: "..."` one speaker per shot, service negatives (multi-character, on-screen text kept) instead of the cinematic ones, no product-object constraints. Non-service stays byte-identical (fragment-regression green). _(user manual test passed; brand prefix deferred to Chunk 5)_
 
 **S4 — service hooks (stat/question/pain) + dynamic selection**
 
