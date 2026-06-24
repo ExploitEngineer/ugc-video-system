@@ -43,9 +43,9 @@ Decisions:
 - **Prompt-improvement step** — expand the user's short service description into a rich, model-ready creative brief (cast, setting, conflict→resolution, hook, CTA) before storyboard/video.
 - Character toggle (Chunk 4) + brand guidelines (Chunk 5) become CENTRAL (service ads = synthesized cast + optional brand). Prompting (Chunks 6/7) must cover multi-scene skits + on-screen text + multi-actor.
 
-### Chunk R — Deep research: service-ad prompting (RUNNING)
+### Chunk R — Deep research: service-ad prompting ✅
 
-- [~] Deep-research pass → a build-ready spec in `research/` covering: prompt-improvement/expansion, multi-scene narrative storyboards (gpt-image-2), multi-scene live-action skits with dialogue + color-grade shifts + on-screen text (Seedance 2.0), dynamic hook selection, and keeping it general across service types.
+- [x] Deep-research pass (18 confirmed / 7 killed claims) → build-ready spec **`research/06-service-ad-prompting.md`**. Key: storyboard-first anchors synthesized-cast identity; Seedance dialogue = `speaks in English: "..."` (NOT `{braces}`), ONE speaker per shot (multi-person lip-sync unsolved); on-screen text = literal copy in quotes; hooks picked dynamically by awareness stage (re-add stat/question/pain hooks); flexible framework beats (PAS/AIDA/BAB), NOT a fixed second-by-second template; brand prefix block into both prompts.
 
 ### Chunk S — Service ad type + dynamic hooks + prompt-improvement
 
