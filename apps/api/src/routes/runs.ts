@@ -246,7 +246,7 @@ async function fileToBytes(file: File): Promise<Uint8Array> {
  * before we store them verbatim (the product image is NOT re-encoded). Rejects
  * mislabeled/undecodable content with a 422.
  */
-async function assertImageBytes(bytes: Uint8Array, field: string): Promise<void> {
+async function assertImageBytes(bytes: Uint8Array, field: string): Promise<string> {
   let format: string | undefined;
   try {
     format = (await sharp(Buffer.from(bytes)).metadata()).format;
@@ -256,6 +256,11 @@ async function assertImageBytes(bytes: Uint8Array, field: string): Promise<void>
   if (!format || !["png", "jpeg", "webp"].includes(format)) {
     throw unprocessable(`${field} is not a PNG, JPEG, or WebP image.`);
   }
+  // Return the TRUE mime sniffed from the bytes — the client-declared part type
+  // is unreliable (a WebP commonly arrives labelled image/png), and storing the
+  // wrong mime makes downstream AI calls send a mismatched data URI that Anthropic
+  // rejects as an opaque "400 Provider returned error".
+  return `image/${format}`;
 }
 
 /** Confirm MP4 bytes by the ISO-BMFF `ftyp` box marker at offset 4 (the
@@ -338,12 +343,13 @@ runs.post(
   if (productImage) {
     const productBytes = await fileToBytes(productImage as File);
     // Verify the bytes really decode as an allowed image — the declared MIME is
-    // client-controlled and the product image is stored verbatim.
-    await assertImageBytes(productBytes, "productImage");
+    // client-controlled and the product image is stored verbatim. Use the SNIFFED
+    // mime (not the client part type) so a mislabelled WebP is stored honestly.
+    const productMime = await assertImageBytes(productBytes, "productImage");
     uploads.push({
       kind: "product_upload",
       bytes: productBytes,
-      mime: (productImage as File).type,
+      mime: productMime,
     });
   }
   if (personImage) {
