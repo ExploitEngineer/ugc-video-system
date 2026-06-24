@@ -13,6 +13,7 @@ import {
 // run and must not render in the timeline. They remain in the shared `Step`
 // enum (and so in STEP_LABEL/STEP_AGENT below) for when the Critic is restored.
 export const STEP_ORDER: Step[] = [
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "storyboard",
@@ -21,6 +22,7 @@ export const STEP_ORDER: Step[] = [
 
 /** The multi-segment pipeline timeline — master storyboard → N clips → merge. */
 export const STEP_ORDER_MULTI: Step[] = [
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "segment_storyboard",
@@ -43,6 +45,7 @@ export function stepOrderFor(duration: RunDetail["duration"]): Step[] {
 const REFERENCE_STEPS: Step[] = ["product_sheet", "person_sheet"];
 
 export const STEP_LABEL: Record<Step, string> = {
+  creative_brief: "Creative brief",
   product_sheet: "Product reference sheet",
   person_sheet: "Person reference sheet",
   product_inspection: "Product inspection",
@@ -63,6 +66,10 @@ export interface StepAgent {
 }
 
 export const STEP_AGENT: Record<Step, StepAgent> = {
+  creative_brief: {
+    skill: "Creative Brief Builder",
+    agent: "Creative Direction Agent",
+  },
   product_sheet: { skill: "Product Sheet Builder", agent: "Image Agent" },
   person_sheet: { skill: "Person Sheet Builder", agent: "Image Agent" },
   product_inspection: { skill: "Product Inspection", agent: "Critic Agent" },

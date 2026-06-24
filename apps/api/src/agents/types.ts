@@ -87,9 +87,63 @@ export interface SkillContext {
    * share one grade/lighting/palette. Undefined for 15s runs.
    */
   visualStyle?: string;
+  /**
+   * Service-ad only — the creative-director brief from `runs.creative_brief`
+   * (cast + multi-scene plan + hook + CTA). The synthesized source of truth the
+   * storyboard renders when there is no product/person upload. Undefined for the
+   * product ad-types.
+   */
+  creativeBrief?: CreativeBrief;
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;
+}
+
+/**
+ * The service-ad creative brief — output of the `creative_brief` (creative
+ * director) step, persisted to `runs.creative_brief`. A dynamic, prompt-driven
+ * multi-scene plan: there is NO product/person upload, so the synthesized cast +
+ * scenes here are the source of truth the storyboard renders. Beats come from the
+ * chosen `framework`, not a fixed timeline.
+ */
+export interface CreativeBrief {
+  /** One-line creative concept for the ad. */
+  concept: string;
+  /** Chosen ad framework, e.g. "PAS" | "AIDA" | "BAB" | "testimonial" | "demo". */
+  framework: string;
+  /** Schwartz awareness stage the prompt maps onto, e.g. "problem-aware". */
+  awarenessStage: string;
+  /** The opening hook: a type + the spoken/on-screen line. */
+  hook: { type: string; line: string };
+  /** Synthesized cast — identity blocks the storyboard renders from (no upload). */
+  cast: BriefCharacter[];
+  /** 3-4 scenes, in play order — the arc of the chosen framework. */
+  scenes: BriefScene[];
+  /** Closing call-to-action + optional end-card copy. */
+  cta: {
+    line: string;
+    endCard?: { headline: string; tagline?: string; url?: string };
+  };
+}
+
+export interface BriefCharacter {
+  /** Short role label, e.g. "stressed marketer". Referenced by scenes. */
+  name: string;
+  /** Detailed identity block: apparent age, build, hair, skin, wardrobe. */
+  identity: string;
+}
+
+export interface BriefScene {
+  setting: string;
+  /** Grade/mood for this scene, e.g. "tense red emergency light". */
+  lighting: string;
+  /** Cast names present in this scene. */
+  charactersPresent: string[];
+  action: string;
+  /** Spoken lines (one speaker per shot downstream). */
+  dialogue?: { speaker: string; line: string }[];
+  /** Literal on-screen copy (a stat, a price, an end-card line). */
+  onScreenText?: string;
 }
 
 /**

@@ -7,6 +7,7 @@
 
 import type { AdTypeDef } from "./types.js";
 
+import { service } from "./defs/service.js";
 import { testimonial } from "./defs/testimonial.js";
 import { brandStory } from "./defs/brand-story.js";
 import { inspirational } from "./defs/inspirational.js";
@@ -28,6 +29,7 @@ export { adTypeIdSchema } from "@ugc/shared";
 // refactor (docs/refactor-tickets.md); dropped ids resolve via LEGACY_ALIASES so
 // old persisted runs keep working.
 const ALL_DEFS: AdTypeDef[] = [
+  service, // DEFAULT — service/skit ad, no uploads (creative_brief plans it)
   testimonial, // legacyMapping: "ugc" — UGC / Testimonial
   brandStory,
   inspirational, // legacyMapping: "inspirational"

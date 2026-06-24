@@ -49,10 +49,25 @@ Decisions:
 
 ### Chunk S — Service ad type + dynamic hooks + prompt-improvement
 
-- [ ] Register a single `service` ad-type (default); no required uploads; synthesized cast.
-- [ ] Dynamic hook selection from the prompt (re-add a stat/text hook if research confirms).
-- [ ] Prompt-improvement step in creative direction: short prompt → rich brief.
-- [ ] Verify: a bare "we provide X service" prompt (no uploads, optional brand) generates a coherent multi-scene service ad.
+**S1 — service type + creative-director brief ✅**
+
+- [x] Registered single `service` ad-type (default, no required uploads, synthesized cast) + skill; legacy ids untouched.
+- [x] New `creative_brief` step + Creative Brief Builder skill: short prompt → structured brief (`concept, framework, awarenessStage, hook, cast[], scenes[], cta`) persisted to `runs.creative_brief` (migration 0019). New `CreativeBrief` shared type.
+- [x] Distinct service path in orchestrator/plan: `creative_brief → storyboard → video` (skips product/person sheets); detector + create-form default to `service`; timeline shows "Creative brief" (hidden for product runs).
+- [x] Verify: typecheck + 86 tests + offline smoke; real service run passes end-to-end, brief jsonb is sane. _(user manual test passed — video quality not yet brief-driven, expected)_
+
+**S2 — multi-scene storyboard from the brief** (next)
+
+- [ ] `storyboard/prompt.ts` consumes `ctx.creativeBrief` for the service type: render the brief's cast (identity blocks) across distinct per-scene panels, color-grade shifts, on-screen text (hook stat / end card) in quotes.
+- [ ] Verify: service storyboard sheet shows the planned multi-scene story with a consistent synthesized cast.
+
+**S3 — multi-scene service video** (Seedance)
+
+- [ ] `video/prompt.ts` for service: per-scene beats, dialogue `speaks in English: "..."` (one speaker/shot), brand prefix, no restated identity.
+
+**S4 — service hooks (stat/question/pain) + dynamic selection**
+
+- [ ] Re-add stat/question/pain hooks for `service`; dynamic pick by awareness stage from the brief.
 
 ---
 

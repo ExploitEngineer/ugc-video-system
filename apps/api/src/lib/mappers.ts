@@ -179,6 +179,9 @@ export function toRunDetailDto(
     hasPersonUpload: assets.some((a) => a.kind === "person_upload"),
   };
   const skippedSteps: Step[] = [];
+  // creative_brief runs ONLY for the service type; product/person sheets run only
+  // for the product types — mark the other path's steps skipped in the timeline.
+  if (run.adType !== "service") skippedSteps.push("creative_brief");
   if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
   if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
   return {

@@ -18,7 +18,9 @@ export type RunStatus = z.infer<typeof runStatusSchema>;
 /**
  * Discrete pipeline units (`runs.currentStep`, `step_events.step`).
  *
- * The first six are the ~15s pipeline. The last four are the multi-segment
+ * `creative_brief` runs ONLY for the `service` ad-type (the creative-director
+ * step: short prompt → multi-scene brief; no product/person sheets). The 15s
+ * product/person pipeline and the last four multi-segment
  * pipeline (`isMultiSegment(duration)` — 30/45/60s): `narrative_outline` is
  * dormant; `segment_storyboard`/`segment_video` are single steps that fan out
  * over the run's N segments internally (the "which segment" dimension lives in
@@ -26,6 +28,7 @@ export type RunStatus = z.infer<typeof runStatusSchema>;
  * concatenates the N clips into the final video. A 15s run never emits these.
  */
 export const stepSchema = z.enum([
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "product_inspection",

@@ -64,7 +64,7 @@ export function CreateRunForm({
   // Auto-detect removed — the user always picks a type (the detector still infers
   // adStyle + hooks). Default to testimonial (UGC review): product-optional +
   // person synthesized, so it never blocks submit.
-  const [adType, setAdType] = useState<string>("testimonial");
+  const [adType, setAdType] = useState<string>("service");
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();

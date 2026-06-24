@@ -30,6 +30,13 @@ export interface DetectorFixture {
 export const DETECTOR_FIXTURES: DetectorFixture[] = [
   // ── happy path per surviving core type (asset-matched) ───────────────────
   {
+    name: "service-default-no-assets",
+    prompt: "We provide an AI tool that automates your ad campaigns",
+    input: { hasProduct: false, hasPerson: false },
+    rawDetector: { adType: "service", hooks: ["problem-solution"], confidence: 0.85 },
+    expected: { adType: "service", visualLeadHook: "problem-solution", synthesizePerson: false },
+  },
+  {
     name: "ugc-testimonial-happy",
     prompt:
       "A real customer talking to the camera about how much they love these running shoes",
@@ -122,7 +129,7 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     prompt: "???",
     input: { hasProduct: false, hasPerson: false },
     rawDetector: { adType: "qwerty-nonsense", hooks: [], confidence: 0.9 },
-    expected: { adType: "brand-story", synthesizePerson: false },
+    expected: { adType: "service", synthesizePerson: false },
   },
   {
     name: "clamp-legacy-ugc-alias",

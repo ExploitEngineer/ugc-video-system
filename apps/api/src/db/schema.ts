@@ -111,6 +111,7 @@ export const runs = pgTable(
     personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
     productBrief: text("product_brief"), // factual product identity anchor (category/materials/colors/markings); threaded to storyboard + critic
     productUse: jsonb("product_use"), // causal use-sequence {accessVerb,changedState,persistenceCue,functionSignal,useVerb}; baked into the storyboard still
+    creativeBrief: jsonb("creative_brief"), // service-ad only: creative-director brief { concept, framework, hook, cast, scenes, cta } — multi-scene plan with no product/person upload
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     duration: durationEnum("duration").notNull().default("15s"), // 15s single-clip pipeline | 60s four-clip merged pipeline

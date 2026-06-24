@@ -12,9 +12,11 @@ import { resolveHooks } from "./hooks/compose.js";
 /** Confidence below this falls back to the asset-implied default (coarse gate, not a probability). */
 export const CONFIDENCE_FLOOR = 0.55;
 
-/** The always-buildable default for an empty/garbage classification. */
+/** The always-buildable default for an empty/garbage classification. With a
+ *  product, the product-led demo; with NO uploads, the service skit (the
+ *  no-upload default — the synthesized cast carries it). */
 export function assetImpliedDefault(hasProduct: boolean): string {
-  return hasProduct ? "product-demo" : "brand-story";
+  return hasProduct ? "product-demo" : "service";
 }
 
 // ── adType clamp ────────────────────────────────────────────────────────────

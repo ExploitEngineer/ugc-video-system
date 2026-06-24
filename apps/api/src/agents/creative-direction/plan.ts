@@ -83,6 +83,10 @@ export function nextStep(
     ? "segment_storyboard"
     : "storyboard";
   switch (step) {
+    // Service path: the creative brief feeds straight into the storyboard
+    // (no product/person reference sheets).
+    case "creative_brief":
+      return multi ? "segment_storyboard" : "storyboard";
     case "product_sheet":
       return "person_sheet";
     case "person_sheet":

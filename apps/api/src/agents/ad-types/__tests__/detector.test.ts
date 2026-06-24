@@ -11,9 +11,9 @@ import {
 import { CONFUSABLE_RULES, renderAdTypeMenu, renderHookMenu } from "../menu.js";
 
 describe("assetImpliedDefault", () => {
-  it("product → product-demo, none → brand-story", () => {
+  it("product → product-demo, none → service", () => {
     expect(assetImpliedDefault(true)).toBe("product-demo");
-    expect(assetImpliedDefault(false)).toBe("brand-story");
+    expect(assetImpliedDefault(false)).toBe("service");
   });
 });
 
@@ -34,7 +34,7 @@ describe("clampAdType", () => {
   });
 
   it("falls back to the asset-implied default for garbage", () => {
-    expect(clampAdType("totally-unknown-xyz", false)).toBe("brand-story");
+    expect(clampAdType("totally-unknown-xyz", false)).toBe("service");
     expect(clampAdType("totally-unknown-xyz", true)).toBe("product-demo");
     expect(clampAdType("", true)).toBe("product-demo");
   });
@@ -46,10 +46,8 @@ describe("confidenceGate", () => {
   });
 
   it("overrides a low-confidence pick of a different look family", () => {
-    // testimonial (ugc_authentic) vs the no-asset default brand-story (cinematic_polished)
-    expect(confidenceGate("testimonial", 0.3, false, false)).toBe(
-      "brand-story",
-    );
+    // testimonial (ugc_authentic) vs the no-asset default service (cinematic_polished)
+    expect(confidenceGate("testimonial", 0.3, false, false)).toBe("service");
   });
 
   it("keeps a low-confidence pick that shares the default's look + is asset-compatible", () => {

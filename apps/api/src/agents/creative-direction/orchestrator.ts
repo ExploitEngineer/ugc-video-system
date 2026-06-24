@@ -54,6 +54,7 @@ import {
   narrativeOutline,
   PANELS_PER_SEGMENT,
 } from "./narrative-outline/index.js";
+import { creativeBrief } from "./creative-brief/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
 import { derivePersonBrief } from "./derive-person-brief/index.js";
 import {
@@ -194,6 +195,10 @@ function buildCtx(
     visualStyle: isMultiSegment(run.duration)
       ? (run.visualStyle ?? undefined)
       : undefined,
+    // Service ads only — the creative-director brief (cast + scenes + hook + CTA),
+    // planned by the `creative_brief` step and read back here on the next loop.
+    creativeBrief:
+      (run.creativeBrief as SkillContext["creativeBrief"]) ?? undefined,
     openai,
     video,
   };
@@ -402,6 +407,22 @@ async function executeStep(
     }
 
     // ── 60s pipeline ────────────────────────────────────────────────────
+
+    case "creative_brief": {
+      // Service ads: the creative director plans the synthesized cast + scenes
+      // (the multi-scene brief) BEFORE the storyboard — there is no product or
+      // person upload to anchor from. Persisted to runs.creative_brief.
+      await writeStepEvent({ runId, step, status: "started" });
+      const brief = await creativeBrief(ctx, { userPrompt });
+      await setRun(runId, { creativeBrief: brief });
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { scenes: brief.scenes.length, framework: brief.framework },
+      });
+      return {};
+    }
 
     case "narrative_outline": {
       // Plan the whole 60s arc as four segment summaries BEFORE any storyboard,
@@ -976,18 +997,36 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     const t0 = Date.now();
 
     if (run.currentStep === null) {
-      // First generation: product + person sheets run CONCURRENTLY (each skipped
-      // when its asset is optional + not uploaded). `person_sheet` is always the
-      // checkpoint the phase advances to — the gate/advance block below treats it
-      // exactly like a single completed reference step.
-      step = "person_sheet";
-      logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
-      const { failedStep, err, hasReference } = await runReferencePhase(ctx, tag);
-      if (failedStep) {
-        await failRun(runId, failedStep, err);
-        return;
+      if ((run.adType ?? "") === "service") {
+        // Service path: the creative-director brief runs FIRST (it plans the
+        // synthesized cast + scenes). No product/person reference sheets, so
+        // there is no reference gate.
+        step = "creative_brief";
+        logRun(runId, "▶ creative brief …", tag);
+        try {
+          ({ outcome } = await executeStep(ctx, step));
+        } catch (err) {
+          await failRun(runId, step, err);
+          return;
+        }
+        referenceExists = false;
+      } else {
+        // First generation: product + person sheets run CONCURRENTLY (each
+        // skipped when its asset is optional + not uploaded). `person_sheet` is
+        // always the checkpoint the phase advances to — the gate/advance block
+        // below treats it exactly like a single completed reference step.
+        step = "person_sheet";
+        logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
+        const { failedStep, err, hasReference } = await runReferencePhase(
+          ctx,
+          tag,
+        );
+        if (failedStep) {
+          await failRun(runId, failedStep, err);
+          return;
+        }
+        referenceExists = hasReference;
       }
-      referenceExists = hasReference;
     } else {
       step = nextStep(
         run.currentStep,
