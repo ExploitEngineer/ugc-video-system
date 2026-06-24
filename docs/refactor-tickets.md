@@ -32,6 +32,30 @@ Dropped: `social-proof, explainer, promo-offer, announcement, brand-awareness` (
 
 ---
 
+## PIVOT (2026-06-24) — service-based ads are now the PRIMARY product
+
+New direction: the system's main output is **service-based ads** — short narrative/skit ads for a SERVICE or software (SaaS, agency, local service, coaching). The user uploads **nothing** (no product, no person) and just writes what the service does; brand guidelines are optional. Synthesized actors, a multi-scene skit, a dynamic hook, optional on-screen stat/price/end-card — all **driven by the user prompt**, NOT a fixed template (the Gemini B2B breakdown is one example, too static to hardcode).
+
+Decisions:
+
+- **Add ONE `service` ad-type** alongside the existing 6 (they stay). `service` is the default; product/person uploads optional/absent.
+- **Fully dynamic, prompt-driven** — the hook and the beat structure derive from the user's prompt, never a hardcoded template. The cold-open hook set likely needs a stat/text-style hook re-added for service ads (pending research).
+- **Prompt-improvement step** — expand the user's short service description into a rich, model-ready creative brief (cast, setting, conflict→resolution, hook, CTA) before storyboard/video.
+- Character toggle (Chunk 4) + brand guidelines (Chunk 5) become CENTRAL (service ads = synthesized cast + optional brand). Prompting (Chunks 6/7) must cover multi-scene skits + on-screen text + multi-actor.
+
+### Chunk R — Deep research: service-ad prompting (RUNNING)
+
+- [~] Deep-research pass → a build-ready spec in `research/` covering: prompt-improvement/expansion, multi-scene narrative storyboards (gpt-image-2), multi-scene live-action skits with dialogue + color-grade shifts + on-screen text (Seedance 2.0), dynamic hook selection, and keeping it general across service types.
+
+### Chunk S — Service ad type + dynamic hooks + prompt-improvement
+
+- [ ] Register a single `service` ad-type (default); no required uploads; synthesized cast.
+- [ ] Dynamic hook selection from the prompt (re-add a stat/text hook if research confirms).
+- [ ] Prompt-improvement step in creative direction: short prompt → rich brief.
+- [ ] Verify: a bare "we provide X service" prompt (no uploads, optional brand) generates a coherent multi-scene service ad.
+
+---
+
 ## Chunks
 
 ### Chunk 0 — Housekeeping + baseline
@@ -56,10 +80,9 @@ Dropped: `social-proof, explainer, promo-offer, announcement, brand-awareness` (
 - [x] Hook → storyboard scene-1 + video first time-slice via `hookOpening` (unchanged seam).
 - [x] Verify: typecheck + 85 tests (incl. 4 fixed green-but-misleading tests); menu/opening dump; real run confirms the cold-open. _(user manual test passed)_
 
-### Chunk 3 — Creative Direction summary card UI (#2)
+### Chunk 3 — Creative Direction summary card UI (#2) ✅
 
-- [ ] Move the `adStyle` paragraph + creative chips out of the user bubble into a Creative Direction agent message (`run-view.tsx`); tidy chip layout; relabel "AI person" → "AI character".
-- [ ] Verify: studio visual check.
+- [x] Moved the `adStyle` paragraph + ad-type/hook/cast chips out of the user bubble into a dedicated "Creative direction" agent message (`run-view.tsx`); adStyle is now a real paragraph with the reel icon; "AI person" → "AI character"; "· auto" → "· detected". User bubble keeps the prompt + thumbnails + user-picked options. _(committed 84eb7b6)_
 
 ### Chunk 4 — Character On/Off toggle + dynamic main character + text supporting cast (#5)
 
