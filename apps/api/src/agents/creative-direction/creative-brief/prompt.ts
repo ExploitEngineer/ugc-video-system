@@ -7,10 +7,13 @@
 // the source of truth the storyboard renders.
 
 import type { ChatMessage } from "../../../providers/openai/index.js";
+import { formatBrand } from "../../../lib/brand.js";
 
 export interface CreativeBriefPromptInput {
   userPrompt: string;
   adStyle: string;
+  /** Optional user-typed brand guidelines (tone, palette, wording, do/don'ts). */
+  brandText?: string;
 }
 
 export function buildCreativeBriefPrompt(
@@ -46,6 +49,8 @@ export function buildCreativeBriefPrompt(
     "- End with a clear CTA and a simple end-card line.",
     "- Keep it realistic and specific to the service; there is no product to show,",
     "  so the people and the story carry it.",
+    "- If BRAND GUIDELINES are provided below, the ad MUST follow them — the colour",
+    "  palette, tone of voice, wording and the end-card; never contradict them.",
     "",
     "Return STRICT JSON only, exactly this shape (no prose, no markdown fences):",
     "{",
@@ -62,6 +67,7 @@ export function buildCreativeBriefPrompt(
   const user = [
     `SERVICE (what the user provided): ${input.userPrompt}`,
     input.adStyle ? `Style hint: ${input.adStyle}` : "",
+    formatBrand(input.brandText),
     "Write the creative brief now, as STRICT JSON.",
   ]
     .filter(Boolean)

@@ -261,6 +261,8 @@ export const createRunInputSchema = z.object({
    * registry fallback, never a hard reject.
    */
   adType: z.string().trim().optional(),
+  /** Optional user-typed brand guidelines (tone, palette, wording, do/don'ts). */
+  brandText: z.string().trim().max(4000).optional(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
 

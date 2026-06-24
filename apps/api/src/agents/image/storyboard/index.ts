@@ -96,6 +96,7 @@ async function renderStoryboard(
     full60s,
     segmentCount,
     creativeBrief: ctx.creativeBrief,
+    brandText: ctx.brandText,
   });
   // The storyboard plan is the longest LLM output in the pipeline, so JSON mode
   // + a generous token ceiling are essential (a truncated reply = invalid JSON).

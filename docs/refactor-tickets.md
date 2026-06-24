@@ -108,13 +108,15 @@ Decisions:
 - [ ] Character-planning step → `{ mainCharacter, supportingCast[] }`; carry `supportingCast` in ctx; splice into `storyboard/prompt.ts` + `video/prompt.ts`.
 - [ ] Verify: On + no upload → main character generated; Off → no `person_sheet`, upload hidden, run completes; 2-3-person prompt → supporting roles as text in prompts.
 
-### Chunk 5 — Brand guidelines: upload + extraction + text + inject (#1)
+### Chunk 5 — Brand guidelines: text + inject (#1)
 
-- [ ] Schema: `runs.brand_guidelines` jsonb + `runs.brand_text` text (+ migration).
-- [ ] `lib/brand/` (schema + `extractBrand()` vision call + `formatBrand()`), ported from `ai-ad-gen`.
-- [ ] `routes/runs.ts` accept brand file + text + logo, store, extract; `dto.ts`; brand inputs in `create-run-form.tsx`.
-- [ ] Inject brand into `interpret-style/prompt.ts`, `storyboard/prompt.ts`, `video/prompt.ts`.
-- [ ] Verify: real run with a brand deck — extraction populates `brand_guidelines`, brand appears in prompts, palette/tone visibly influences output.
+**5a — brand text box + inject ✅**
+
+- [x] Schema: `runs.brand_text` + `runs.brand_guidelines` (migration 0020). `lib/brand.ts` `formatBrand()`.
+- [x] Injected the brand block into the creative brief + storyboard + video prompts (both builders). `routes/runs.ts` accepts `brandText`; `dto.ts`; `SkillContext.brandText` + buildCtx; "Brand guidelines" textarea in the create-form Options popover.
+- [x] Verify: typecheck + 86 tests + web lint; real service run (OrderCalm) — brand palette/tone/name visibly drive the storyboard + the colour-grade shift. _(user manual test passed)_
+
+**5b — brand FILE upload + AI extraction + logo (deferred)** — file (PDF/image) → structured `brand_guidelines` via a vision LLM (ai-ad-gen pattern) + logo asset; revisit after the prompting pass.
 
 ### Chunk 6 — Prompting deep pass: gpt-image-2 storyboard (#6a)
 

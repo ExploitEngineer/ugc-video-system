@@ -63,6 +63,7 @@ export async function creativeBrief(
   const messages = buildCreativeBriefPrompt({
     userPrompt: input.userPrompt,
     adStyle: ctx.adStyle,
+    brandText: ctx.brandText,
   });
   // One retry with a larger ceiling on an unparseable reply (the brief is the
   // longest creative-direction output; a truncated body otherwise hard-fails).

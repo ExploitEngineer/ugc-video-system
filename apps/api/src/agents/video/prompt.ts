@@ -5,6 +5,7 @@ import { getAdType } from "../ad-types/registry.js";
 import { buildFragmentCtx } from "../ad-types/fragment-ctx.js";
 import { hookOpening } from "../ad-types/hooks/compose.js";
 import type { HookSelection } from "../ad-types/types.js";
+import { formatBrand } from "../../lib/brand.js";
 
 /** Per-ratio frame-orientation labels baked into the Seedance directive. */
 const FRAME_LABEL: Record<AspectRatio, { full: string; short: string }> = {
@@ -90,6 +91,8 @@ export function buildVideoPrompt(input: {
    * storyboard=1, face=2) to match the submitted content order.
    */
   hasProductSheet?: boolean;
+  /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
+  brandText?: string;
 }): ChatMessage[] {
   const {
     adStyle,
@@ -212,6 +215,7 @@ export function buildVideoPrompt(input: {
         : "Audio uses ONE consistent voiceover — a single voice for the whole ad, the same in every beat; never a second or overlapping voice.",
     hookDirective,
     pacingLine,
+    formatBrand(input.brandText),
     `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most ~90 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (camera + one action + the quoted line); NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, captions, badges or grid.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
@@ -279,6 +283,8 @@ export function buildDeterministicVideoPrompt(input: {
   segmentIndex?: number;
   /** 60s: whether the shared product sheet is attached (product = @Image 1). */
   hasProductSheet?: boolean;
+  /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
+  brandText?: string;
 }): string {
   const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
   const def = getAdType(adType);
@@ -286,6 +292,9 @@ export function buildDeterministicVideoPrompt(input: {
   // Service ads are a multi-scene skit (clean cuts, synthesized characters
   // speaking, no physical product to hold constant).
   const isService = def.id === "service";
+  const brandTail = formatBrand(input.brandText)
+    ? ` ${formatBrand(input.brandText)}.`
+    : "";
   const anchor = (input.characterAnchor ?? "").trim();
   const fctx = buildFragmentCtx({
     adStyle,
@@ -338,7 +347,7 @@ export function buildDeterministicVideoPrompt(input: {
     return (
       `Generate a short live-action SKIT from the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04), ONE per scene, used as the LOOK + identity reference. Render the four scenes IN ORDER with a clean CUT between each (DISTINCT settings/moments; the lighting may shift) in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage. ${presenterPin}` +
       `${shots}. ` +
-      `Each character's face, hair and wardrobe stay consistent across the scenes they appear in; ONE speaker per shot; motion natural and stable, ONE camera move per shot. ${audio} ` +
+      `Each character's face, hair and wardrobe stay consistent across the scenes they appear in; ONE speaker per shot; motion natural and stable, ONE camera move per shot. ${audio}${brandTail} ` +
       `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep any in-scene on-screen text from the keyframes (a stat, a price, the end-card line) legible, but NEVER render the sheet's panel-number badges, grid lines, dividers or bottom caption bars. ONE full-frame scene per shot with clean cuts between scenes, never a split-screen or panel grid.`
     );
   }
@@ -347,7 +356,7 @@ export function buildDeterministicVideoPrompt(input: {
   return (
     `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them. ${productPin}${presenterPin}` +
     `${shots}. ` +
-    `The camera makes at most ONE slow move per beat (or holds steady) and all motion stays slow and physically stable; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio} ` +
+    `The camera makes at most ONE slow move per beat (or holds steady) and all motion stays slow and physically stable; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio}${brandTail} ` +
     `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. ONE full-frame scene per shot, never a split-screen or panel grid. No on-screen text, captions, badges, panel grid or watermark${ugc ? "; no background music" : ""}.`
   );
 }

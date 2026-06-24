@@ -20,6 +20,7 @@ import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
 import { hookOpening } from "../../ad-types/hooks/compose.js";
 import type { HookSelection } from "../../ad-types/types.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
+import { formatBrand } from "../../../lib/brand.js";
 
 export interface StoryboardPromptInput {
   adStyle: string;
@@ -95,6 +96,8 @@ export interface StoryboardPromptInput {
    * planner invents the script as before (the product ad-types).
    */
   creativeBrief?: CreativeBrief;
+  /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
+  brandText?: string;
 }
 
 export interface StoryboardScene {
@@ -158,11 +161,13 @@ export function buildStoryboardPrompt({
   full60s,
   segmentCount,
   creativeBrief,
+  brandText,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
+  const brandLine = formatBrand(brandText);
 
   // Ad-type registry dispatch (Chunk F): the per-type / per-look prompt fragments
   // replace the old `adType === "ugc"` ternaries. Legacy ids resolve via aliases,
@@ -743,6 +748,7 @@ export function buildStoryboardPrompt({
     ...typeBlock,
     ...hookBlock,
     "",
+    ...(brandLine ? [brandLine, ""] : []),
     ...scriptGrounding,
     ...transcriptStyle,
     "",

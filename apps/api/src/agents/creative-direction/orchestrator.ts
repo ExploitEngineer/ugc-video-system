@@ -199,6 +199,8 @@ function buildCtx(
     // planned by the `creative_brief` step and read back here on the next loop.
     creativeBrief:
       (run.creativeBrief as SkillContext["creativeBrief"]) ?? undefined,
+    // Optional user-typed brand guidelines, injected into the prompts.
+    brandText: run.brandText ?? undefined,
     openai,
     video,
   };

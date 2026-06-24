@@ -94,6 +94,12 @@ export interface SkillContext {
    * product ad-types.
    */
   creativeBrief?: CreativeBrief;
+  /**
+   * Optional brand guidelines from `runs.brand_text` (user-typed: tone, palette,
+   * wording, do/don'ts). Injected into the creative brief, storyboard and video
+   * prompts so the output follows the brand. Undefined when none provided.
+   */
+  brandText?: string;
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;

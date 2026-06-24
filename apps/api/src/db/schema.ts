@@ -112,6 +112,8 @@ export const runs = pgTable(
     productBrief: text("product_brief"), // factual product identity anchor (category/materials/colors/markings); threaded to storyboard + critic
     productUse: jsonb("product_use"), // causal use-sequence {accessVerb,changedState,persistenceCue,functionSignal,useVerb}; baked into the storyboard still
     creativeBrief: jsonb("creative_brief"), // service-ad only: creative-director brief { concept, framework, hook, cast, scenes, cta } — multi-scene plan with no product/person upload
+    brandText: text("brand_text"), // optional user-typed brand guidelines (tone, palette, do/don'ts), injected into the prompts
+    brandGuidelines: jsonb("brand_guidelines"), // optional structured brand kit extracted from an uploaded brand file (5b); injected alongside brand_text
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     duration: durationEnum("duration").notNull().default("15s"), // 15s single-clip pipeline | 60s four-clip merged pipeline

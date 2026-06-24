@@ -302,6 +302,8 @@ runs.post(
     // Optional ad-type override (Chunk J). FormData omits it / sends "auto" for
     // the default auto-detect path.
     ...(body.adType ? { adType: body.adType } : {}),
+    // Optional user-typed brand guidelines (multipart text field).
+    ...(body.brandText ? { brandText: body.brandText } : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -309,7 +311,7 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, duration, criticEnabled, adType } =
+  const { prompt, mode, aspectRatio, duration, criticEnabled, adType, brandText } =
     parsed.data;
   // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
   // they surface immediately in detector_meta (the worker re-derives + enriches
@@ -375,6 +377,7 @@ runs.post(
       aspectRatio,
       duration,
       criticEnabled,
+      ...(brandText ? { brandText } : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
         : {}),

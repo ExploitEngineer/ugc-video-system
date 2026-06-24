@@ -215,7 +215,8 @@ export function StepTimeline({ run }: { run: RunDetail }) {
   // for the product types (where it's skipped) so they don't show a confusing
   // "Skipped" row for a step that isn't part of their pipeline at all.
   const order = stepOrderFor(run.duration).filter(
-    (s) => s !== "creative_brief" || !run.skippedSteps.includes("creative_brief"),
+    (s) =>
+      s !== "creative_brief" || !run.skippedSteps.includes("creative_brief"),
   );
 
   return (

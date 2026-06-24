@@ -65,6 +65,8 @@ export function CreateRunForm({
   // adStyle + hooks). Default to testimonial (UGC review): product-optional +
   // person synthesized, so it never blocks submit.
   const [adType, setAdType] = useState<string>("service");
+  // Optional brand guidelines (tone, palette, wording) — injected into the prompts.
+  const [brandText, setBrandText] = useState("");
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -131,6 +133,7 @@ export function CreateRunForm({
     fd.set("aspectRatio", aspectRatio);
     fd.set("duration", duration);
     fd.set("adType", adType);
+    if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
       try {
@@ -202,6 +205,8 @@ export function CreateRunForm({
               adType={adType}
               onAdType={setAdType}
               adTypes={adTypes}
+              brandText={brandText}
+              onBrandText={setBrandText}
             />
             <span className="text-muted-foreground hidden items-center pl-1 font-mono text-[11px] tabular-nums sm:inline-flex">
               {duration} · {aspectRatio} · {MODE_LABEL[mode]}
@@ -376,6 +381,8 @@ function OptionsMenu({
   adType,
   onAdType,
   adTypes,
+  brandText,
+  onBrandText,
 }: {
   mode: Mode;
   onMode: (m: Mode) => void;
@@ -386,6 +393,8 @@ function OptionsMenu({
   adType: string;
   onAdType: (t: string) => void;
   adTypes: AdTypeMenuItem[];
+  brandText: string;
+  onBrandText: (v: string) => void;
 }) {
   return (
     <Popover>
@@ -420,6 +429,15 @@ function OptionsMenu({
           </Field>
           <Field label="Mode">
             <ModeToggle value={mode} onChange={onMode} />
+          </Field>
+          <Field label="Brand guidelines">
+            <textarea
+              value={brandText}
+              onChange={(e) => onBrandText(e.target.value)}
+              rows={3}
+              placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
+              className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 text-xs outline-none"
+            />
           </Field>
         </div>
       </PopoverContent>
