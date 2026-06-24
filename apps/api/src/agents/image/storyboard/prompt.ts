@@ -708,8 +708,14 @@ export function buildStoryboardPrompt({
         "  CHANGES between panels as the story moves (a colour-grade shift is fine),",
         "  while each cast member's face, hair and wardrobe stay IDENTICAL across",
         "  panels. The panels connect CAUSALLY into one continuous story.",
-        "- Where a scene lists on-screen text, letter that copy VERBATIM into the",
-        "  panel (a stat, a price or the end-card line); keep it short and legible.",
+        "- ON-SCREEN TEXT: render any app / device / UI screen as realistic but with",
+        "  SHORT, ABSTRACT placeholder text — do NOT spell out long readable rows or",
+        "  lists (small text always renders garbled); at most a heading or one value",
+        "  is crisp. Render only the FEW hero text elements CRISP and lettered",
+        "  VERBATIM: the brand name, a single stat / number, and any end-card line.",
+        "- END CARD: if the planned story's last scene is an end card, render that",
+        "  panel as a clean, DESIGNED brand frame — the brand name / logo centred, a",
+        "  short tagline and URL on the brand background colour; NO people, NO clutter.",
         "",
       ]
     : [];

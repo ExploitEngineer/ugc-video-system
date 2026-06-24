@@ -118,7 +118,19 @@ Decisions:
 
 **5b — brand FILE upload + AI extraction + logo (deferred)** — file (PDF/image) → structured `brand_guidelines` via a vision LLM (ai-ad-gen pattern) + logo asset; revisit after the prompting pass.
 
-### Chunk 6 — Prompting deep pass: gpt-image-2 storyboard (#6a)
+### Chunk 6/7 — Prompting deep pass (now SERVICE-focused, iterative)
+
+**Round 1 — on-screen text + end card ✅**
+
+- [x] Garbled-UI-text fix: brief + storyboard render busy app/UI screens with ABSTRACT non-readable text; only the hero stat + end-card line crisp + verbatim. End card = brief scene 4 (brand name/logo + tagline + URL, no actors), rendered as a clean designed last panel. Video negatives match. _(user manual test passed)_
+
+**Open follow-ups (next rounds, driven by user-reported issues):**
+
+- [ ] identity/realism polish, supporting-cast presence, brand-palette adherence in-frame.
+- [ ] multi-segment service brief→panel mapping (30s/60s: 4 brief scenes → N×4 master).
+- [ ] (original product-type items below, lower priority post-pivot.)
+
+### Chunk 6 — Prompting deep pass: gpt-image-2 storyboard (#6a, product types)
 
 - [ ] Deepen `storyboard/prompt.ts` + `fragments/looks.ts` + `providers/openai` params: identity lock, anti-plastic-skin, panel-grid geometry, text fidelity, supporting-cast text, brand-palette adherence.
 - [ ] Verify: storyboards across the 6 types (with/without brand + supporting cast) for realism + identity consistency.
