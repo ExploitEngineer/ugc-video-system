@@ -387,6 +387,14 @@ export function buildStoryboardPrompt({
   const hasUse = Boolean(useVerb);
   const hasPrep = Boolean(accessVerb);
 
+  // Positional image binding — refs are pushed product-first, then person
+  // (storyboard/index.ts:146-148), so with a product sheet attached the person
+  // sheet is Image 2, else Image 1. gpt-image-2's images.edit gives no per-image
+  // role, so the prompt MUST name which attached image is which BY NUMBER —
+  // without it identity drifts to the product category's default (skincare→woman).
+  const hasProd = hasProduct ?? true;
+  const personImgNo = hasProd ? 2 : 1;
+
   // TEXT identity anchor — pins what the product IS so a drifting reference
   // sheet can't make the storyboard render a different kind of item.
   const productAnchor = product
@@ -394,8 +402,8 @@ export function buildStoryboardPrompt({
         "THE PRODUCT IS (authoritative identity — this exact item, nothing else):",
         product,
         "Every panel MUST show THIS product — the same category, form, materials and",
-        "markings described above AND shown in the product sheet. For exact COLOUR",
-        "and finish the attached product sheet is the sole authority: match its hues",
+        "markings described above AND shown in Image 1 (the product sheet). For exact",
+        "COLOUR and finish Image 1 (the product sheet) is the sole authority: match its hues",
         "precisely, never invent, restyle or shift the colour. If the sheet's KIND of",
         "item ever looks ambiguous, this text wins: never substitute a different kind",
         "of item. State this product by name in the `imagePrompt`.",
@@ -410,9 +418,13 @@ export function buildStoryboardPrompt({
     ? [
         "CHARACTER ANCHOR (the on-screen person — lock this and keep it 100%",
         "constant across ALL FOUR scenes, captions and transcripts):",
+        `- The person is the EXACT human shown in Image ${personImgNo} (the person sheet):`,
+        "  replicate their face, apparent gender, age, hair and skin tone IDENTICALLY",
+        "  in every panel — never invent a different person, never blend in features",
+        "  from any other attached image.",
         person
-          ? "- From the attached PERSON SHEET (authoritative), plus the person brief below, read and FIX the person's apparent"
-          : "- From the attached PERSON SHEET (authoritative) read and FIX the person's apparent",
+          ? `- From Image ${personImgNo} (the person sheet, authoritative), plus the person brief below, read and FIX the person's apparent`
+          : `- From Image ${personImgNo} (the person sheet, authoritative) read and FIX the person's apparent`,
         "  GENDER PRESENTATION, approximate age range, hair (length / color /",
         "  style), skin tone and build.",
         ...(person ? [`- Person brief: ${person}`] : []),
@@ -429,6 +441,26 @@ export function buildStoryboardPrompt({
         "  product brief flip the person's apparent gender.",
       ]
     : [];
+
+  // UPLOADED-PRODUCT FOCUS — when a real product was uploaded (Image 1), promote
+  // it to a featured on-screen HERO even for product-OPTIONAL types (brand-story,
+  // inspirational, lifestyle…), which otherwise treat the product as optional
+  // background and under-feature it. Skipped for graphic_text (explainer), whose
+  // product appears as a designed graphic element, not live photography.
+  const uploadedProductFocus =
+    fctx.hasProduct && !cleanGraphic
+      ? [
+          "UPLOADED PRODUCT — a real product was provided (Image 1, the product",
+          "sheet), so it is a FEATURED on-screen subject of THIS ad, never optional",
+          "set-dressing:",
+          "- Feature THIS exact product, identity-locked to Image 1, prominently and",
+          "  in sharp focus in the MAJORITY of the panels — woven naturally into the",
+          "  ad type's treatment (story, mood, demo or proof), not replacing it.",
+          "- Never omit the product, bury it in the deep background, or swap it for a",
+          "  generic stand-in; whenever a panel shows it, it is unmistakably the",
+          "  product from Image 1, at true-to-life scale.",
+        ]
+      : [];
 
   // Ad-type-specific direction for the script + transcripts (registry dispatch).
   const typeBlock = def.fragments.storyboardTypeBlock(fctx);
@@ -614,10 +646,14 @@ export function buildStoryboardPrompt({
 
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
-    "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity:",
+    "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity.",
+    "ATTACHED IMAGES — bind identity to them BY NUMBER (this exact order):",
+    hasProd
+      ? "- Image 1 = the PRODUCT reference sheet: render THIS exact item, matching its shape, colour, finish and markings in every panel."
+      : "",
     hasPerson
-      ? "a product sheet AND a person sheet are attached."
-      : "a product sheet is attached (no person in this ad).",
+      ? `- Image ${personImgNo} = the PERSON reference sheet: the human in Image ${personImgNo} is the EXACT on-screen person. Copy their face, apparent gender, age, hair and skin tone IDENTICALLY in every panel; never invent a different person, and never change or flip their gender — a "men's"/"women's" product does NOT set the person's gender.`
+      : "- No person in this ad.",
     "",
     "STEP 1 — REVIEW. First study the attached sheet(s) together with the user's",
     "prompt and the ad style. Note the product (its real form, materials,",
@@ -626,6 +662,7 @@ export function buildStoryboardPrompt({
     "and what the user wants the ad to say.",
     "",
     ...(product ? [...productAnchor, ""] : []),
+    ...(uploadedProductFocus.length ? [...uploadedProductFocus, ""] : []),
     ...(characterAnchor.length ? [...characterAnchor, ""] : []),
     ...typeBlock,
     ...hookBlock,

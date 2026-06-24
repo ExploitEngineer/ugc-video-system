@@ -305,7 +305,7 @@ export async function videoBuilder(
       );
     }
     roles.push(
-      `@Image${boardNo} (the storyboard) sets shot composition, framing and timeline — a 2×2 grid of four panels (top-left, top-right, bottom-left, bottom-right = 01→04); follow them in order, one per beat`,
+      `@Image${boardNo} (the storyboard) is a STYLE and FRAMING reference only — match its look, identity and shot order, but render ONE continuous full-frame scene, never its panel layout`,
     );
     if (faceUrl) {
       roles.push(
@@ -326,8 +326,8 @@ export async function videoBuilder(
     const isHandheld = lookFamily === "ugc_authentic";
     const negatives = videoNegatives(lookFamily);
     const renderDirective = isGraphic
-      ? "Render clean animated motion-graphics frames (no people, no live footage, no camera). Reproduce the board's typography, layout and brand colour but NEVER render its panel-number badges, grid lines, borders or caption/description bars."
-      : "Render ONE continuous live-action take with no cuts. The storyboard is a LOOK reference — reproduce its framing and identity but NEVER render its panel-number badges, grid lines, split-screen dividers, before/after labels, borders or bottom caption bars.";
+      ? "Render clean animated motion-graphics that FILL the frame — one design at a time, no people, no camera; reproduce the board's typography and brand colour, never its badges or panel grid."
+      : "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
     // Ad-level closer for text-carrying ads (kinetic-typography): stop invented
     // marks and keep any real figure legible.
     const textCloser = isGraphic

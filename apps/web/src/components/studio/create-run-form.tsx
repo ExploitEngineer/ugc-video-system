@@ -61,15 +61,17 @@ export function CreateRunForm({
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [duration, setDuration] = useState<Duration>("15s");
-  // Ad type — "auto" (default) lets the detector classify; an explicit pick locks it.
-  const [adType, setAdType] = useState<string>("auto");
+  // Auto-detect removed — the user always picks a type (the detector still infers
+  // adStyle + hooks). Default to testimonial (UGC review): product-optional +
+  // person synthesized, so it never blocks submit.
+  const [adType, setAdType] = useState<string>("testimonial");
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load the registry-driven ad-type menu once (best-effort — falls back to
-  // Auto-detect only if the API is unreachable).
+  // Load the registry-driven ad-type menu once (best-effort — the dropdown is
+  // empty until it lands, then defaults to the testimonial pick).
   useEffect(() => {
     let active = true;
     fetchAdTypes().then((list) => {
@@ -81,14 +83,13 @@ export function CreateRunForm({
   }, []);
 
   // Per-type asset requirement — drives whether the product upload is required
-  // and the hint shown. Auto-detect stays permissive (the detector adapts to
-  // whatever was uploaded); a specific pick requires a product only when its
-  // policy says so. Person is never a required upload (synthesized when needed).
-  const selectedType =
-    adType === "auto" ? null : (adTypes.find((o) => o.id === adType) ?? null);
+  // and the hint shown. The user always picks a type; it requires a product only
+  // when its policy says so. Person is never a required upload (synthesized when
+  // needed). `selectedType` is null only briefly while the menu is still loading.
+  const selectedType = adTypes.find((o) => o.id === adType) ?? null;
   const productRequired = selectedType?.assetPolicy.product === "required";
   const assetHint = !selectedType
-    ? "Auto-detect — add a product and/or person image, or none for a text-only ad type."
+    ? "Add a product and/or person image, or none for a text-only ad type."
     : selectedType.assetPolicy.product === "required"
       ? `${selectedType.displayName} needs a product image · person optional`
       : selectedType.assetPolicy.person === "required"
@@ -444,8 +445,8 @@ function Field({
   );
 }
 
-/** Ad-type dropdown — "Auto-detect" (default) + the registry's types. An
- *  explicit pick LOCKS the type; Auto runs the full detector. Themed shadcn
+/** Ad-type dropdown — the registry's types (no Auto-detect). The pick LOCKS the
+ *  type for the run; the detector still infers adStyle + hooks. Themed shadcn
  *  DropdownMenu (not a native select) so the open list matches the dark theme;
  *  scrolls and scales cleanly from 2 to 16+ types. */
 function AdTypeSelect({
@@ -457,16 +458,13 @@ function AdTypeSelect({
   onChange: (t: string) => void;
   options: AdTypeMenuItem[];
 }) {
-  const label =
-    value === "auto"
-      ? "Auto-detect"
-      : (options.find((o) => o.id === value)?.displayName ?? value);
+  const label = options.find((o) => o.id === value)?.displayName ?? value;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title="Auto-detect reads the ad type from your prompt; pick one to lock it."
+          title="Pick the ad type to generate."
           className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors"
         >
           <span className="truncate">{label}</span>
@@ -479,9 +477,6 @@ function AdTypeSelect({
         className="ring-glow max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-2xl border-border/70"
       >
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-          <DropdownMenuRadioItem value="auto" className="text-xs">
-            Auto-detect
-          </DropdownMenuRadioItem>
           {options.map((o) => (
             <DropdownMenuRadioItem
               key={o.id}

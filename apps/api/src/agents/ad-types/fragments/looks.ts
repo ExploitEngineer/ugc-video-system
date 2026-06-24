@@ -164,14 +164,17 @@ export const lookBase = (family: LookFamily): LookStrategy => LOOKS[family];
  * for motion-graphics.
  */
 export function videoNegatives(family: LookFamily): string {
+  // SHORT, positive-leaning tails (Seedance ignores long prompts and a 2×2 grid
+  // named repeatedly only PRIMES it to render the grid). ONE "full-frame scene"
+  // cue per look does the anti-grid work without re-describing the layout.
   switch (family) {
     case "graphic_text":
-      return "Animated text and shapes only — no people, no live footage, no camera move; keep every word and number correct and perfectly legible, no garbled or duplicated letters; never render panel-number badges, grid lines, borders or caption bars.";
+      return "Animated text and shapes only — no people, no camera; every word and number legible, no garbled letters; one full-frame design at a time, no panel grid or caption bars.";
     case "demo_clean":
-      return "The product stays rigid and dimensionally fixed — ONE single instance with identical silhouette, proportions, finish and printed markings in every frame; no duplicate or extra product, no morphing, no garbled label, no extra fingers; motion smooth and stable.";
+      return "ONE product, fixed shape and markings every frame — no morph, duplicate or garbled label; smooth stable motion; one full-frame scene.";
     case "ugc_authentic":
-      return "Keep ONE consistent real person and ONE product, identical in every frame; natural, stable motion; no warped or extra hands, no duplicated product, no on-screen text or captions.";
+      return "ONE real person and ONE product, consistent every frame; natural stable motion, no warped or extra hands; one full-frame scene, no on-screen text.";
     case "cinematic_polished":
-      return "Keep ONE consistent face and product identity, stable and rigid in every frame; smooth motion; no jitter, no identity drift, no warped face or product, no on-screen text.";
+      return "ONE consistent face and product, stable every frame; smooth motion, no identity drift or warping; one full-frame scene, no on-screen text.";
   }
 }

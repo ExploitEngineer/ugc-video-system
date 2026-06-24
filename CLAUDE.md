@@ -34,6 +34,15 @@ Per-package: `pnpm --filter <web|api> <script>`. Override api port with `PORT`.
 
 After dependency installs, pnpm requires explicit build-script approval for `@biomejs/biome`, `esbuild`, `sharp` (declared in `pnpm-workspace.yaml` `onlyBuiltDependencies`).
 
+## Verifying changes — SMOKE TEST every feature
+
+`pnpm typecheck` + `pnpm --filter api test` (vitest) are the FLOOR, not the bar — they never run the agents, the live LLM calls, or the providers. Every real failure here (LLM JSON truncation, an over-long Seedance prompt degrading the video, ad-type misdetection) was green in unit tests and only surfaced at runtime. So after building anything, smoke-test it for real before calling it done:
+
+- **Run the actual path end to end** (`pnpm dev`, generate a real run through the studio) or exercise the specific step — don't infer success from a passing build.
+- **Inspect the real output** in the local DB (`psql postgresql://postgres:postgres@localhost:5432/ugc`): `step_events` (a `failed` row + its `payload->>'detail'`), `runs.error`, `videos.provider_meta->>'videoPrompt'`, the persisted `scene_plan`/`scenes` jsonb — plus the api logs.
+- **For LLM/agent steps**, confirm the prompt the model actually receives is sane (length, not self-contradictory) and the reply parses. A passing fixture only proves the deterministic string shape, never the live model.
+- **New step or migration**: restart `pnpm dev:api` so the worker loads the new code AND the new pg enum/column, then confirm the step reaches `passed` on a real run.
+
 ## Layout & cross-package wiring
 
 ```
