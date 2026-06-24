@@ -49,11 +49,12 @@ Dropped: `social-proof, explainer, promo-offer, announcement, brand-awareness` (
 - [x] Verify: typecheck + 86 tests; menu dump = 6 types; real UGC + Product Demo runs `passed`.
 - [x] **Bugfix (surfaced in manual test):** a mislabelled image mime (WebP stored as `image/png`) made Claude-via-OpenRouter 400 on the product brief + sheet plan. Fixed by sniffing the true format at the provider boundary (+ AVIF/HEIC→PNG), storing the sniffed mime on upload, and surfacing real chat-error bodies.
 
-### Chunk 2 — Cold-open hooks (#4)
+### Chunk 2 — Cold-open hooks (#4) ✅
 
-- [ ] Replace `hooks/hook-defs.json` with the cold-open set + opening directives; update `hooks/registry.ts`, `hooks/compose.ts`, per-type `defaultHooks`/`allowedHooks`, detector menu.
-- [ ] Confirm hook → storyboard panel-1 + video first time-slice.
-- [ ] Verify: tests; real run — hook opens the first 3-4s in storyboard + `videoPrompt`.
+- [x] Replaced `hook-defs.json` with 7 cold-open hooks (kept stable ids + new `striking-visual`); dropped the 10 structural/copy hooks (stat-shock, social-proof, bold-claim, contrarian, direct-callout, unexpected-comparison, negativity-bias, question, demonstration, testimonial-as-hook).
+- [x] `registry`: 6 visual-leads + `curiosity-gap` as the lone overlay accent. `compose`: emptied the moot mutually-exclusive sets; remapped placeholders. All 6 defs' `defaultHooks`/`allowedHooks` → cold-open set.
+- [x] Hook → storyboard scene-1 + video first time-slice via `hookOpening` (unchanged seam).
+- [x] Verify: typecheck + 85 tests (incl. 4 fixed green-but-misleading tests); menu/opening dump; real run confirms the cold-open. _(user manual test passed)_
 
 ### Chunk 3 — Creative Direction summary card UI (#2)
 

@@ -25,13 +25,12 @@ export const brandStory: AdTypeDef = {
       "An open cinematic scene can succeed with neither a clear product nor a presenter, though either may appear.",
   },
   lookFamily: "cinematic_polished",
-  defaultHooks: ["curiosity-gap", "pattern-interrupt"],
+  defaultHooks: ["striking-visual", "pattern-interrupt"],
   allowedHooks: [
-    "curiosity-gap",
+    "striking-visual",
     "pattern-interrupt",
-    "question",
+    "curiosity-gap",
     "relatable-scenario",
-    "bold-claim",
   ],
   fragments: buildFragments("brand-story", "cinematic_polished"),
 };

@@ -34,8 +34,8 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     prompt:
       "A real customer talking to the camera about how much they love these running shoes",
     input: { hasProduct: true, hasPerson: true },
-    rawDetector: { adType: "testimonial", hooks: ["testimonial"], confidence: 0.9 },
-    expected: { adType: "testimonial", visualLeadHook: "testimonial", synthesizePerson: false },
+    rawDetector: { adType: "testimonial", hooks: ["confession"], confidence: 0.9 },
+    expected: { adType: "testimonial", visualLeadHook: "confession", synthesizePerson: false },
   },
   {
     name: "brand-story-happy",
@@ -56,8 +56,8 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     name: "product-demo-happy",
     prompt: "Show my blender crushing ice, step by step, so people see how it works",
     input: { hasProduct: true, hasPerson: false },
-    rawDetector: { adType: "product-demo", hooks: ["demonstration"], confidence: 0.8 },
-    expected: { adType: "product-demo", visualLeadHook: "demonstration", synthesizePerson: false },
+    rawDetector: { adType: "product-demo", hooks: ["problem-solution"], confidence: 0.8 },
+    expected: { adType: "product-demo", visualLeadHook: "problem-solution", synthesizePerson: false },
   },
   {
     name: "lifestyle-happy",
@@ -80,9 +80,8 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     name: "product-demo-no-product-downgrades-to-lifestyle",
     prompt: "Show this gadget in action solving the morning rush",
     input: { hasProduct: false, hasPerson: false },
-    rawDetector: { adType: "product-demo", hooks: ["demonstration"], confidence: 0.66 },
-    // product required + no product → downgrade to lifestyle (product optional);
-    // demonstration (needs product) is stripped on the way.
+    rawDetector: { adType: "product-demo", hooks: ["problem-solution"], confidence: 0.66 },
+    // product required + no product → downgrade to lifestyle (product optional).
     expected: { adType: "lifestyle", synthesizePerson: false },
   },
   {
@@ -115,7 +114,7 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     name: "clamp-near-miss",
     prompt: "honest review of these shoes",
     input: { hasProduct: true, hasPerson: true },
-    rawDetector: { adType: "testimonal", hooks: ["testimonial"], confidence: 0.9 }, // typo
+    rawDetector: { adType: "testimonal", hooks: ["problem-solution"], confidence: 0.9 }, // typo
     expected: { adType: "testimonial", synthesizePerson: false },
   },
   {
@@ -129,7 +128,7 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     name: "clamp-legacy-ugc-alias",
     prompt: "ugc review",
     input: { hasProduct: true, hasPerson: true },
-    rawDetector: { adType: "ugc", hooks: ["testimonial"], confidence: 0.9 },
+    rawDetector: { adType: "ugc", hooks: ["problem-solution"], confidence: 0.9 },
     expected: { adType: "testimonial", synthesizePerson: false },
   },
   {

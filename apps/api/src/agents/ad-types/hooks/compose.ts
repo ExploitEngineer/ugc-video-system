@@ -14,15 +14,14 @@
 import type { AdTypeDef, HookSelection, ResolvedHook } from "../types.js";
 import { getHook, hasHook, hookDefaultRole, type HookDef } from "./registry.js";
 
-// research/02 used snake_case placeholders in defaultHooks/allowedHooks and the
-// detector may echo them. Map each to its canonical catalog id (research/01).
-// `unboxing_reveal` has no standalone hook → folds to curiosity-gap +
-// demonstration. Unmapped ids fall through to a generic snake→kebab swap.
+// The detector may echo snake_case placeholders; map each to its canonical
+// cold-open catalog id. Unmapped ids fall through to a generic snake→kebab swap,
+// then get dropped if they aren't a real catalog hook.
 const PLACEHOLDER_TO_CANONICAL: Readonly<Record<string, string[]>> = {
   pain_point: ["problem-solution"],
   transformation: ["before-after"],
-  warning: ["negativity-bias"],
-  unboxing_reveal: ["curiosity-gap", "demonstration"],
+  unboxing_reveal: ["curiosity-gap"],
+  shock: ["striking-visual"],
 };
 
 /** Normalise a raw detected hook id to one or more canonical catalog ids. */
@@ -34,14 +33,11 @@ export function canonicalizeHookId(raw: string): string[] {
   return [id.replace(/_/g, "-")];
 }
 
-// Mutually-exclusive sets — the resolver must collapse each to ONE.
-const EXCLUSIVE_SETS: ReadonlyArray<ReadonlySet<string>> = [
-  new Set(["testimonial", "social-proof"]), // one person vs aggregate proof
-  new Set(["testimonial", "confession"]), // only one first spoken line
-  new Set(["problem-solution", "negativity-bias"]), // empathetic vs accusatory
-  new Set(["problem-solution", "demonstration"]), // hide-then-reveal vs show-now
-  new Set(["bold-claim", "contrarian"]), // two big-statement openings
-];
+// Mutually-exclusive sets — the resolver collapses each to ONE. The cold-open set
+// has no conflicting pairs (the devices layer cleanly, and two visual-leads are
+// already resolved to one by role assignment below), so this is empty. Kept as a
+// seam for future hooks.
+const EXCLUSIVE_SETS: ReadonlyArray<ReadonlySet<string>> = [];
 
 interface ResolveOpts {
   hasProduct: boolean;

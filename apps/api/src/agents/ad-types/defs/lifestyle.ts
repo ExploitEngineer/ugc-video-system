@@ -23,13 +23,13 @@ export const lifestyle: AdTypeDef = {
       "The product usually anchors the occasion but the scene can read aspirationally without a clear hero product; a person makes it relatable but is optional.",
   },
   lookFamily: "cinematic_polished",
-  defaultHooks: ["relatable-scenario", "pattern-interrupt"],
+  defaultHooks: ["relatable-scenario", "striking-visual"],
   allowedHooks: [
     "relatable-scenario",
+    "striking-visual",
     "pattern-interrupt",
     "curiosity-gap",
-    "direct-callout",
-    "bold-claim",
+    "before-after",
   ],
 
   fragments: buildFragments("lifestyle", "cinematic_polished"),

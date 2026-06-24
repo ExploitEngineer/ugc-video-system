@@ -1,9 +1,13 @@
-// The HookDef catalog (16 hooks). A hook is an ad-type-AGNOSTIC opening fragment
-// injected into scene 1 of the storyboard and the first time-slice of the video
-// prompt — layered on top of the ad-type fragments, with NO type×hook matrix.
+// The HookDef catalog (7 cold-open hooks). A hook is an ad-type-AGNOSTIC opening
+// device — a striking first 3-4 seconds — injected into scene 1 of the storyboard
+// and the first time-slice of the video prompt, layered on top of the ad-type
+// fragments with NO type×hook matrix.
 //
-// The 16 entries are the paste-ready JSON from the hook-library research doc,
-// loaded once and validated for shape + no duplicate ids.
+// Curated in the ad-gen refactor (docs/refactor-tickets.md) down from the original
+// 16 to short COLD-OPEN VISUAL devices only; the structural/copy overlays
+// (social-proof, stat-shock, bold-claim, contrarian, direct-callout,
+// unexpected-comparison, negativity-bias, question, demonstration, and the
+// testimonial hook) were dropped.
 
 import type { HookRole } from "../types.js";
 import hookDefs from "./hook-defs.json" with { type: "json" };
@@ -22,16 +26,16 @@ export interface HookDef {
   worksWithoutPerson: boolean;
 }
 
-// Visual-lead hooks own the first frame/action; overlay hooks layer a line/text
-// on top. (pattern-interrupt is catalogued as overlay default but is eligible as
-// a secondary visual-lead — handled in compose.ts.) Source: research/01 rule 2.
+// Visual-lead hooks own the first frame/action; the lone overlay hook
+// (curiosity-gap) layers a teasing spoken line on top of that frame. All
+// cold-open devices are visual leads except the curiosity tease.
 const VISUAL_LEAD_IDS = new Set<string>([
+  "striking-visual",
+  "pattern-interrupt",
   "problem-solution",
-  "demonstration",
   "before-after",
-  "testimonial",
-  "confession",
   "relatable-scenario",
+  "confession",
 ]);
 
 export const hookDefaultRole = (id: string): HookRole =>
@@ -63,5 +67,5 @@ export const getHook = (id: string): HookDef => {
 
 export const hasHook = (id: string): boolean => BY_ID.has(id);
 
-/** All 16 canonical hook ids, in catalog order. */
+/** All canonical hook ids, in catalog order. */
 export const allHookIds = (): string[] => HOOKS.map((h) => h.id);

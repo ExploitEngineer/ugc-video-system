@@ -27,12 +27,9 @@ export const founderPov: AdTypeDef = {
   allowedHooks: [
     "confession",
     "problem-solution",
-    "curiosity-gap",
-    "contrarian",
-    "direct-callout",
     "relatable-scenario",
-    "question",
-    "pattern-interrupt",
+    "curiosity-gap",
+    "striking-visual",
   ],
 
   fragments: buildFragments("founder-pov", "cinematic_polished"),

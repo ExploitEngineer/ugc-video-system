@@ -17,13 +17,13 @@ const mkDef = (allowedHooks: string[], defaultHooks: string[]): AdTypeDef =>
 const testimonial = getAdType("testimonial");
 
 describe("hook registry", () => {
-  it("has exactly 16 kebab-case hook ids", () => {
+  it("has exactly 7 kebab-case hook ids", () => {
     const ids = allHookIds();
-    expect(ids.length).toBe(16);
+    expect(ids.length).toBe(7);
     for (const id of ids) expect(id).toMatch(/^[a-z][a-z0-9-]*$/);
   });
 
-  it("classifies the 6 visual-lead hooks, the rest overlay", () => {
+  it("classifies the 6 visual-lead hooks; curiosity-gap is the overlay", () => {
     const leads = allHookIds().filter(
       (id) => hookDefaultRole(id) === "visual_lead",
     );
@@ -31,12 +31,13 @@ describe("hook registry", () => {
       [
         "before-after",
         "confession",
-        "demonstration",
+        "pattern-interrupt",
         "problem-solution",
         "relatable-scenario",
-        "testimonial",
+        "striking-visual",
       ].sort(),
     );
+    expect(hookDefaultRole("curiosity-gap")).toBe("overlay");
   });
 });
 
@@ -44,15 +45,11 @@ describe("canonicalizeHookId — placeholder → canonical", () => {
   it("maps the snake_case placeholders", () => {
     expect(canonicalizeHookId("pain_point")).toEqual(["problem-solution"]);
     expect(canonicalizeHookId("transformation")).toEqual(["before-after"]);
-    expect(canonicalizeHookId("warning")).toEqual(["negativity-bias"]);
-    expect(canonicalizeHookId("stat_shock")).toEqual(["stat-shock"]);
+    expect(canonicalizeHookId("shock")).toEqual(["striking-visual"]);
   });
 
-  it("folds unboxing_reveal into curiosity-gap + demonstration", () => {
-    expect(canonicalizeHookId("unboxing_reveal")).toEqual([
-      "curiosity-gap",
-      "demonstration",
-    ]);
+  it("folds unboxing_reveal into curiosity-gap", () => {
+    expect(canonicalizeHookId("unboxing_reveal")).toEqual(["curiosity-gap"]);
   });
 
   it("passes a canonical id through unchanged", () => {
@@ -60,7 +57,7 @@ describe("canonicalizeHookId — placeholder → canonical", () => {
   });
 
   it("every mapped id is a real catalog hook", () => {
-    for (const raw of ["pain_point", "transformation", "warning", "unboxing_reveal"]) {
+    for (const raw of ["pain_point", "transformation", "unboxing_reveal", "shock"]) {
       for (const id of canonicalizeHookId(raw)) expect(hasHook(id)).toBe(true);
     }
   });
@@ -77,44 +74,36 @@ describe("resolveHooks", () => {
   });
 
   it("asset guardrail: strips person-only hooks when no person", () => {
-    const sel = resolveHooks(testimonial, ["testimonial", "problem-solution"], {
+    // confession needs a person; with none it is stripped, leaving problem-solution.
+    const sel = resolveHooks(testimonial, ["confession", "problem-solution"], {
       hasProduct: true,
       hasPerson: false,
     });
-    expect(sel.visualLead.id).toBe("problem-solution"); // testimonial stripped
+    expect(sel.visualLead.id).toBe("problem-solution");
   });
 
-  it("asset guardrail: strips demonstration when no product", () => {
+  it("cold-open hooks all survive a no-product run (none are product-gated)", () => {
     const def = mkDef(
-      ["demonstration", "curiosity-gap"],
-      ["curiosity-gap", "demonstration"],
+      ["striking-visual", "curiosity-gap"],
+      ["striking-visual", "curiosity-gap"],
     );
-    const sel = resolveHooks(def, ["demonstration", "curiosity-gap"], {
+    const sel = resolveHooks(def, ["striking-visual", "curiosity-gap"], {
       hasProduct: false,
       hasPerson: true,
     });
-    expect(sel.visualLead.id).toBe("curiosity-gap");
-    expect(sel.overlay).toBeNull();
-  });
-
-  it("collapses a mutually-exclusive set to the higher scorer", () => {
-    const def = mkDef(["problem-solution", "demonstration"], ["demonstration"]);
-    const sel = resolveHooks(def, ["problem-solution", "demonstration"], {
-      hasProduct: true,
-      hasPerson: true,
-    });
-    // demonstration is the type default → wins the {problem-solution,demonstration} set
-    expect(sel.visualLead.id).toBe("demonstration");
+    expect(sel.visualLead.id).toBe("striking-visual");
+    expect(sel.overlay?.id).toBe("curiosity-gap");
   });
 
   it("takes the top 2 and assigns exactly one visual-lead + one overlay", () => {
+    // before-after is detected but NOT allowed → dropped; the allowed pair resolves.
     const def = mkDef(
-      ["problem-solution", "curiosity-gap", "stat-shock"],
+      ["problem-solution", "curiosity-gap"],
       ["problem-solution", "curiosity-gap"],
     );
     const sel = resolveHooks(
       def,
-      ["problem-solution", "curiosity-gap", "stat-shock"],
+      ["problem-solution", "curiosity-gap", "before-after"],
       { hasProduct: true, hasPerson: true },
     );
     expect(sel.visualLead.id).toBe("problem-solution");
@@ -124,8 +113,11 @@ describe("resolveHooks", () => {
   });
 
   it("never pairs two visual-leads (drops the weaker)", () => {
-    // testimonial + problem-solution are both visual_lead defaults of the type
-    const sel = resolveHooks(testimonial, ["testimonial", "problem-solution"], {
+    const def = mkDef(
+      ["striking-visual", "problem-solution"],
+      ["striking-visual", "problem-solution"],
+    );
+    const sel = resolveHooks(def, ["striking-visual", "problem-solution"], {
       hasProduct: true,
       hasPerson: true,
     });

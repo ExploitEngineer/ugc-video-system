@@ -88,14 +88,14 @@ describe("clampHooks", () => {
 describe("reconcile", () => {
   it("person-required + no person → synthesize, type unchanged, person-hook kept", () => {
     const out = reconcile(
-      { adType: "testimonial", hooks: ["testimonial"], confidence: 0.9 },
+      { adType: "testimonial", hooks: ["confession"], confidence: 0.9 },
       true,
       false,
     );
     expect(out.adType).toBe("testimonial");
     expect(out.synthesizePerson).toBe(true);
-    // synthesized person makes the testimonial hook valid again
-    expect(out.hooks.visualLead.id).toBe("testimonial");
+    // a synthesized person makes the person-only confession hook valid again
+    expect(out.hooks.visualLead.id).toBe("confession");
   });
 
   it("both-optional type with no assets → no synth, no downgrade", () => {
@@ -126,11 +126,11 @@ describe("detector menus", () => {
     expect(menu).toContain("look:");
   });
 
-  it("renderHookMenu lists all 16 hooks", () => {
+  it("renderHookMenu lists all 7 cold-open hooks", () => {
     const menu = renderHookMenu();
-    expect(menu.split("\n").length).toBe(16);
+    expect(menu.split("\n").length).toBe(7);
     expect(menu).toContain("problem-solution");
-    expect(menu).toContain("confession");
+    expect(menu).toContain("striking-visual");
   });
 
   it("CONFUSABLE_RULES is non-empty", () => {
