@@ -24,6 +24,12 @@ export interface PersonBriefPromptInput {
 export interface PersonBriefPlan {
   /** One concise paragraph: demographics, wardrobe, color palette to match the product. */
   personBrief: string;
+  /**
+   * Text-only secondary roles the prompt clearly implies (Chunk 4b) — a child, a
+   * partner, a colleague, a server. Each gets NO reference sheet; `[]` when the
+   * prompt implies no one else.
+   */
+  supportingCast?: { role: string; appearance: string }[];
 }
 
 export function buildPersonBriefPrompt({
@@ -69,13 +75,20 @@ export function buildPersonBriefPrompt({
     "anything product-like, and do NOT invent color-matched accessories (e.g. a",
     "wristband the same color as the product) — clothing only, no props.",
     "",
-    "This brief is handed to a downstream skill that generates the person as a",
-    "reference sheet WITHOUT seeing any image, so the brief must be fully",
+    "This brief is handed to a downstream skill that generates the MAIN person as",
+    "a reference sheet WITHOUT seeing any image, so the brief must be fully",
     "self-contained: do NOT say 'matching the product' — state the actual",
     "demographics, wardrobe, and clothing colors explicitly.",
     "",
+    "SUPPORTING CAST: if the prompt clearly implies OTHER people beyond the main",
+    "character (e.g. her kids, a partner, a coworker, a barista, a coach), list",
+    "each as a short `role` + a brief `appearance` (apparent age, build, hair,",
+    "wardrobe). These are SECONDARY, text-only — they get no reference sheet and",
+    "never upstage the main person. If the prompt implies no one else, return an",
+    "EMPTY array. Do NOT invent a crowd; only people the prompt actually implies.",
+    "",
     "Return STRICT JSON only, no prose, matching:",
-    '{ "personBrief": "<one concise paragraph, ~40-70 words, beginning with gender, age, hair>" }',
+    '{ "personBrief": "<one concise paragraph, ~40-70 words, beginning with gender, age, hair>", "supportingCast": [ { "role": "<short label>", "appearance": "<brief look>" } ] }',
   ].join("\n");
 
   const user: ChatMessage = {

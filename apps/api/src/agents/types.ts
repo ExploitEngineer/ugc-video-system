@@ -106,6 +106,12 @@ export interface SkillContext {
    * person-sheet branch in the orchestrator. Undefined defaults to On.
    */
   characterEnabled?: boolean;
+  /**
+   * Chunk 4b — text-only supporting roles (`runs.supporting_cast`) planned from
+   * the prompt for product-type ads. Woven into the storyboard + a short video
+   * mention; never get a reference sheet. Undefined/empty ⇒ no supporting cast.
+   */
+  supportingCast?: SupportingRole[];
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;
@@ -143,6 +149,19 @@ export interface BriefCharacter {
   name: string;
   /** Detailed identity block: apparent age, build, hair, skin, wardrobe. */
   identity: string;
+}
+
+/**
+ * A TEXT-ONLY supporting role (Chunk 4b) — a secondary person in a product-type
+ * ad who is NOT the main character and gets NO reference sheet. Planned from the
+ * prompt and woven into the storyboard (and a short video mention) so they render
+ * consistently without a face asset.
+ */
+export interface SupportingRole {
+  /** Short role label, e.g. "her teenage son", "a barista". */
+  role: string;
+  /** Brief appearance: apparent age, build, hair, wardrobe — enough to render. */
+  appearance: string;
 }
 
 export interface BriefScene {

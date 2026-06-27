@@ -13,7 +13,7 @@
 import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
-import type { CreativeBrief, ProductUse } from "../../types.js";
+import type { CreativeBrief, ProductUse, SupportingRole } from "../../types.js";
 import { getAdType } from "../../ad-types/registry.js";
 import { lookBase } from "../../ad-types/fragments/looks.js";
 import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
@@ -98,6 +98,12 @@ export interface StoryboardPromptInput {
   creativeBrief?: CreativeBrief;
   /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
   brandText?: string;
+  /**
+   * Chunk 4b — text-only supporting roles (`runs.supporting_cast`) for product
+   * ads. Rendered from text (no reference sheet) and held consistent across
+   * panels. Ignored for service ads (the creative brief carries their cast).
+   */
+  supportingCast?: SupportingRole[];
 }
 
 export interface StoryboardScene {
@@ -162,6 +168,7 @@ export function buildStoryboardPrompt({
   segmentCount,
   creativeBrief,
   brandText,
+  supportingCast,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
@@ -737,6 +744,21 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
+  // Chunk 4b — text-only supporting roles (product types only; the service brief
+  // already carries its own cast). Rendered from text, never a reference sheet.
+  const supportRoles = brief
+    ? []
+    : (supportingCast ?? []).filter((c) => c.role?.trim());
+  const supportingCastBlock = supportRoles.length
+    ? [
+        "- SUPPORTING CAST (text only — these people have NO reference sheet;",
+        "  render each from the description below and keep them CONSISTENT across",
+        "  the panels they appear in). They are SECONDARY to the main person and",
+        "  the product — never the hero of a panel, and never block or upstage them:",
+        ...supportRoles.map((c) => `  - ${c.role}: ${c.appearance}`),
+      ]
+    : [];
+
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
     "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity.",
@@ -835,6 +857,7 @@ export function buildStoryboardPrompt({
           "  references too.",
         ]
       : []),
+    ...supportingCastBlock,
     "",
     ...panelLabelBlock,
     "",

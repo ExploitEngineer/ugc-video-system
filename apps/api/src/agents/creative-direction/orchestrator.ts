@@ -204,6 +204,9 @@ function buildCtx(
     brandText: run.brandText ?? undefined,
     // Chunk 4 — the Character On/Off toggle for this run (drives the person sheet).
     characterEnabled: run.characterEnabled,
+    // Chunk 4b — text-only supporting roles planned from the prompt (product types).
+    supportingCast:
+      (run.supportingCast as SkillContext["supportingCast"]) ?? undefined,
     openai,
     video,
   };
@@ -671,13 +674,22 @@ async function runReferencePhase(
     if (!personUpload) {
       // No uploaded person but the character toggle is On → SYNTHESIZE the main
       // character. Plan the brief FIRST (the sheet skill READS runs.personBrief),
-      // from the uploaded product if one exists, else from the prompt alone.
-      const { personBrief } = await planPersonBrief(ctx, {
+      // from the uploaded product if one exists, else from the prompt alone. The
+      // planner also extracts any text-only supporting cast (Chunk 4b) — persisted
+      // so the next loop's ctx (storyboard) picks it up.
+      const { personBrief, supportingCast } = await planPersonBrief(ctx, {
         userPrompt,
         ...(productUpload ? { productUpload } : {}),
       });
-      await setRun(runId, { personBrief });
-      logRun(runId, `person brief (synthesized): "${personBrief}"`, tag);
+      await setRun(runId, {
+        personBrief,
+        ...(supportingCast.length ? { supportingCast } : {}),
+      });
+      logRun(
+        runId,
+        `person brief (synthesized): "${personBrief}"${supportingCast.length ? ` (+${supportingCast.length} supporting role${supportingCast.length > 1 ? "s" : ""})` : ""}`,
+        tag,
+      );
       await executeStep(ctx, "person_sheet");
       return;
     }

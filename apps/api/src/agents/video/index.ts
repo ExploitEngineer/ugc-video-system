@@ -205,6 +205,7 @@ export async function videoBuilder(
       visualStyle: ctx.visualStyle,
       hasProductSheet: Boolean(input.productSheetRef?.source),
       brandText: ctx.brandText,
+      supportingCast: ctx.supportingCast,
     });
     let videoPrompt = "";
     for (let attempt = 1; attempt <= 2 && !videoPrompt.trim(); attempt++) {
@@ -232,6 +233,7 @@ export async function videoBuilder(
         segmentIndex: input.segmentIndex,
         hasProductSheet: Boolean(input.productSheetRef?.source),
         brandText: ctx.brandText,
+        supportingCast: ctx.supportingCast,
       });
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }

@@ -113,10 +113,14 @@ Decisions:
 - [x] Floor: typecheck (3/3) + 86 api tests + web lint; migration applied to local DB; menu dump confirms per-type `characterDefault`.
 - [ ] **Manual test:** toggle On + no upload (e.g. brand-story/lifestyle) → a main character IS synthesized; toggle Off → person-upload hidden, NO `person_sheet`, run still completes; product-demo defaults Off, ugc/founder default On.
 
-**4b — text-only supporting cast `[ ]` (next sub-step)**
+**4b — text-only supporting cast `[~]` (implemented, awaiting manual test)**
 
-- [ ] Character-planning step → `{ mainCharacter, supportingCast[] }` (extends the prompt-only person-brief planner); persist `runs.supporting_cast`; carry in ctx; splice supporting-role TEXT into `storyboard/prompt.ts` + `video/prompt.ts` (no extra sheets).
-- [ ] Verify: a 2-3-person prompt → main sheet + supporting roles present as text in the storyboard + video prompts.
+- [x] `planPersonBrief` now also extracts `supportingCast: { role, appearance }[]` from the prompt (sanitized, capped at 3); the orchestrator persists it to `runs.supporting_cast`; `buildCtx` carries `ctx.supportingCast` (new shared `SupportingRole` type). Product types only — service uses the brief's own cast.
+- [x] Splice: full detail in the STORYBOARD still (gated SUPPORTING-CAST block, no reference sheet, held consistent across panels); a SHORT silent-background mention in both video builders (per the seedance-less-context principle — the still carries the look). All splices gated, so no-cast / legacy output stays byte-identical (fragment-regression green).
+- [x] Floor: typecheck (3/3) + 86 api tests + offline smoke (block present with cast, absent without).
+- [ ] **Manual test:** a 2-3-person product prompt (Character On, no person upload) → main sheet synthesized + supporting roles present as TEXT in the storyboard panels; `runs.supporting_cast` populated; the video keeps the background figure present + silent.
+
+**Chunk 4 is complete** once 4b's manual test passes (4a already committed `9087616`).
 
 ### Chunk 5 — Brand guidelines: text + inject (#1)
 

@@ -5,6 +5,7 @@ import { getAdType } from "../ad-types/registry.js";
 import { buildFragmentCtx } from "../ad-types/fragment-ctx.js";
 import { hookOpening } from "../ad-types/hooks/compose.js";
 import type { HookSelection } from "../ad-types/types.js";
+import type { SupportingRole } from "../types.js";
 import { formatBrand } from "../../lib/brand.js";
 
 /** Per-ratio frame-orientation labels baked into the Seedance directive. */
@@ -93,6 +94,8 @@ export function buildVideoPrompt(input: {
   hasProductSheet?: boolean;
   /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
   brandText?: string;
+  /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
+  supportingCast?: SupportingRole[];
 }): ChatMessage[] {
   const {
     adStyle,
@@ -118,6 +121,14 @@ export function buildVideoPrompt(input: {
   // is no physical product to hold constant.
   const isService = def.id === "service";
   const hasPerson = input.hasPerson ?? false;
+  // Chunk 4b — text-only supporting roles (product types). A SHORT mention only;
+  // the storyboard still carries their look. Gated so no-cast runs are unchanged.
+  const support = !isService
+    ? (input.supportingCast ?? []).filter((c) => c.role?.trim())
+    : [];
+  const supportLine = support.length
+    ? `Secondary background ${support.length === 1 ? "figure" : "figures"} from the storyboard (${support.map((c) => c.role).join(", ")}) stay present and consistent but SILENT — no dialogue; do not add or remove people.`
+    : "";
   const fctx = buildFragmentCtx({
     adStyle,
     hasProduct: Boolean(hasProductSheet),
@@ -207,6 +218,7 @@ export function buildVideoPrompt(input: {
       ? "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the character's spoken line in quotes. ONE speaker per slice (never two people talking at once — cut to whoever speaks). Keep motion natural and stable. Do NOT restate the characters' looks, wardrobe or the lighting in each slice — the storyboard carries that; no adjective stacking."
       : "",
     isService ? "" : "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the spoken line in quotes. Keep motion slow and stable; the product holds ONE fixed shape (no morph or duplicate); any prep (opening, unclasping) comes in an EARLIER slice and persists. Do NOT restate the person's look, wardrobe, lighting or style in each slice — the reference images carry that; no adjective stacking.",
+    supportLine,
     audioLine,
     isService
       ? ""
@@ -285,6 +297,8 @@ export function buildDeterministicVideoPrompt(input: {
   hasProductSheet?: boolean;
   /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
   brandText?: string;
+  /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
+  supportingCast?: SupportingRole[];
 }): string {
   const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
   const def = getAdType(adType);
@@ -294,6 +308,14 @@ export function buildDeterministicVideoPrompt(input: {
   const isService = def.id === "service";
   const brandTail = formatBrand(input.brandText)
     ? ` ${formatBrand(input.brandText)}.`
+    : "";
+  // Chunk 4b — text-only supporting roles (product types). Short mention; the
+  // storyboard still carries their look. Gated so no-cast runs are unchanged.
+  const support = !isService
+    ? (input.supportingCast ?? []).filter((c) => c.role?.trim())
+    : [];
+  const supportClause = support.length
+    ? `Secondary background figures (${support.map((c) => c.role).join(", ")}) stay present and consistent but silent. `
     : "";
   const anchor = (input.characterAnchor ?? "").trim();
   const fctx = buildFragmentCtx({
@@ -354,7 +376,7 @@ export function buildDeterministicVideoPrompt(input: {
 
   // Every other look is one continuous photoreal live-action take.
   return (
-    `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them. ${productPin}${presenterPin}` +
+    `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them. ${productPin}${presenterPin}${supportClause}` +
     `${shots}. ` +
     `The camera makes at most ONE slow move per beat (or holds steady) and all motion stays slow and physically stable; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio}${brandTail} ` +
     `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. ONE full-frame scene per shot, never a split-screen or panel grid. No on-screen text, captions, badges, panel grid or watermark${ugc ? "; no background music" : ""}.`
