@@ -5,10 +5,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate as drizzleMigrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { env } from "../config/index.js";
+import { databaseUrl } from "./connection-url.js";
 
 export async function migrate(): Promise<void> {
-  const migrationClient = postgres(env.DATABASE_URL, { max: 1, prepare: false });
+  const migrationClient = postgres(databaseUrl(), { max: 1, prepare: false });
 
   await drizzleMigrate(drizzle(migrationClient), {
     migrationsFolder: "./src/db/migrations",

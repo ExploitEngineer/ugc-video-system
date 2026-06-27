@@ -6,12 +6,14 @@
 
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { env } from "../config/index.js";
+import { databaseUrl } from "./connection-url.js";
 import * as schema from "./schema.js";
 
 // Supabase Postgres requires TLS. `prepare: false` keeps it compatible
 // with the transaction-mode pooler (PgBouncer) if that URL is used.
-const client = postgres(env.DATABASE_URL, { prepare: false });
+// `databaseUrl()` re-encodes the userinfo so an un-encoded password can't crash
+// the driver on boot (URIError: URI malformed).
+const client = postgres(databaseUrl(), { prepare: false });
 
 export const db = drizzle(client, { schema });
 
