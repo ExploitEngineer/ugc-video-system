@@ -134,6 +134,17 @@ Decisions:
 
 - [x] Garbled-UI-text fix: brief + storyboard render busy app/UI screens with ABSTRACT non-readable text; only the hero stat + end-card line crisp + verbatim. End card = brief scene 4 (brand name/logo + tagline + URL, no actors), rendered as a clean designed last panel. Video negatives match. _(user manual test passed)_
 
+**Round 1.5 — voice + hero-text fidelity ✅** _(committed `b3ba8ab`)_
+
+- [x] Each on-screen character keeps a CONSISTENT voice matching apparent age/gender across their scenes (service.skill.md + video/prompt.ts); hero + end-card text rendered VERBATIM letter-for-letter (storyboard/prompt.ts).
+
+**Round 2 — dynamic solution-screen + storyboard consistency/POV `[~]` (implemented, awaiting manual test)**
+
+- [x] **Dynamic UI screen** (prompt-driven, not a fixed template): brief authors an app/dashboard/device screen ONLY when the service is genuinely screen-based AND the beat needs it (creative-brief/prompt.ts — removed the "show busy screens/apps" push); video service negatives no longer force "Render busy app/UI screens" — they follow the storyboard and only keep screen text abstract IF a screen is shown (video/index.ts).
+- [x] **Storyboard consistency + POV** via `cinematic_polished.shotDirection` (was empty `[]`): shot-type variety, RECURRING SET & PROPS held identical across panels (fixes the drifting-towels case), and screens/devices framed OVER-THE-SHOULDER / POV (fixes POS screens facing camera). Reaches service + all cinematic product types. `plannedStoryBlock` MULTI-SCENE rule refined to hold shared settings identical.
+- [x] Floor: typecheck (3/3) + 86 api tests (fragment-regression `inspirational` storyboard baseline re-locked via `regen-legacy-fixtures.ts`) + web lint; offline dump confirms the shot-direction prose splices + the brief UI language is conditional.
+- [ ] **Manual test:** OrderEase (screen service) → screens POV/over-shoulder, kitchen + props consistent, solution screen still present; a NON-screen service (cleaning/coaching) → no forced UI screen; Lumio (brand-story) → one consistent towel/mug/counter across panels.
+
 **Open follow-ups (next rounds, driven by user-reported issues):**
 
 - [ ] identity/realism polish, supporting-cast presence, brand-palette adherence in-frame.

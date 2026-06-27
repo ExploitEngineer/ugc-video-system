@@ -311,7 +311,7 @@ export async function videoBuilder(
     // gets its own directive + negatives.
     const isService = ctx.adType === "service";
     const negatives = isService
-      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Render busy app/UI screens with abstract, non-readable text; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people); never render the sheet's badges, grid lines or caption bars."
+      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people); never render the sheet's badges, grid lines or caption bars."
       : videoNegatives(lookFamily);
     const renderDirective = isService
       ? "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene — each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels."

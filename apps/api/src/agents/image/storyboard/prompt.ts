@@ -704,10 +704,14 @@ export function buildStoryboardPrompt({
             .join(" — ");
           return `  ${i + 1}. ${place}${who} | action: ${s.action}${say}${txt}`;
         }),
-        "- MULTI-SCENE: each panel is its OWN setting + lighting/grade — the world",
-        "  CHANGES between panels as the story moves (a colour-grade shift is fine),",
-        "  while each cast member's face, hair and wardrobe stay IDENTICAL across",
-        "  panels. The panels connect CAUSALLY into one continuous story.",
+        "- MULTI-SCENE: render each panel in its scene's OWN authored setting +",
+        "  lighting/grade. When consecutive scenes SHARE a setting (the same",
+        "  location), render that location and its recurring props (furniture,",
+        "  fixtures, signage, devices) IDENTICALLY across those panels — same",
+        "  colours, layout and dressing; the world only CHANGES when the authored",
+        "  setting changes (a colour-grade shift is fine). Each cast member's face,",
+        "  hair and wardrobe stay IDENTICAL across every panel. The panels connect",
+        "  CAUSALLY into one continuous story.",
         "- ON-SCREEN TEXT: render any app / device / UI screen as realistic but with",
         "  SHORT, ABSTRACT placeholder text — do NOT spell out long readable rows or",
         "  lists (small text always renders garbled); at most a heading or one value",
