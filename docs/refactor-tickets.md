@@ -103,10 +103,20 @@ Decisions:
 
 ### Chunk 4 — Character On/Off toggle + dynamic main character + text supporting cast (#5)
 
-- [ ] Schema: `runs.character_enabled` boolean + `runs.supporting_cast` jsonb (one migration); `dto.ts` create-run + RunDetail.
-- [ ] Character On/Off control in `create-run-form.tsx` (default from ad-type); Off → hide person-upload. `willGeneratePerson` driven by `character_enabled`, not `personRequired` (`plan.ts`, `reconcile.ts`).
-- [ ] Character-planning step → `{ mainCharacter, supportingCast[] }`; carry `supportingCast` in ctx; splice into `storyboard/prompt.ts` + `video/prompt.ts`.
-- [ ] Verify: On + no upload → main character generated; Off → no `person_sheet`, upload hidden, run completes; 2-3-person prompt → supporting roles as text in prompts.
+**4a — character toggle + dynamic main character `[~]` (implemented, awaiting manual test)**
+
+- [x] Schema: `runs.character_enabled` boolean (default true) + `runs.supporting_cast` jsonb (migration `0021_next_mac_gargan`); `dto.ts` `createRunInputSchema.characterEnabled` (optional) + `runSchema.characterEnabled` + `adTypeMenuItemSchema.characterDefault`.
+- [x] `AdTypeDef.characterDefault` on all 7 defs (product-demo Off, rest On); exposed via `menu.ts`. The create-run route resolves the default from the picked type's `characterDefault` when the client omits it.
+- [x] `willGeneratePerson` driven by `character_enabled`, NOT `personRequired` (`plan.ts` AssetCtx + predicate; orchestrator `assetCtxFor`/reference-phase asset; `reconcile.ts` synthesize-person + person-hook validity via an optional `characterEnabled` param; `mappers.ts` skip-step ctx).
+- [x] Synthesize the main character even with NO uploads: `planPersonBrief`/`buildPersonBriefPrompt` now take `productUpload` OPTIONAL and plan the brief from the prompt alone when absent; orchestrator `personBranch` synthesizes whenever the toggle is On and no person was uploaded.
+- [x] Character On/Off control in `create-run-form.tsx` (Options popover, default from ad-type, re-syncs on type change); Off → hide person-upload + drop a stale file; hidden entirely for `service` (cast comes from the brief). Sends `characterEnabled` in the multipart body.
+- [x] Floor: typecheck (3/3) + 86 api tests + web lint; migration applied to local DB; menu dump confirms per-type `characterDefault`.
+- [ ] **Manual test:** toggle On + no upload (e.g. brand-story/lifestyle) → a main character IS synthesized; toggle Off → person-upload hidden, NO `person_sheet`, run still completes; product-demo defaults Off, ugc/founder default On.
+
+**4b — text-only supporting cast `[ ]` (next sub-step)**
+
+- [ ] Character-planning step → `{ mainCharacter, supportingCast[] }` (extends the prompt-only person-brief planner); persist `runs.supporting_cast`; carry in ctx; splice supporting-role TEXT into `storyboard/prompt.ts` + `video/prompt.ts` (no extra sheets).
+- [ ] Verify: a 2-3-person prompt → main sheet + supporting roles present as text in the storyboard + video prompts.
 
 ### Chunk 5 — Brand guidelines: text + inject (#1)
 

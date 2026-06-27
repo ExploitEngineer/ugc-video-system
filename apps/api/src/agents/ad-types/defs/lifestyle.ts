@@ -32,5 +32,6 @@ export const lifestyle: AdTypeDef = {
     "before-after",
   ],
 
+  characterDefault: true,
   fragments: buildFragments("lifestyle", "cinematic_polished"),
 };

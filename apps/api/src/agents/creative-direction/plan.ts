@@ -18,6 +18,13 @@ export interface AssetCtx {
   personRequired: boolean;
   hasProductUpload: boolean;
   hasPersonUpload: boolean;
+  /**
+   * Chunk 4 — the run's Character On/Off toggle. THIS, not `personRequired`,
+   * decides whether a main on-screen character is generated: On → one person
+   * sheet (uploaded if provided, else synthesized); Off → none. Defaulted from
+   * the ad-type's `characterDefault` at run creation.
+   */
+  characterEnabled: boolean;
 }
 
 /**
@@ -29,12 +36,14 @@ export function willGenerateProduct(a: AssetCtx): boolean {
 }
 
 /**
- * Will a person reference sheet be generated? Yes when a person was uploaded, OR
- * when the ad type REQUIRES a person (then it is synthesized from the brief).
- * An optional person with no upload is skipped.
+ * Will a person reference sheet be generated? Driven by the Character toggle
+ * (Chunk 4), NOT the ad type: yes when a person was uploaded, OR when the
+ * character toggle is On (then the main character is synthesized — from the
+ * product if one was uploaded, else from the prompt). Toggle Off + no upload →
+ * skipped, so the ad is product/scene-only.
  */
 export function willGeneratePerson(a: AssetCtx): boolean {
-  return a.hasPersonUpload || a.personRequired;
+  return a.hasPersonUpload || a.characterEnabled;
 }
 
 /** Whether the reference gate has ANY artifact to show (else it collapses). */

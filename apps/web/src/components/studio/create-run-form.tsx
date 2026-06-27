@@ -67,6 +67,10 @@ export function CreateRunForm({
   const [adType, setAdType] = useState<string>("service");
   // Optional brand guidelines (tone, palette, wording) — injected into the prompts.
   const [brandText, setBrandText] = useState("");
+  // Character On/Off toggle (Chunk 4) — whether a main on-screen character is
+  // generated (uploaded or synthesized). Defaults from the picked ad-type and
+  // re-syncs when the type changes.
+  const [characterEnabled, setCharacterEnabled] = useState(true);
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -84,12 +88,32 @@ export function CreateRunForm({
     };
   }, []);
 
+  // Reset the character toggle to the picked type's default when the type
+  // changes (and once the menu first loads). A later manual toggle persists —
+  // this only refires when adType/adTypes change.
+  useEffect(() => {
+    const t = adTypes.find((o) => o.id === adType);
+    if (t) setCharacterEnabled(t.characterDefault);
+  }, [adType, adTypes]);
+
   // Per-type asset requirement — drives whether the product upload is required
   // and the hint shown. The user always picks a type; it requires a product only
   // when its policy says so. Person is never a required upload (synthesized when
   // needed). `selectedType` is null only briefly while the menu is still loading.
   const selectedType = adTypes.find((o) => o.id === adType) ?? null;
   const productRequired = selectedType?.assetPolicy.product === "required";
+  // Service synthesizes its cast in the creative brief, so the toggle + person
+  // upload are moot there — hide both. For product types the toggle decides
+  // whether the person upload shows.
+  const isService = adType === "service";
+  const showCharacterControl = !isService && Boolean(selectedType);
+  const showPersonUpload = !isService && characterEnabled;
+
+  // Drop a stale person file when the upload is hidden (toggle off / service) so
+  // it is never sent for a character-off run.
+  useEffect(() => {
+    if (!showPersonUpload) setPersonFile(null);
+  }, [showPersonUpload]);
   const assetHint = !selectedType
     ? "Add a product and/or person image, or none for a text-only ad type."
     : selectedType.assetPolicy.product === "required"
@@ -127,12 +151,13 @@ export function CreateRunForm({
 
     const fd = new FormData();
     if (productFile) fd.set("productImage", productFile);
-    if (personFile) fd.set("personImage", personFile);
+    if (showPersonUpload && personFile) fd.set("personImage", personFile);
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
     fd.set("aspectRatio", aspectRatio);
     fd.set("duration", duration);
     fd.set("adType", adType);
+    fd.set("characterEnabled", String(characterEnabled));
     if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
@@ -188,13 +213,21 @@ export function CreateRunForm({
               onError={setError}
               required={productRequired}
             />
-            <AttachButton
-              label="Person"
-              icon={UserIcon}
-              file={personFile}
-              onFile={setPersonFile}
-              onError={setError}
-            />
+            {showCharacterControl && (
+              <CharacterChip
+                value={characterEnabled}
+                onChange={setCharacterEnabled}
+              />
+            )}
+            {showPersonUpload && (
+              <AttachButton
+                label="Person"
+                icon={UserIcon}
+                file={personFile}
+                onFile={setPersonFile}
+                onError={setError}
+              />
+            )}
             <OptionsMenu
               mode={mode}
               onMode={setMode}
@@ -508,6 +541,39 @@ function AdTypeSelect({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Compact Character On/Off chip for the composer bar — On → solid brand, Off →
+ *  dashed muted, mirroring the AttachButton chips. Toggles a main on-screen
+ *  character (uploaded if a person is added, else synthesized). */
+function CharacterChip({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      aria-pressed={value}
+      title={
+        value
+          ? "Character on — one main on-screen character (uploaded or synthesized). Click to turn off."
+          : "Character off — product/scene-only ad. Click to turn on."
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        value
+          ? "border-brand/50 bg-brand/10 text-foreground"
+          : "border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 border-dashed",
+      )}
+    >
+      <UserIcon className="size-3.5" />
+      Character {value ? "on" : "off"}
+    </button>
   );
 }
 

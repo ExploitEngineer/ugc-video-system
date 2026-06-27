@@ -161,17 +161,24 @@ export function reconcile(
   plan: RawPlan,
   hasProduct: boolean,
   hasPerson: boolean,
+  characterEnabled?: boolean,
 ): ReconciledPlan {
   let type = clampAdType(plan.adType, hasProduct);
   type = confidenceGate(type, plan.confidence, hasProduct, hasPerson);
   let def = getAdType(type);
 
-  let synthesizePerson = requires(def.assetPolicy.person) && !hasPerson;
+  // Chunk 4: the Character toggle decides whether a person is synthesized when
+  // none was uploaded. When `characterEnabled` is supplied it overrides the old
+  // person-REQUIRED rule; when omitted (legacy callers/tests) fall back to it.
+  const wantsPerson = (d: typeof def): boolean =>
+    (characterEnabled ?? requires(d.assetPolicy.person)) && !hasPerson;
+
+  let synthesizePerson = wantsPerson(def);
 
   if (requires(def.assetPolicy.product) && !hasProduct) {
     type = downgradeTarget(type, hasProduct, hasPerson);
     def = getAdType(type);
-    synthesizePerson = requires(def.assetPolicy.person) && !hasPerson;
+    synthesizePerson = wantsPerson(def);
   }
 
   // Hooks resolve against EFFECTIVE presence: a synthesized person makes

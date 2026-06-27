@@ -134,6 +134,8 @@ export const runSchema = z.object({
   /** Target ad length — `15s` (single clip) or `30/45/60s` (N merged clips). */
   duration: durationSchema,
   criticEnabled: z.boolean(),
+  /** Whether a main on-screen character is generated for this run (Chunk 4). */
+  characterEnabled: z.boolean(),
   status: runStatusSchema,
   /**
    * The LAST COMPLETED step — `null` before the first step finishes (a fresh
@@ -255,6 +257,14 @@ export const createRunInputSchema = z.object({
   criticEnabled: z.boolean(),
   hasPersonImage: z.boolean(),
   /**
+   * Character On/Off toggle (Chunk 4): whether ONE main on-screen character is
+   * generated — uploaded if provided, else SYNTHESIZED even with no upload.
+   * Optional on the wire; the create-run route defaults it from the picked
+   * ad-type's `characterDefault`. Drives `willGeneratePerson`, replacing the old
+   * person-REQUIRED gate.
+   */
+  characterEnabled: z.boolean().optional(),
+  /**
    * Optional ad-type override (Chunk J). `"auto"` (or omitted) = let the
    * detector classify; any other kebab id LOCKS the type (`ad_type_source` =
    * `"user"`). Validated as an open string; an unknown id resolves via the
@@ -275,6 +285,8 @@ export const adTypeMenuItemSchema = z.object({
     product: z.enum(["required", "optional", "forbidden"]),
     person: z.enum(["required", "optional", "forbidden"]),
   }),
+  /** Default state of the Character On/Off toggle when this type is picked. */
+  characterDefault: z.boolean(),
 });
 export type AdTypeMenuItem = z.infer<typeof adTypeMenuItemSchema>;
 

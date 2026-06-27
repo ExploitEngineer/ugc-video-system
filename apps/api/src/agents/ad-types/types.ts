@@ -159,6 +159,13 @@ export interface AdTypeDef {
   lookFamily: LookFamily; // which of the 4 shared bases this type uses
   defaultHooks: string[]; // HookDef ids (subset of allowedHooks)
   allowedHooks: string[]; // HookDef ids permitted for this type
+  /**
+   * Default state of the run's Character On/Off toggle (Chunk 4) for this type.
+   * The toggle — not the asset policy — decides whether a main on-screen person
+   * is generated (synthesized even with no upload). The type only seeds the
+   * default; the user can flip it. `true` = a person leads by default.
+   */
+  characterDefault: boolean;
   legacyMapping?: "ugc" | "inspirational"; // present ONLY on the two seed types
   fragments: FragmentSet;
 }

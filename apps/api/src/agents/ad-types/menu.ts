@@ -22,6 +22,7 @@ export function adTypeMenuList(): AdTypeMenuItem[] {
       product: def.assetPolicy.product,
       person: def.assetPolicy.person,
     },
+    characterDefault: def.characterDefault,
   }));
 }
 

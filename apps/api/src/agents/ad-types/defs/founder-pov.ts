@@ -32,5 +32,7 @@ export const founderPov: AdTypeDef = {
     "striking-visual",
   ],
 
+  // The founder is the storyteller — a character always leads.
+  characterDefault: true,
   fragments: buildFragments("founder-pov", "cinematic_polished"),
 };

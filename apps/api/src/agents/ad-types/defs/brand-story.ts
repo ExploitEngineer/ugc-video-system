@@ -32,5 +32,6 @@ export const brandStory: AdTypeDef = {
     "curiosity-gap",
     "relatable-scenario",
   ],
+  characterDefault: true,
   fragments: buildFragments("brand-story", "cinematic_polished"),
 };

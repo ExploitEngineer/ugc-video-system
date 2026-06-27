@@ -33,6 +33,7 @@ export const inspirational: AdTypeDef = {
     "curiosity-gap",
     "relatable-scenario",
   ],
+  characterDefault: true,
   legacyMapping: "inspirational",
   fragments: buildFragments("inspirational", "cinematic_polished"),
 };

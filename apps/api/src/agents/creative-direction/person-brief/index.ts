@@ -13,7 +13,13 @@ import { buildPersonBriefPrompt, type PersonBriefPlan } from "./prompt.js";
 
 export interface PlanPersonBriefInput {
   userPrompt: string;
-  productUpload: ImageRef;
+  /**
+   * The uploaded product image, when one exists — the brief is grounded in a
+   * plausible USER of it (vision). Omitted when the Character toggle synthesizes
+   * a main character with NO uploads: the brief is then planned from the prompt
+   * + ad style alone (no image).
+   */
+  productUpload?: ImageRef;
 }
 
 export async function planPersonBrief(

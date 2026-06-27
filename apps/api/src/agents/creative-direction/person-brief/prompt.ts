@@ -12,8 +12,12 @@ import type { ChatMessage, ImageRef } from "../../../providers/openai/index.js";
 export interface PersonBriefPromptInput {
   userPrompt: string;
   adStyle: string;
-  /** The uploaded product image — attached for vision. */
-  productUpload: ImageRef;
+  /**
+   * The uploaded product image — attached for vision when present. Omitted when
+   * the main character is synthesized from the prompt alone (Character toggle On,
+   * no uploads), in which case no image is attached.
+   */
+  productUpload?: ImageRef;
 }
 
 /** Shape the LLM must return as strict JSON. */
@@ -29,19 +33,36 @@ export function buildPersonBriefPrompt({
 }: PersonBriefPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
 
+  // Two modes: grounded in an uploaded product (vision), or — when the Character
+  // toggle synthesizes a main character with no uploads — invented from the
+  // prompt + style alone (no image).
+  const lead = productUpload
+    ? [
+        "A product image is attached. Looking at the product and the requested ad",
+        "style, describe the ideal on-camera PERSON to feature in the ad — a real,",
+        "plausible USER of this kind of product, the sort of human who naturally",
+        "belongs in the same commercial as it.",
+      ]
+    : [
+        "No image is attached. From the user's prompt and the requested ad style,",
+        "describe the ideal on-camera MAIN CHARACTER to feature in the ad — a real,",
+        "plausible person who naturally belongs in this scene and would credibly",
+        "front this ad.",
+      ];
+
+  const grounding = productUpload
+    ? "Keep it grounded in what the product actually is and who would realistically use or be marketed it."
+    : "Keep it grounded in the prompt — match who this ad is for and the world it depicts.";
+
   const system = [
     "You are the Creative Direction Agent for an AI ad-video generator.",
-    "A product image is attached. Looking at the product and the requested ad",
-    "style, describe the ideal on-camera PERSON to feature in the ad — a real,",
-    "plausible USER of this kind of product, the sort of human who naturally",
-    "belongs in the same commercial as it.",
+    ...lead,
     "",
     "OPEN the brief by stating, in this order and explicitly: apparent GENDER",
     'PRESENTATION (e.g. "a woman" / "a man"), an approximate AGE RANGE, and HAIR',
     "(length, color, style). THEN add the rest of the look, wardrobe (ordinary",
     "clothing) and a tasteful clothing color palette in believable everyday",
-    "colors. Keep it grounded in what the product actually is and who would",
-    "realistically use or be marketed it.",
+    `colors. ${grounding}`,
     "",
     "DESCRIBE THE PERSON ONLY. Do NOT mention the product, a bottle, or ANY",
     "handheld item, prop, bag or accessory. Do NOT have them hold, wear or display",
@@ -49,7 +70,7 @@ export function buildPersonBriefPrompt({
     "wristband the same color as the product) — clothing only, no props.",
     "",
     "This brief is handed to a downstream skill that generates the person as a",
-    "reference sheet WITHOUT seeing the product, so the brief must be fully",
+    "reference sheet WITHOUT seeing any image, so the brief must be fully",
     "self-contained: do NOT say 'matching the product' — state the actual",
     "demographics, wardrobe, and clothing colors explicitly.",
     "",
@@ -62,9 +83,11 @@ export function buildPersonBriefPrompt({
     content: [
       `Ad style: ${style}`,
       `User prompt: ${userPrompt}`,
-      "The product image is attached. Return the person brief as strict JSON.",
+      productUpload
+        ? "The product image is attached. Return the person brief as strict JSON."
+        : "Return the person brief as strict JSON.",
     ].join("\n"),
-    images: [productUpload],
+    ...(productUpload ? { images: [productUpload] } : {}),
   };
 
   return [{ role: "system", content: system }, user];

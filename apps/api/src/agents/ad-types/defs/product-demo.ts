@@ -33,6 +33,8 @@ export const productDemo: AdTypeDef = {
     "pattern-interrupt",
     "curiosity-gap",
   ],
-
+  // The product is the hero; no on-screen character by default (the user can
+  // turn one On to add a presenter).
+  characterDefault: false,
   fragments: buildFragments("product-demo", "demo_clean"),
 };

@@ -120,6 +120,8 @@ export const runs = pgTable(
     narrativeOutline: jsonb("narrative_outline"), // 60s only: { segments: [{ index, beat, summary }], visualStyle } — continuity arc planned before any storyboard
     visualStyle: text("visual_style"), // 60s only: locked visual-style bible (grade/lens/lighting/palette/time-of-day arc), injected verbatim into all 4 storyboard + 4 video prompts
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
+    characterEnabled: boolean("character_enabled").notNull().default(true), // Chunk 4 toggle: generate ONE main on-screen character (uploaded or synthesized). The create-run route sets it explicitly from the ad-type's characterDefault; this column default only covers direct inserts.
+    supportingCast: jsonb("supporting_cast"), // Chunk 4b: text-only supporting roles [{ role, appearance }] planned from the prompt, woven into storyboard + video prompts (no extra reference sheets)
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
     error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)

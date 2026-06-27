@@ -100,6 +100,12 @@ export interface SkillContext {
    * prompts so the output follows the brand. Undefined when none provided.
    */
   brandText?: string;
+  /**
+   * Chunk 4 — the run's Character On/Off toggle. When On, a main on-screen
+   * character is generated (uploaded or synthesized); when Off, none. Drives the
+   * person-sheet branch in the orchestrator. Undefined defaults to On.
+   */
+  characterEnabled?: boolean;
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;

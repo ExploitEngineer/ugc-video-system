@@ -93,6 +93,7 @@ export type RunListRow = Pick<
   | "aspectRatio"
   | "duration"
   | "criticEnabled"
+  | "characterEnabled"
   | "status"
   | "currentStep"
   | "error"
@@ -119,6 +120,7 @@ export function toRunDto(row: RunListRow): Run {
     aspectRatio: row.aspectRatio,
     duration: row.duration,
     criticEnabled: row.criticEnabled,
+    characterEnabled: row.characterEnabled,
     status: row.status,
     // Pass `currentStep` through verbatim — null means "no step has completed
     // yet" (fresh run) or "parallel reference phase in flight". Coalescing it to
@@ -177,6 +179,8 @@ export function toRunDetailDto(
     personRequired: policy.person === "required",
     hasProductUpload: assets.some((a) => a.kind === "product_upload"),
     hasPersonUpload: assets.some((a) => a.kind === "person_upload"),
+    // Chunk 4 — drives the person_sheet skip mark below (matches the orchestrator).
+    characterEnabled: run.characterEnabled,
   };
   const skippedSteps: Step[] = [];
   // creative_brief runs ONLY for the service type; product/person sheets run only

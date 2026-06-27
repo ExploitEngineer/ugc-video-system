@@ -166,6 +166,7 @@ function assetCtxFor(
     personRequired: policy.person === "required",
     hasProductUpload: Boolean(uploads.productUpload),
     hasPersonUpload: Boolean(uploads.personUpload),
+    characterEnabled: run.characterEnabled,
   };
 }
 
@@ -201,6 +202,8 @@ function buildCtx(
       (run.creativeBrief as SkillContext["creativeBrief"]) ?? undefined,
     // Optional user-typed brand guidelines, injected into the prompts.
     brandText: run.brandText ?? undefined,
+    // Chunk 4 — the Character On/Off toggle for this run (drives the person sheet).
+    characterEnabled: run.characterEnabled,
     openai,
     video,
   };
@@ -649,6 +652,8 @@ async function runReferencePhase(
     personRequired: policy.person === "required",
     hasProductUpload: Boolean(productUpload),
     hasPersonUpload: Boolean(personUpload),
+    // Chunk 4 — the Character toggle, not the asset policy, decides the person sheet.
+    characterEnabled: ctx.characterEnabled ?? true,
   };
   const genProduct = willGenerateProduct(asset);
   const genPerson = willGeneratePerson(asset);
@@ -660,18 +665,19 @@ async function runReferencePhase(
   // photo). The product branch runs alongside and never waits on the brief.
   const personBranch = async (): Promise<void> => {
     if (!genPerson) {
-      logRun(runId, "↪ skip person_sheet (optional, none uploaded)", tag);
+      logRun(runId, "↪ skip person_sheet (character toggle off, none uploaded)", tag);
       return;
     }
-    if (productUpload && !personUpload) {
-      // Invent the person from the product — the sheet skill READS this brief,
-      // so it must be persisted BEFORE the person_sheet step.
+    if (!personUpload) {
+      // No uploaded person but the character toggle is On → SYNTHESIZE the main
+      // character. Plan the brief FIRST (the sheet skill READS runs.personBrief),
+      // from the uploaded product if one exists, else from the prompt alone.
       const { personBrief } = await planPersonBrief(ctx, {
         userPrompt,
-        productUpload,
+        ...(productUpload ? { productUpload } : {}),
       });
       await setRun(runId, { personBrief });
-      logRun(runId, `person brief: "${personBrief}"`, tag);
+      logRun(runId, `person brief (synthesized): "${personBrief}"`, tag);
       await executeStep(ctx, "person_sheet");
       return;
     }
@@ -704,7 +710,6 @@ async function runReferencePhase(
       await Promise.all([deriveBrief, executeStep(ctx, "person_sheet")]);
       return;
     }
-    await executeStep(ctx, "person_sheet");
   };
 
   // Product-identity branch — vision over the upload → a factual product brief,
@@ -810,6 +815,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         },
         hasProduct,
         personUploaded,
+        run.characterEnabled,
       );
       const hookLabel = [plan.hooks.visualLead.id, plan.hooks.overlay?.id]
         .filter(Boolean)

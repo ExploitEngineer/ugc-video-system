@@ -33,6 +33,8 @@ export const testimonial: AdTypeDef = {
     "curiosity-gap",
     "striking-visual",
   ],
+  // A UGC review is a person speaking to camera — a character leads by default.
+  characterDefault: true,
   legacyMapping: "ugc",
   fragments: buildFragments("testimonial", "ugc_authentic"),
 };

@@ -12,10 +12,10 @@ import {
 } from "../plan.js";
 
 // Representative asset contexts.
-const testimonial: AssetCtx = { productRequired: false, personRequired: true, hasProductUpload: true, hasPersonUpload: false }; // product uploaded, person synthesized
-const brandStoryNoPerson: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: true, hasPersonUpload: false }; // person SKIPPED
-const personUploaded: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: false, hasPersonUpload: true };
-const neither: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: false, hasPersonUpload: false }; // both skipped
+const testimonial: AssetCtx = { productRequired: false, personRequired: true, hasProductUpload: true, hasPersonUpload: false, characterEnabled: true }; // product uploaded, character on → person synthesized
+const brandStoryNoPerson: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: true, hasPersonUpload: false, characterEnabled: false }; // character off + none → person SKIPPED
+const personUploaded: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: false, hasPersonUpload: true, characterEnabled: false }; // upload alone generates the person
+const neither: AssetCtx = { productRequired: false, personRequired: false, hasProductUpload: false, hasPersonUpload: false, characterEnabled: false }; // both skipped
 
 describe("asset-step predicates", () => {
   it("product generates only from an upload", () => {
@@ -23,10 +23,10 @@ describe("asset-step predicates", () => {
     expect(willGenerateProduct(neither)).toBe(false);
   });
 
-  it("person generates when uploaded OR required", () => {
-    expect(willGeneratePerson(testimonial)).toBe(true); // required → synthesize
+  it("person generates when uploaded OR character toggle on", () => {
+    expect(willGeneratePerson(testimonial)).toBe(true); // character on → synthesize
     expect(willGeneratePerson(personUploaded)).toBe(true); // uploaded
-    expect(willGeneratePerson(brandStoryNoPerson)).toBe(false); // optional + none → skip
+    expect(willGeneratePerson(brandStoryNoPerson)).toBe(false); // character off + none → skip
     expect(willGeneratePerson(neither)).toBe(false);
   });
 

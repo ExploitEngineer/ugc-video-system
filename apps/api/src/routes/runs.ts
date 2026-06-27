@@ -154,6 +154,7 @@ async function loadRunList(): Promise<Run[]> {
       aspectRatio: schema.runs.aspectRatio,
       duration: schema.runs.duration,
       criticEnabled: schema.runs.criticEnabled,
+      characterEnabled: schema.runs.characterEnabled,
       status: schema.runs.status,
       currentStep: schema.runs.currentStep,
       error: schema.runs.error,
@@ -299,6 +300,11 @@ runs.post(
     // only if explicitly "true". The studio UI no longer sends this field.
     criticEnabled: body.criticEnabled === "true",
     hasPersonImage: personImage !== null,
+    // Character On/Off toggle (Chunk 4). FormData carries a string; omitted by
+    // legacy/API clients → resolved from the ad-type default below.
+    ...(body.characterEnabled !== undefined
+      ? { characterEnabled: body.characterEnabled === "true" }
+      : {}),
     // Optional ad-type override (Chunk J). FormData omits it / sends "auto" for
     // the default auto-detect path.
     ...(body.adType ? { adType: body.adType } : {}),
@@ -321,6 +327,13 @@ runs.post(
   // fills adStyle + hooks but honors this adType (orchestrator). "auto"/omitted
   // leaves it null for full auto-detection.
   const userAdType = adType && adType !== "auto" ? adType : null;
+
+  // Character On/Off toggle (Chunk 4): whether a main on-screen character is
+  // generated (uploaded or synthesized). When the client omits it, default from
+  // the picked ad-type's `characterDefault` (the form always sends it).
+  const characterEnabled =
+    parsed.data.characterEnabled ??
+    getAdType(userAdType ?? "service").characterDefault;
 
   // Per-type asset requirement: an explicit pick whose policy REQUIRES a product
   // must include one. Auto-detect stays permissive (the detector + reconcile
@@ -377,6 +390,7 @@ runs.post(
       aspectRatio,
       duration,
       criticEnabled,
+      characterEnabled,
       ...(brandText ? { brandText } : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }

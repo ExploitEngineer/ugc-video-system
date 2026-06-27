@@ -36,5 +36,8 @@ export const service: AdTypeDef = {
     "confession",
     "before-after",
   ],
+  // Service ads synthesize their cast in the creative brief (no person_sheet),
+  // so the toggle is moot at runtime; default On to keep cast-led intent.
+  characterDefault: true,
   fragments: buildFragments("service", "cinematic_polished"),
 };
