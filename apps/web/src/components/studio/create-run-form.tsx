@@ -205,6 +205,11 @@ export function CreateRunForm({
 
         <div className="flex items-end justify-between gap-2 px-1">
           <div className="flex flex-wrap items-center gap-1.5">
+            <AdTypeSelect
+              value={adType}
+              onChange={setAdType}
+              options={adTypes}
+            />
             <AttachButton
               label="Product"
               icon={ImageIcon}
@@ -235,9 +240,6 @@ export function CreateRunForm({
               onAspect={setAspectRatio}
               duration={duration}
               onDuration={setDuration}
-              adType={adType}
-              onAdType={setAdType}
-              adTypes={adTypes}
               brandText={brandText}
               onBrandText={setBrandText}
             />
@@ -411,9 +413,6 @@ function OptionsMenu({
   onAspect,
   duration,
   onDuration,
-  adType,
-  onAdType,
-  adTypes,
   brandText,
   onBrandText,
 }: {
@@ -423,9 +422,6 @@ function OptionsMenu({
   onAspect: (r: AspectRatio) => void;
   duration: Duration;
   onDuration: (d: Duration) => void;
-  adType: string;
-  onAdType: (t: string) => void;
-  adTypes: AdTypeMenuItem[];
   brandText: string;
   onBrandText: (v: string) => void;
 }) {
@@ -447,13 +443,6 @@ function OptionsMenu({
         className="ring-glow w-80 rounded-2xl border-border/70 p-4"
       >
         <div className="flex flex-col gap-4">
-          <Field label="Ad type">
-            <AdTypeSelect
-              value={adType}
-              onChange={onAdType}
-              options={adTypes}
-            />
-          </Field>
           <Field label="Duration">
             <DurationToggle value={duration} onChange={onDuration} />
           </Field>
@@ -516,7 +505,7 @@ function AdTypeSelect({
         <button
           type="button"
           title="Pick the ad type to generate."
-          className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors"
+          className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 inline-flex max-w-[12rem] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium outline-none transition-colors"
         >
           <span className="truncate">{label}</span>
           <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
@@ -571,7 +560,12 @@ function CharacterChip({
           : "border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 border-dashed",
       )}
     >
-      <UserIcon className="size-3.5" />
+      <span className="relative inline-flex items-center justify-center">
+        <UserIcon className="size-3.5" />
+        {!value && (
+          <span className="bg-current pointer-events-none absolute left-1/2 top-1/2 h-[1.5px] w-[150%] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full" />
+        )}
+      </span>
       Character {value ? "on" : "off"}
     </button>
   );
