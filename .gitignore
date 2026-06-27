@@ -36,9 +36,9 @@ coverage/
 # vercel
 .vercel
 
-# claude
+# claude (ad-type skills now live as committed source in apps/api/.../ad-types/skills)
 .claude
 
 # local research inputs (kept on the author's machine, not committed)
-research/
-research-prompts/
+# research/
+# research-prompts/

@@ -13,6 +13,7 @@ import {
 // run and must not render in the timeline. They remain in the shared `Step`
 // enum (and so in STEP_LABEL/STEP_AGENT below) for when the Critic is restored.
 export const STEP_ORDER: Step[] = [
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "storyboard",
@@ -21,6 +22,7 @@ export const STEP_ORDER: Step[] = [
 
 /** The multi-segment pipeline timeline — master storyboard → N clips → merge. */
 export const STEP_ORDER_MULTI: Step[] = [
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "segment_storyboard",
@@ -43,6 +45,7 @@ export function stepOrderFor(duration: RunDetail["duration"]): Step[] {
 const REFERENCE_STEPS: Step[] = ["product_sheet", "person_sheet"];
 
 export const STEP_LABEL: Record<Step, string> = {
+  creative_brief: "Creative brief",
   product_sheet: "Product reference sheet",
   person_sheet: "Person reference sheet",
   product_inspection: "Product inspection",
@@ -63,6 +66,10 @@ export interface StepAgent {
 }
 
 export const STEP_AGENT: Record<Step, StepAgent> = {
+  creative_brief: {
+    skill: "Creative Brief Builder",
+    agent: "Creative Direction Agent",
+  },
   product_sheet: { skill: "Product Sheet Builder", agent: "Image Agent" },
   person_sheet: { skill: "Person Sheet Builder", agent: "Image Agent" },
   product_inspection: { skill: "Product Inspection", agent: "Critic Agent" },
@@ -190,15 +197,10 @@ export function stepState(run: RunDetail, step: Step): StepState {
   const events = run.stepEvents.filter((e) => e.step === step);
   const hasPassed = events.some((e) => e.status === "passed");
 
-  // Person sheet is skipped when no person image was provided (the run
-  // advances past it without ever emitting an event).
-  if (
-    step === "person_sheet" &&
-    events.length === 0 &&
-    currentIdx > order.indexOf("person_sheet")
-  ) {
-    return "skipped";
-  }
+  // Skipped reference steps are known up front from the run's asset plan (the
+  // backend resolves them from the ad type's asset policy + uploads). Render
+  // "Skipped" immediately, never flashing "Generating" during the parallel phase.
+  if (run.skippedSteps.includes(step)) return "skipped";
 
   // Parallel reference phase: while it's in flight (the backend keeps
   // `currentStep` null until BOTH the product and person sheets finish), every
@@ -216,11 +218,10 @@ export function stepState(run: RunDetail, step: Step): StepState {
     // participating sheet has begun, show every participating sheet as
     // "Generating". Otherwise the sheet whose `started` event lands in the
     // earlier poll flips to active ~1 poll ahead of the other, which reads as a
-    // glitch (one spinning, one still pending). person_sheet only participates
-    // when it is actually generated; when a person image was uploaded the step
-    // is skipped, so it must not be pulled into the running pair.
-    const personUploaded = run.assets.some((a) => a.kind === "person_upload");
-    const participates = step === "product_sheet" || !personUploaded;
+    // glitch (one spinning, one still pending). A step participates iff it is
+    // actually generated — a skipped reference step already returned "skipped"
+    // above, so it is never pulled into the running pair.
+    const participates = !run.skippedSteps.includes(step);
     if (participates) {
       const anyReferenceStarted = run.stepEvents.some(
         (e) => REFERENCE_STEPS.includes(e.step) && e.status === "started",

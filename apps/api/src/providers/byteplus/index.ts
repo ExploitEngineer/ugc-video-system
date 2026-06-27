@@ -140,6 +140,10 @@ export function createBytePlusProvider(): VideoProvider {
       }
 
       const resolution = env.BYTEPLUS_VIDEO_RESOLUTION || DEFAULT_RESOLUTION;
+      // Seed precedence: the eval env override wins (reproducible iteration);
+      // otherwise the caller's per-run seed (multi-segment continuity); else
+      // unset → BytePlus picks at random for per-run variety.
+      const seed = env.BYTEPLUS_VIDEO_SEED ?? input.seed;
       const body = {
         model: env.BYTEPLUS_VIDEO_MODEL,
         content,
@@ -148,10 +152,7 @@ export function createBytePlusProvider(): VideoProvider {
         ratio: input.aspectRatio ?? DEFAULT_RATIO, // Seedance 2.0 key (16:9 | 9:16)
         generate_audio: true, // native synchronized audio
         watermark: false,
-        // Optional fixed seed (eval only) — unset → BytePlus picks at random.
-        ...(env.BYTEPLUS_VIDEO_SEED != null
-          ? { seed: env.BYTEPLUS_VIDEO_SEED }
-          : {}),
+        ...(seed != null ? { seed } : {}),
       };
 
       log.info("submit task", {

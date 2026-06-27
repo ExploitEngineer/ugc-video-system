@@ -6,6 +6,7 @@
 // text-to-image vs reference edit.
 
 import OpenAI, { toFile } from "openai";
+import sharp from "sharp";
 import type {
   ChatCompletionContentPart,
   ChatCompletionMessageParam,
@@ -74,9 +75,9 @@ export interface ChatOptions {
    */
   jsonMode?: boolean;
   /**
-   * Reasoning backend. `"openai"` (default) → gpt-4.1. `"claude"` → Claude
-   * Sonnet 4.6 via OpenRouter, for the vision/label-reading steps. If
-   * `OPENROUTER_API_KEY` is unset, `"claude"` silently falls back to gpt-4.1.
+   * Reasoning backend. `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
+   * `"openai"` → forces gpt-4.1. When `OPENROUTER_API_KEY` is unset, the default
+   * silently falls back to gpt-4.1, so the server runs without the key.
    */
   backend?: "openai" | "claude";
 }
@@ -136,6 +137,61 @@ const IMAGE_MAX_ATTEMPTS = 5;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+// Formats both Anthropic vision (Claude via OpenRouter) and OpenAI images.edit
+// accept directly. AVIF/HEIC are NOT accepted by Anthropic → transcode to PNG.
+const API_SAFE_IMAGE_MIMES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+/**
+ * Sniff the TRUE image format from the magic bytes. Uploads can be MISLABELLED
+ * (a WebP stored as `image/png`, an iPhone HEIC as `image/jpeg`, …). When we
+ * inline such bytes as `data:<declared-mime>;base64,…`, Anthropic/OpenAI reject
+ * the media-type↔bytes mismatch — surfacing as an opaque "400 Provider returned
+ * error" with the real cause hidden inside OpenRouter.
+ */
+function sniffImageMime(b: Uint8Array, fallback: string): string {
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)
+    return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
+    return "image/jpeg";
+  if (
+    b.length >= 12 &&
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && // "RIFF"
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 // "WEBP"
+  )
+    return "image/webp";
+  if (b.length >= 4 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38)
+    return "image/gif";
+  // ISO-BMFF `ftyp` box (AVIF / HEIC): bytes 4-7 = "ftyp", 8-11 = brand.
+  if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    const brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
+    if (brand === "avif" || brand === "avis") return "image/avif";
+    if (brand.startsWith("hei") || brand === "mif1" || brand === "msf1")
+      return "image/heic";
+  }
+  return fallback;
+}
+
+/**
+ * Normalize fetched image bytes for the AI APIs: correct a mislabelled mime to
+ * the real one, and transcode anything the APIs don't accept (AVIF/HEIC) to PNG.
+ * png/jpeg/webp/gif pass through with only the mime corrected (no re-encode).
+ */
+async function normalizeImageBytes(
+  buf: Uint8Array,
+  declaredMime: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  const sniffed = sniffImageMime(buf, declaredMime);
+  if (API_SAFE_IMAGE_MIMES.has(sniffed)) return { bytes: buf, mime: sniffed };
+  // AVIF/HEIC/unknown → transcode to PNG (sharp decodes both).
+  const png = await sharp(Buffer.from(buf)).png().toBuffer();
+  return { bytes: new Uint8Array(png), mime: "image/png" };
+}
+
 /**
  * Resolve an `ImageRef` to a base64 data URI. We fetch the bytes ourselves and
  * inline them rather than handing OpenAI a URL to download — OpenAI's server
@@ -148,9 +204,12 @@ async function imageRefToDataUri(ref: ImageRef): Promise<string> {
   if (!res.ok) {
     throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
   }
-  const buf = Buffer.from(await res.arrayBuffer());
-  const mime = ref.mime ?? res.headers.get("content-type") ?? "image/png";
-  return `data:${mime};base64,${buf.toString("base64")}`;
+  const declared = ref.mime ?? res.headers.get("content-type") ?? "image/png";
+  const { bytes, mime } = await normalizeImageBytes(
+    new Uint8Array(await res.arrayBuffer()),
+    declared,
+  );
+  return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
 /** Map our `ChatMessage` (+ optional images) to the SDK's message shape. */
@@ -179,10 +238,13 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
   if (!res.ok) {
     throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
   }
-  const buf = new Uint8Array(await res.arrayBuffer());
-  const mime = ref.mime ?? res.headers.get("content-type") ?? "image/png";
+  const declared = ref.mime ?? res.headers.get("content-type") ?? "image/png";
+  const { bytes, mime } = await normalizeImageBytes(
+    new Uint8Array(await res.arrayBuffer()),
+    declared,
+  );
   const ext = mime.split("/")[1]?.split(";")[0] ?? "png";
-  return toFile(buf, `ref.${ext}`, { type: mime });
+  return toFile(bytes, `ref.${ext}`, { type: mime });
 }
 
 export function createOpenAIProvider(): OpenAIProvider {
@@ -190,10 +252,12 @@ export function createOpenAIProvider(): OpenAIProvider {
     async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
-      // Route to Claude only when asked AND the key is present; otherwise the
-      // step degrades to gpt-4.1 (safe — the Claude steps are best-effort).
-      const useClaude =
-        opts?.backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
+      // Claude Sonnet 4.6 (via OpenRouter) is the DEFAULT reasoning/vision
+      // backend. A call routes to Claude unless it explicitly forces
+      // `backend:"openai"`; if `OPENROUTER_API_KEY` is unset we degrade to
+      // gpt-4.1 (so the server still runs without the key).
+      const backend = opts?.backend ?? "claude";
+      const useClaude = backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
       const apiClient = useClaude ? getOpenRouterClient() : getClient();
       const model = useClaude ? OPENROUTER_CLAUDE_MODEL : OPENAI_CHAT_MODEL;
       // json_object is reliable on gpt-4.1; on Claude-via-OpenRouter it is not
@@ -207,23 +271,45 @@ export function createOpenAIProvider(): OpenAIProvider {
         maxTokens,
         jsonMode: wantJson,
       });
-      const completion = await apiClient.chat.completions.create({
-        model,
-        messages: sdkMessages,
-        max_completion_tokens: maxTokens,
-        ...(wantJson
-          ? { response_format: { type: "json_object" as const } }
-          : {}),
-      });
-      const choice = completion.choices[0];
-      const content = choice?.message?.content ?? "";
-      // A truncated response (hit the token ceiling) yields invalid JSON
-      // downstream — surface it as a clear, actionable error here.
-      if (choice?.finish_reason === "length") {
-        log.warn("chat truncated at token ceiling", { maxTokens });
+      try {
+        const completion = await apiClient.chat.completions.create({
+          model,
+          messages: sdkMessages,
+          max_completion_tokens: maxTokens,
+          ...(wantJson
+            ? { response_format: { type: "json_object" as const } }
+            : {}),
+        });
+        const choice = completion.choices[0];
+        const content = choice?.message?.content ?? "";
+        // A truncated response (hit the token ceiling) yields invalid JSON
+        // downstream — surface it as a clear, actionable error here.
+        if (choice?.finish_reason === "length") {
+          log.warn("chat truncated at token ceiling", { maxTokens });
+        }
+        log.debug("chat ✓", { ms: Date.now() - t0, chars: content.length });
+        return content;
+      } catch (err) {
+        // OpenRouter/OpenAI bury the real cause (bad image, moderation, …) inside
+        // `error`; "400 Provider returned error" alone is useless. Surface it.
+        const e = err as { status?: number; code?: string; error?: unknown };
+        const detail =
+          e?.error != null
+            ? typeof e.error === "string"
+              ? e.error
+              : JSON.stringify(e.error)
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        log.error("chat ✗ provider error", {
+          model,
+          backend: useClaude ? "claude" : "openai",
+          ms: Date.now() - t0,
+          status: e?.status,
+          detail,
+        });
+        throw err;
       }
-      log.debug("chat ✓", { ms: Date.now() - t0, chars: content.length });
-      return content;
     },
 
     async generateImage(input) {

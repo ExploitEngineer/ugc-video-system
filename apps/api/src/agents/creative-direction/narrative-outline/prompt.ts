@@ -7,13 +7,15 @@
 // circular dependency ("each storyboard needs the others' summaries"): the
 // summaries are planned up front by one brain, so all four read as ONE ad.
 
-import type { AdType } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import type { NarrativeOutline, ProductUse } from "../../types.js";
+import { getAdType } from "../../ad-types/registry.js";
+import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
 
 export interface NarrativeOutlinePromptInput {
   adStyle: string;
-  adType: AdType;
+  /** OPEN ad-type id — dispatched through the ad-type registry. */
+  adType: string;
   productBrief: string;
   productUse?: ProductUse;
   personBrief: string;
@@ -38,7 +40,17 @@ function productUseLine(use?: ProductUse): string | null {
 export function buildNarrativeOutlinePrompt(
   input: NarrativeOutlinePromptInput,
 ): ChatMessage[] {
-  const isUgc = input.adType === "ugc";
+  const def = getAdType(input.adType);
+  const treatment =
+    def.fragments.narrativeTreatment(
+      buildFragmentCtx({
+        adStyle: input.adStyle,
+        productBrief: input.productBrief,
+        personBrief: input.personBrief,
+        hasProduct: Boolean(input.productBrief),
+        hasPerson: Boolean(input.personBrief),
+      }),
+    )[0] ?? "";
   const useLine = productUseLine(input.productUse);
 
   return [
@@ -69,9 +81,7 @@ export function buildNarrativeOutlinePrompt(
         "    segment, it stays that way later — never silently resets);",
         "  - time of day and location progress coherently (no impossible jumps);",
         "  - each segment hands off cleanly to the next.",
-        isUgc
-          ? "Treatment: UGC — a real person casually talking about the product the way they actually speak (not a scripted ad or review read). The spoken beat in each summary is a natural first-person line."
-          : "Treatment: inspirational — a cinematic scene carried by voiceover narration. The spoken beat in each summary is a voiceover line.",
+        treatment,
         useLine
           ? `Respect how the product is actually operated across the arc: ${useLine}.`
           : "",

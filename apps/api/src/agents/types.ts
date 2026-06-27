@@ -4,7 +4,8 @@
 // The OpenAI provider is injected on `ctx` (dependency injection) so skills
 // never import the adapter directly and stay unit-testable with a fake.
 
-import type { AdType, AspectRatio, Duration } from "@ugc/shared";
+import type { AspectRatio, Duration } from "@ugc/shared";
+import type { HookSelection } from "./ad-types/types.js";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
 
@@ -34,8 +35,23 @@ export interface SkillContext {
   runId: string;
   /** Opaque in F4 (caller supplies it); F7's Creative Direction Agent sets it. */
   adStyle: string;
-  /** Ad treatment (ugc | inspirational), inferred from the prompt. */
-  adType: AdType;
+  /**
+   * The OPEN ad-type id (e.g. `testimonial`, `brand-story`, `product-demo`),
+   * straight from `runs.ad_type`. The prompt builders resolve it through the
+   * ad-type registry (`getAdType`) for per-type fragment dispatch (Chunk F);
+   * legacy `ugc`/`inspirational` values resolve via the registry's aliases, so
+   * old rows behave identically.
+   */
+  adType: string;
+  /**
+   * Resolved hook selection from the detector (Chunk E), parsed from
+   * `runs.hooks`. Undefined on legacy/older runs. Consumed by the prompt
+   * builders' hook-opening splice in Chunk F.
+   */
+  hooks?: HookSelection;
+  /** Ground-truth: a product / person image was uploaded for this run. */
+  hasProduct?: boolean;
+  hasPerson?: boolean;
   /**
    * Factual product identity anchor (category / materials / colors / markings),
    * planned once via vision over the upload and persisted to `runs.product_brief`.
@@ -71,9 +87,94 @@ export interface SkillContext {
    * share one grade/lighting/palette. Undefined for 15s runs.
    */
   visualStyle?: string;
+  /**
+   * Service-ad only — the creative-director brief from `runs.creative_brief`
+   * (cast + multi-scene plan + hook + CTA). The synthesized source of truth the
+   * storyboard renders when there is no product/person upload. Undefined for the
+   * product ad-types.
+   */
+  creativeBrief?: CreativeBrief;
+  /**
+   * Optional brand guidelines from `runs.brand_text` (user-typed: tone, palette,
+   * wording, do/don'ts). Injected into the creative brief, storyboard and video
+   * prompts so the output follows the brand. Undefined when none provided.
+   */
+  brandText?: string;
+  /**
+   * Chunk 4 — the run's Character On/Off toggle. When On, a main on-screen
+   * character is generated (uploaded or synthesized); when Off, none. Drives the
+   * person-sheet branch in the orchestrator. Undefined defaults to On.
+   */
+  characterEnabled?: boolean;
+  /**
+   * Chunk 4b — text-only supporting roles (`runs.supporting_cast`) planned from
+   * the prompt for product-type ads. Woven into the storyboard + a short video
+   * mention; never get a reference sheet. Undefined/empty ⇒ no supporting cast.
+   */
+  supportingCast?: SupportingRole[];
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;
+}
+
+/**
+ * The service-ad creative brief — output of the `creative_brief` (creative
+ * director) step, persisted to `runs.creative_brief`. A dynamic, prompt-driven
+ * multi-scene plan: there is NO product/person upload, so the synthesized cast +
+ * scenes here are the source of truth the storyboard renders. Beats come from the
+ * chosen `framework`, not a fixed timeline.
+ */
+export interface CreativeBrief {
+  /** One-line creative concept for the ad. */
+  concept: string;
+  /** Chosen ad framework, e.g. "PAS" | "AIDA" | "BAB" | "testimonial" | "demo". */
+  framework: string;
+  /** Schwartz awareness stage the prompt maps onto, e.g. "problem-aware". */
+  awarenessStage: string;
+  /** The opening hook: a type + the spoken/on-screen line. */
+  hook: { type: string; line: string };
+  /** Synthesized cast — identity blocks the storyboard renders from (no upload). */
+  cast: BriefCharacter[];
+  /** 3-4 scenes, in play order — the arc of the chosen framework. */
+  scenes: BriefScene[];
+  /** Closing call-to-action + optional end-card copy. */
+  cta: {
+    line: string;
+    endCard?: { headline: string; tagline?: string; url?: string };
+  };
+}
+
+export interface BriefCharacter {
+  /** Short role label, e.g. "stressed marketer". Referenced by scenes. */
+  name: string;
+  /** Detailed identity block: apparent age, build, hair, skin, wardrobe. */
+  identity: string;
+}
+
+/**
+ * A TEXT-ONLY supporting role (Chunk 4b) — a secondary person in a product-type
+ * ad who is NOT the main character and gets NO reference sheet. Planned from the
+ * prompt and woven into the storyboard (and a short video mention) so they render
+ * consistently without a face asset.
+ */
+export interface SupportingRole {
+  /** Short role label, e.g. "her teenage son", "a barista". */
+  role: string;
+  /** Brief appearance: apparent age, build, hair, wardrobe — enough to render. */
+  appearance: string;
+}
+
+export interface BriefScene {
+  setting: string;
+  /** Grade/mood for this scene, e.g. "tense red emergency light". */
+  lighting: string;
+  /** Cast names present in this scene. */
+  charactersPresent: string[];
+  action: string;
+  /** Spoken lines (one speaker per shot downstream). */
+  dialogue?: { speaker: string; line: string }[];
+  /** Literal on-screen copy (a stat, a price, an end-card line). */
+  onScreenText?: string;
 }
 
 /**

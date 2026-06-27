@@ -211,7 +211,13 @@ export function StepTimeline({ run }: { run: RunDetail }) {
   const upNextStep = awaitingGate
     ? gateStartsStep(awaitingGate, run.duration)
     : null;
-  const order = stepOrderFor(run.duration);
+  // `creative_brief` belongs only to the service path; drop it from the timeline
+  // for the product types (where it's skipped) so they don't show a confusing
+  // "Skipped" row for a step that isn't part of their pipeline at all.
+  const order = stepOrderFor(run.duration).filter(
+    (s) =>
+      s !== "creative_brief" || !run.skippedSteps.includes("creative_brief"),
+  );
 
   return (
     <ol className="relative">

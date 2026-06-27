@@ -47,8 +47,7 @@ export function setupTranslations(cesdk: CreativeEditorSDK): void {
       "libraries.ly.img.textAnimations.ly.img.animations.label":
         "Transitions & Animations",
       // Entrance group → "Transition In"
-      "libraries.ly.img.animations.ly.img.animations.in.label":
-        "Transition In",
+      "libraries.ly.img.animations.ly.img.animations.in.label": "Transition In",
       "libraries.ly.img.textAnimations.ly.img.animations.in.label":
         "Transition In",
       // Exit group → "Transition Out"

@@ -7,9 +7,59 @@
 
 import { type Duration, isMultiSegment, type Step } from "@ugc/shared";
 
-/** The first step of every run. */
-export function firstStep(): Step {
-  return "product_sheet";
+/**
+ * Ground-truth asset signals for a run (Chunk G): the registry asset policy for
+ * the resolved ad type + whether each asset was actually uploaded. Drives which
+ * reference steps run. The reference phase is parallel in the orchestrator, so
+ * these predicates also describe what `runReferencePhase` will generate.
+ */
+export interface AssetCtx {
+  productRequired: boolean;
+  personRequired: boolean;
+  hasProductUpload: boolean;
+  hasPersonUpload: boolean;
+  /**
+   * Chunk 4 — the run's Character On/Off toggle. THIS, not `personRequired`,
+   * decides whether a main on-screen character is generated: On → one person
+   * sheet (uploaded if provided, else synthesized); Off → none. Defaulted from
+   * the ad-type's `characterDefault` at run creation.
+   */
+  characterEnabled: boolean;
+}
+
+/**
+ * Will a product reference sheet be generated? A product can ONLY come from an
+ * upload (it is never synthesized), so this is exactly "a product was uploaded".
+ */
+export function willGenerateProduct(a: AssetCtx): boolean {
+  return a.hasProductUpload;
+}
+
+/**
+ * Will a person reference sheet be generated? Driven by the Character toggle
+ * (Chunk 4), NOT the ad type: yes when a person was uploaded, OR when the
+ * character toggle is On (then the main character is synthesized — from the
+ * product if one was uploaded, else from the prompt). Toggle Off + no upload →
+ * skipped, so the ad is product/scene-only.
+ */
+export function willGeneratePerson(a: AssetCtx): boolean {
+  return a.hasPersonUpload || a.characterEnabled;
+}
+
+/** Whether the reference gate has ANY artifact to show (else it collapses). */
+export function hasAnyReference(a: AssetCtx): boolean {
+  return willGenerateProduct(a) || willGeneratePerson(a);
+}
+
+/**
+ * The first step of a run. With no asset context (legacy callers) it is always
+ * `product_sheet`. Asset-aware: skip straight to `person_sheet` when no product
+ * is generated, or to `storyboard` when neither reference sheet is generated.
+ */
+export function firstStep(asset?: AssetCtx): Step {
+  if (!asset || willGenerateProduct(asset)) return "product_sheet";
+  if (willGeneratePerson(asset)) return "person_sheet";
+  return "storyboard";
 }
 
 /**
@@ -42,6 +92,10 @@ export function nextStep(
     ? "segment_storyboard"
     : "storyboard";
   switch (step) {
+    // Service path: the creative brief feeds straight into the storyboard
+    // (no product/person reference sheets).
+    case "creative_brief":
+      return multi ? "segment_storyboard" : "storyboard";
     case "product_sheet":
       return "person_sheet";
     case "person_sheet":
@@ -84,8 +138,14 @@ export type Gate = "reference" | "storyboard";
  *   - storyboard gate → right before the video work (storyboard ready):
  *     15s `video`, multi `segment_video` (after the master + its row crops).
  */
-export function gateForNext(next: Step | null): Gate | null {
-  if (next === "storyboard" || next === "segment_storyboard") return "reference";
+export function gateForNext(
+  next: Step | null,
+  hasReference = true,
+): Gate | null {
+  // Reference gate collapses when no reference sheet exists (both skipped — e.g.
+  // a neither-asset type with no uploads); there is nothing to confirm.
+  if (next === "storyboard" || next === "segment_storyboard")
+    return hasReference ? "reference" : null;
   if (next === "video" || next === "segment_video") return "storyboard";
   return null;
 }
@@ -121,7 +181,14 @@ export function genStepForRevise(
   gate: Gate,
   _target: "product" | "person" | null,
   duration: Duration = "15s",
+  asset?: AssetCtx,
 ): Step {
-  if (gate !== "storyboard") return "person_sheet";
-  return isMultiSegment(duration) ? "segment_storyboard" : "storyboard";
+  if (gate === "storyboard")
+    return isMultiSegment(duration) ? "segment_storyboard" : "storyboard";
+  // Reference gate: re-run the person sheet (the product sheet is normally
+  // hidden). But on a person-SKIPPED run the only reference artifact is the
+  // product sheet, so a revise must target it instead.
+  if (asset && !willGeneratePerson(asset) && willGenerateProduct(asset))
+    return "product_sheet";
+  return "person_sheet";
 }

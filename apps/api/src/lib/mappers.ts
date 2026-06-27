@@ -6,9 +6,10 @@
 // null), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
-import type { Asset, RunDetail, Scene, StepEvent } from "@ugc/shared";
+import type { Asset, RunDetail, Scene, Step, StepEvent } from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
+  hookSelectionSchema,
   isMultiSegment,
   narrativeOutlineSchema,
   runErrorCodeSchema,
@@ -16,6 +17,11 @@ import {
   stepEventStatusSchema,
 } from "@ugc/shared";
 import type { schema } from "../db/index.js";
+import { FALLBACK_AD_TYPE_ID, getAdType } from "../agents/ad-types/registry.js";
+import {
+  willGeneratePerson,
+  willGenerateProduct,
+} from "../agents/creative-direction/plan.js";
 import { createLogger } from "./log.js";
 
 type AssetRow = typeof schema.assets.$inferSelect;
@@ -82,10 +88,12 @@ export type RunListRow = Pick<
   | "prompt"
   | "adStyle"
   | "adType"
+  | "adTypeSource"
   | "mode"
   | "aspectRatio"
   | "duration"
   | "criticEnabled"
+  | "characterEnabled"
   | "status"
   | "currentStep"
   | "error"
@@ -103,10 +111,16 @@ export function toRunDto(row: RunListRow): Run {
     adStyle: row.adStyle ?? "",
     // Default to `ugc` until the interpret step fills it in.
     adType: row.adType ?? "ugc",
+    // null on legacy rows (detector source not yet recorded).
+    adTypeSource:
+      row.adTypeSource === "auto" || row.adTypeSource === "user"
+        ? row.adTypeSource
+        : null,
     mode: row.mode,
     aspectRatio: row.aspectRatio,
     duration: row.duration,
     criticEnabled: row.criticEnabled,
+    characterEnabled: row.characterEnabled,
     status: row.status,
     // Pass `currentStep` through verbatim — null means "no step has completed
     // yet" (fresh run) or "parallel reference phase in flight". Coalescing it to
@@ -157,6 +171,23 @@ export function toRunDetailDto(
     isMultiSegment(run.duration) && run.narrativeOutline != null
       ? (narrativeOutlineSchema.safeParse(run.narrativeOutline).data ?? null)
       : null;
+  // Reference steps that won't run — same predicates `runReferencePhase` uses to
+  // decide skipping, so the timeline's skip set always matches actual behavior.
+  const policy = getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).assetPolicy;
+  const assetCtx = {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: assets.some((a) => a.kind === "product_upload"),
+    hasPersonUpload: assets.some((a) => a.kind === "person_upload"),
+    // Chunk 4 — drives the person_sheet skip mark below (matches the orchestrator).
+    characterEnabled: run.characterEnabled,
+  };
+  const skippedSteps: Step[] = [];
+  // creative_brief runs ONLY for the service type; product/person sheets run only
+  // for the product types — mark the other path's steps skipped in the timeline.
+  if (run.adType !== "service") skippedSteps.push("creative_brief");
+  if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
+  if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),
@@ -166,5 +197,14 @@ export function toRunDetailDto(
     narrativeOutline: outline,
     // The locked visual-style bible (multi-segment only; null for 15s/pre-outline).
     visualStyle: isMultiSegment(run.duration) ? (run.visualStyle ?? null) : null,
+    // Detector outputs (Chunk E), surfaced in the run view (Chunk K). Validate
+    // the hooks jsonb at the wire boundary; drop on drift (legacy/null rows).
+    hooks: hookSelectionSchema.safeParse(run.hooks).data ?? null,
+    adTypeConfidence: run.adTypeConfidence ?? null,
+    detectorMeta: run.detectorMeta ?? null,
+    // Registry-resolved display name + look family for the resolved adType.
+    adTypeDisplayName: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).displayName,
+    lookFamily: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).lookFamily,
+    skippedSteps,
   };
 }

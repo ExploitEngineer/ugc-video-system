@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
+  BotIcon,
   CheckCircle2Icon,
   ClapperboardIcon,
   ClockIcon,
@@ -15,8 +16,9 @@ import {
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
   SparklesIcon,
+  TagIcon,
   TriangleAlertIcon,
-  UserIcon,
+  ZapIcon,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -49,7 +51,15 @@ import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
 import { useRunStream } from "@/lib/use-run-stream";
 
-/** A small option pill shown in the user's message bubble. */
+/** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
+function prettyHook(id: string): string {
+  return id
+    .split("-")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+/** A small option/creative pill (user options + the AI's creative-direction tags). */
 function Chip({
   icon: Icon,
   children,
@@ -242,6 +252,9 @@ export function RunView({ runId }: { runId: string }) {
   // Uploaded inputs (shown as thumbnails in the user's message bubble).
   const productUpload = run.assets.find((a) => a.kind === "product_upload");
   const personUpload = run.assets.find((a) => a.kind === "person_upload");
+  // A person sheet with no uploaded person photo ⇒ the person was synthesized.
+  const synthPerson =
+    !personUpload && run.assets.some((a) => a.kind === "person_sheet");
   const hasScript =
     (run.segmentScenes?.length ?? 0) > 0 || (run.scenes?.length ?? 0) > 0;
   const running = run.status === "running" || run.status === "regenerating";
@@ -261,11 +274,8 @@ export function RunView({ runId }: { runId: string }) {
             )}
           </div>
         )}
+        {/* Only the options the USER picked live in the user's bubble. */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Chip icon={ClapperboardIcon}>{run.adStyle}</Chip>
-          <Chip icon={run.adType === "ugc" ? UserIcon : SparklesIcon}>
-            {run.adType === "ugc" ? "UGC" : "Inspirational"}
-          </Chip>
           <Chip icon={isMulti ? FilmIcon : ClockIcon}>
             {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
           </Chip>
@@ -283,6 +293,50 @@ export function RunView({ runId }: { runId: string }) {
           </Chip>
         </div>
       </UserMessage>
+
+      {/* Creative Direction agent — the AI's reading of the brief (the adStyle
+          summary + the resolved ad type / hook / cast). Rendered as the agent's
+          OWN output, not inside the user's bubble where it read as if the user
+          wrote it. Appears once detection has set `adStyle`. */}
+      {run.adStyle && (
+        <AgentMessage label="Creative direction">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start gap-2">
+              <ClapperboardIcon className="text-brand mt-0.5 size-4 shrink-0" />
+              <p className="text-foreground/90 text-sm leading-relaxed text-pretty">
+                {run.adStyle}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Chip icon={TagIcon}>
+                {run.adTypeDisplayName}
+                {run.adTypeSource === "user" ? (
+                  <span className="text-muted-foreground/70 ml-1">
+                    · you chose
+                  </span>
+                ) : run.adTypeSource === "auto" ? (
+                  <span className="text-muted-foreground/70 ml-1">
+                    · detected
+                  </span>
+                ) : null}
+              </Chip>
+              {run.hooks && (
+                <>
+                  <Chip icon={ZapIcon}>
+                    Hook: {prettyHook(run.hooks.visualLead.id)}
+                  </Chip>
+                  {run.hooks.overlay && (
+                    <Chip icon={ZapIcon}>
+                      + {prettyHook(run.hooks.overlay.id)}
+                    </Chip>
+                  )}
+                </>
+              )}
+              {synthPerson && <Chip icon={BotIcon}>AI character</Chip>}
+            </div>
+          </div>
+        </AgentMessage>
+      )}
 
       {/* Agent — live progress + the pipeline timeline. */}
       <AgentMessage label="Pipeline">

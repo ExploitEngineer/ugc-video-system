@@ -1,0 +1,119 @@
+[
+  {
+    "id": "striking-visual",
+    "displayName": "Striking Visual",
+    "psychPrinciple": "Novelty / orienting response",
+    "description": "Open on an arresting, unexpected image that stops the scroll (an out-of-place subject, a bold tableau) before the ad resolves into the product's world.",
+    "openingDirective": "Open on ONE arresting, unexpected image — a striking, slightly out-of-place visual that instantly grabs the eye — held for a beat before the scene resolves toward the product.",
+    "scriptToneNote": "Let the image carry the first beat; little or no spoken words over it.",
+    "fitsAdTypes": {
+      "good": ["brand-story", "inspirational", "lifestyle", "product-demo"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "pattern-interrupt",
+    "displayName": "Pattern Interrupt",
+    "psychPrinciple": "Novelty / expectation violation",
+    "description": "A jarring, against-the-grain first frame that breaks the viewer's scroll pattern.",
+    "openingDirective": "Open on a sudden PATTERN INTERRUPT — an abrupt, against-expectation first frame (an unexpected motion, cut or reveal) that breaks the scroll before easing into the scene.",
+    "scriptToneNote": "Punchy, fast first beat.",
+    "fitsAdTypes": {
+      "good": ["brand-story", "inspirational", "product-demo", "lifestyle"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "problem-solution",
+    "displayName": "Problem → Solution",
+    "psychPrinciple": "Loss aversion / tension-release",
+    "description": "Open ON the pain or frustration the product fixes, then move toward relief.",
+    "openingDirective": "Open ON the problem — show the small, relatable frustration the product solves in the very first beat (a real moment of friction), so the relief lands when the product appears.",
+    "scriptToneNote": "Empathetic; name the pain plainly, never preachy.",
+    "fitsAdTypes": {
+      "good": ["testimonial", "product-demo", "founder-pov", "lifestyle"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "before-after",
+    "displayName": "Before / After",
+    "psychPrinciple": "Contrast / transformation",
+    "description": "Tease the 'before' state or the transformation up front to set up a satisfying reveal.",
+    "openingDirective": "Open on the BEFORE — the unimproved state, or a quick tease of the transformation to come — so the 'after' reveal later in the ad pays it off.",
+    "scriptToneNote": "Contrast-driven; let the change speak.",
+    "fitsAdTypes": {
+      "good": ["product-demo", "testimonial", "lifestyle"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "relatable-scenario",
+    "displayName": "Relatable Moment",
+    "psychPrinciple": "Self-identification",
+    "description": "Open on a 'that's so me' everyday moment the target viewer instantly recognizes.",
+    "openingDirective": "Open on a RELATABLE everyday moment the viewer instantly recognizes as 'that's me' — a true-to-life little scene — before the product enters it.",
+    "scriptToneNote": "Warm, true-to-life, specific.",
+    "fitsAdTypes": {
+      "good": ["lifestyle", "testimonial", "brand-story", "founder-pov"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "confession",
+    "displayName": "Confession",
+    "psychPrinciple": "Authenticity / candor",
+    "description": "A candid, slightly vulnerable admission spoken straight to camera that earns trust fast.",
+    "openingDirective": "Open on a candid CONFESSION to camera — the speaker admits something honest or slightly vulnerable in the first beat ('I didn't believe it either…'), spoken directly to the lens.",
+    "scriptToneNote": "Honest, first-person, unpolished.",
+    "fitsAdTypes": { "good": ["testimonial", "founder-pov"], "clashes": [] },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": false
+  },
+  {
+    "id": "curiosity-gap",
+    "displayName": "Curiosity Tease",
+    "psychPrinciple": "Information gap",
+    "description": "Layer an intriguing, unresolved line or question over the opening that the ad then answers.",
+    "openingDirective": "Layer an intriguing, unresolved tease over the opening — a short spoken line or question that opens a curiosity gap the rest of the ad pays off; keep it spoken or implied, not a busy on-screen graphic.",
+    "scriptToneNote": "Teasing; withhold the answer.",
+    "fitsAdTypes": {
+      "good": ["brand-story", "inspirational", "product-demo", "lifestyle"],
+      "clashes": []
+    },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "stat",
+    "displayName": "Stat Shock",
+    "psychPrinciple": "Anchoring / loss aversion",
+    "description": "Open on a bold, specific statistic that frames the cost of the problem (a shocking number). Service/B2B cold-open.",
+    "openingDirective": "Open on a bold, specific STAT that frames the problem — a shocking number stated and shown large on-screen for a beat (e.g. a wasted-spend or lost-hours figure) — before the scene resolves toward the service.",
+    "scriptToneNote": "Lead with the number; concrete, not hype.",
+    "fitsAdTypes": { "good": ["service"], "clashes": [] },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  },
+  {
+    "id": "question",
+    "displayName": "Bold Question",
+    "psychPrinciple": "Self-referential / open loop",
+    "description": "Open on a sharp, direct question that names the viewer's pain and demands an answer. Service/B2B cold-open.",
+    "openingDirective": "Open on a sharp, direct QUESTION to the viewer that names their pain ('Still losing hours to X?') — spoken or shown in the first beat — that the rest of the ad answers.",
+    "scriptToneNote": "One pointed question; make them feel seen.",
+    "fitsAdTypes": { "good": ["service"], "clashes": [] },
+    "worksWithoutProduct": true,
+    "worksWithoutPerson": true
+  }
+]

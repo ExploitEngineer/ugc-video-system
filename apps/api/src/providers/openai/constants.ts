@@ -2,23 +2,29 @@
 // provider or agent logic.
 
 import type { AspectRatio } from "@ugc/shared";
-
-/** LLM used for prompt-building / reasoning (and vision in F5). */
-export const OPENAI_CHAT_MODEL = "gpt-4.1";
+import { env } from "../../config/index.js";
 
 /**
- * OpenRouter — OpenAI-SDK-compatible chat endpoint. Used only for the
- * vision/label-reading steps that route to Claude (describeProduct,
- * derivePersonBrief); everything else stays on `OPENAI_CHAT_MODEL`.
+ * gpt-4.1 — the OpenAI FALLBACK for reasoning/vision (used when
+ * `OPENROUTER_API_KEY` is unset or a caller forces `backend:"openai"`).
+ * Env-overridable via `OPENAI_CHAT_MODEL` (default `gpt-4.1`).
+ */
+export const OPENAI_CHAT_MODEL = env.OPENAI_CHAT_MODEL;
+
+/**
+ * OpenRouter — OpenAI-SDK-compatible chat endpoint. Now the DEFAULT route for
+ * every reasoning/vision `chat()` call (Claude Sonnet 4.6); only image gen
+ * (gpt-image-2) and the gpt-4.1 fallback bypass it.
  */
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 /**
- * Claude Sonnet 4.6 via OpenRouter — stronger label OCR + disciplined JSON for
- * the product/person briefs. VERIFY the slug is live before deploy
- * (`GET https://openrouter.ai/api/v1/models`); a dated alias may also exist.
+ * Claude Sonnet 4.6 via OpenRouter — the default reasoning/vision model
+ * (stronger label OCR + disciplined JSON). Env-overridable via
+ * `OPENROUTER_CLAUDE_MODEL`; VERIFY the slug is live before deploy
+ * (`GET https://openrouter.ai/api/v1/models`).
  */
-export const OPENROUTER_CLAUDE_MODEL = "anthropic/claude-sonnet-4.6";
+export const OPENROUTER_CLAUDE_MODEL = env.OPENROUTER_CLAUDE_MODEL;
 
 /** GPT Image 2. Generate + edit (reference-image) capable. */
 export const OPENAI_IMAGE_MODEL = "gpt-image-2";

@@ -31,6 +31,13 @@ export interface SubmitVideoInput {
   personReferences?: string[];
   /** Stable name prefix for idempotent asset reuse across regen/resume (runId). */
   referenceTag?: string;
+  /**
+   * Optional fixed generation seed. Passed for multi-segment (30/45/60s) runs —
+   * a run-stable seed shared by every segment so the synthesized identity/voice
+   * stay consistent across the merged clips. `env.BYTEPLUS_VIDEO_SEED` (eval)
+   * still overrides this; omit for single 15s clips to keep per-run variety.
+   */
+  seed?: number;
 }
 
 export interface VideoTask {

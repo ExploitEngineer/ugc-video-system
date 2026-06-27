@@ -1,6 +1,6 @@
 "use client";
 
-import type { AspectRatio, Duration, Mode } from "@ugc/shared";
+import type { AdTypeMenuItem, AspectRatio, Duration, Mode } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -23,11 +23,18 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createRun } from "@/lib/api";
+import { createRun, fetchAdTypes } from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -54,12 +61,71 @@ export function CreateRunForm({
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [duration, setDuration] = useState<Duration>("15s");
+  // Auto-detect removed — the user always picks a type (the detector still infers
+  // adStyle + hooks). Default to testimonial (UGC review): product-optional +
+  // person synthesized, so it never blocks submit.
+  const [adType, setAdType] = useState<string>("service");
+  // Optional brand guidelines (tone, palette, wording) — injected into the prompts.
+  const [brandText, setBrandText] = useState("");
+  // Character On/Off toggle (Chunk 4) — whether a main on-screen character is
+  // generated (uploaded or synthesized). Defaults from the picked ad-type and
+  // re-syncs when the type changes.
+  const [characterEnabled, setCharacterEnabled] = useState(true);
+  const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // Load the registry-driven ad-type menu once (best-effort — the dropdown is
+  // empty until it lands, then defaults to the testimonial pick).
+  useEffect(() => {
+    let active = true;
+    fetchAdTypes().then((list) => {
+      if (active) setAdTypes(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Reset the character toggle to the picked type's default when the type
+  // changes (and once the menu first loads). A later manual toggle persists —
+  // this only refires when adType/adTypes change.
+  useEffect(() => {
+    const t = adTypes.find((o) => o.id === adType);
+    if (t) setCharacterEnabled(t.characterDefault);
+  }, [adType, adTypes]);
+
+  // Per-type asset requirement — drives whether the product upload is required
+  // and the hint shown. The user always picks a type; it requires a product only
+  // when its policy says so. Person is never a required upload (synthesized when
+  // needed). `selectedType` is null only briefly while the menu is still loading.
+  const selectedType = adTypes.find((o) => o.id === adType) ?? null;
+  const productRequired = selectedType?.assetPolicy.product === "required";
+  // Service synthesizes its cast in the creative brief, so the toggle + person
+  // upload are moot there — hide both. For product types the toggle decides
+  // whether the person upload shows.
+  const isService = adType === "service";
+  const showCharacterControl = !isService && Boolean(selectedType);
+  const showPersonUpload = !isService && characterEnabled;
+
+  // Drop a stale person file when the upload is hidden (toggle off / service) so
+  // it is never sent for a character-off run.
+  useEffect(() => {
+    if (!showPersonUpload) setPersonFile(null);
+  }, [showPersonUpload]);
+  const assetHint = !selectedType
+    ? "Add a product and/or person image, or none for a text-only ad type."
+    : selectedType.assetPolicy.product === "required"
+      ? `${selectedType.displayName} needs a product image · person optional`
+      : selectedType.assetPolicy.person === "required"
+        ? `${selectedType.displayName} centres on a person (uploaded or auto-generated) · product optional`
+        : `${selectedType.displayName} needs no images — just describe it in your prompt`;
+
   const canSubmit =
-    Boolean(productFile) && prompt.trim().length > 0 && !pending;
+    (!productRequired || Boolean(productFile)) &&
+    prompt.trim().length > 0 &&
+    !pending;
 
   // Auto-grow the composer up to a cap, then scroll.
   // biome-ignore lint/correctness/useExhaustiveDependencies: prompt drives the resize; the ref isn't a dependency
@@ -72,8 +138,10 @@ export function CreateRunForm({
 
   function submit() {
     setError(null);
-    if (!productFile) {
-      setError("A product image is required.");
+    if (productRequired && !productFile) {
+      setError(
+        `The "${selectedType?.displayName ?? "selected"}" ad type needs a product image.`,
+      );
       return;
     }
     if (prompt.trim().length === 0) {
@@ -82,12 +150,15 @@ export function CreateRunForm({
     }
 
     const fd = new FormData();
-    fd.set("productImage", productFile);
-    if (personFile) fd.set("personImage", personFile);
+    if (productFile) fd.set("productImage", productFile);
+    if (showPersonUpload && personFile) fd.set("personImage", personFile);
     fd.set("prompt", prompt.trim());
     fd.set("mode", mode);
     fd.set("aspectRatio", aspectRatio);
     fd.set("duration", duration);
+    fd.set("adType", adType);
+    fd.set("characterEnabled", String(characterEnabled));
+    if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
       try {
@@ -134,21 +205,34 @@ export function CreateRunForm({
 
         <div className="flex items-end justify-between gap-2 px-1">
           <div className="flex flex-wrap items-center gap-1.5">
+            <AdTypeSelect
+              value={adType}
+              onChange={setAdType}
+              options={adTypes}
+            />
             <AttachButton
               label="Product"
               icon={ImageIcon}
               file={productFile}
               onFile={setProductFile}
               onError={setError}
-              required
+              required={productRequired}
             />
-            <AttachButton
-              label="Person"
-              icon={UserIcon}
-              file={personFile}
-              onFile={setPersonFile}
-              onError={setError}
-            />
+            {showCharacterControl && (
+              <CharacterChip
+                value={characterEnabled}
+                onChange={setCharacterEnabled}
+              />
+            )}
+            {showPersonUpload && (
+              <AttachButton
+                label="Person"
+                icon={UserIcon}
+                file={personFile}
+                onFile={setPersonFile}
+                onError={setError}
+              />
+            )}
             <OptionsMenu
               mode={mode}
               onMode={setMode}
@@ -156,6 +240,8 @@ export function CreateRunForm({
               onAspect={setAspectRatio}
               duration={duration}
               onDuration={setDuration}
+              brandText={brandText}
+              onBrandText={setBrandText}
             />
             <span className="text-muted-foreground hidden items-center pl-1 font-mono text-[11px] tabular-nums sm:inline-flex">
               {duration} · {aspectRatio} · {MODE_LABEL[mode]}
@@ -184,6 +270,13 @@ export function CreateRunForm({
           </div>
         </div>
       </div>
+
+      {/* Per-type asset guidance — tells the user which uploads (if any) this
+          ad type needs, so no-image types don't look broken. */}
+      <p className="text-muted-foreground/80 flex items-center gap-1.5 px-1 text-[11px]">
+        <ImageIcon className="size-3 shrink-0 opacity-70" />
+        {assetHint}
+      </p>
 
       <div className="flex min-h-5 items-center justify-between px-1">
         <AnimatePresence mode="wait">
@@ -320,6 +413,8 @@ function OptionsMenu({
   onAspect,
   duration,
   onDuration,
+  brandText,
+  onBrandText,
 }: {
   mode: Mode;
   onMode: (m: Mode) => void;
@@ -327,6 +422,8 @@ function OptionsMenu({
   onAspect: (r: AspectRatio) => void;
   duration: Duration;
   onDuration: (d: Duration) => void;
+  brandText: string;
+  onBrandText: (v: string) => void;
 }) {
   return (
     <Popover>
@@ -355,6 +452,15 @@ function OptionsMenu({
           <Field label="Mode">
             <ModeToggle value={mode} onChange={onMode} />
           </Field>
+          <Field label="Brand guidelines">
+            <textarea
+              value={brandText}
+              onChange={(e) => onBrandText(e.target.value)}
+              rows={3}
+              placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
+              className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 text-xs outline-none"
+            />
+          </Field>
         </div>
       </PopoverContent>
     </Popover>
@@ -376,6 +482,92 @@ function Field({
       </span>
       {children}
     </div>
+  );
+}
+
+/** Ad-type dropdown — the registry's types (no Auto-detect). The pick LOCKS the
+ *  type for the run; the detector still infers adStyle + hooks. Themed shadcn
+ *  DropdownMenu (not a native select) so the open list matches the dark theme;
+ *  scrolls and scales cleanly from 2 to 16+ types. */
+function AdTypeSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (t: string) => void;
+  options: AdTypeMenuItem[];
+}) {
+  const label = options.find((o) => o.id === value)?.displayName ?? value;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title="Pick the ad type to generate."
+          className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 inline-flex max-w-[12rem] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium outline-none transition-colors"
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        sideOffset={6}
+        className="ring-glow max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-2xl border-border/70"
+      >
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          {options.map((o) => (
+            <DropdownMenuRadioItem
+              key={o.id}
+              value={o.id}
+              title={o.whenToUse}
+              className="text-xs"
+            >
+              {o.displayName}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Compact Character On/Off chip for the composer bar — On → solid brand, Off →
+ *  dashed muted, mirroring the AttachButton chips. Toggles a main on-screen
+ *  character (uploaded if a person is added, else synthesized). */
+function CharacterChip({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      aria-pressed={value}
+      title={
+        value
+          ? "Character on — one main on-screen character (uploaded or synthesized). Click to turn off."
+          : "Character off — product/scene-only ad. Click to turn on."
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        value
+          ? "border-brand/50 bg-brand/10 text-foreground"
+          : "border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 border-dashed",
+      )}
+    >
+      <span className="relative inline-flex items-center justify-center">
+        <UserIcon className="size-3.5" />
+        {!value && (
+          <span className="bg-current pointer-events-none absolute left-1/2 top-1/2 h-[1.5px] w-[150%] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full" />
+        )}
+      </span>
+      Character {value ? "on" : "off"}
+    </button>
   );
 }
 

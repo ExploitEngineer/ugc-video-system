@@ -8,18 +8,24 @@
 
 import { parseJsonObject } from "../../json.js";
 import type { ImageRef } from "../../../providers/openai/index.js";
-import type { SkillContext } from "../../types.js";
+import type { SkillContext, SupportingRole } from "../../types.js";
 import { buildPersonBriefPrompt, type PersonBriefPlan } from "./prompt.js";
 
 export interface PlanPersonBriefInput {
   userPrompt: string;
-  productUpload: ImageRef;
+  /**
+   * The uploaded product image, when one exists — the brief is grounded in a
+   * plausible USER of it (vision). Omitted when the Character toggle synthesizes
+   * a main character with NO uploads: the brief is then planned from the prompt
+   * + ad style alone (no image).
+   */
+  productUpload?: ImageRef;
 }
 
 export async function planPersonBrief(
   ctx: SkillContext,
   input: PlanPersonBriefInput,
-): Promise<{ personBrief: string }> {
+): Promise<{ personBrief: string; supportingCast: SupportingRole[] }> {
   const reply = await ctx.openai.chat(
     buildPersonBriefPrompt({
       userPrompt: input.userPrompt,
@@ -29,5 +35,17 @@ export async function planPersonBrief(
     { jsonMode: true },
   );
   const plan = parseJsonObject<PersonBriefPlan>(reply);
-  return { personBrief: plan.personBrief?.trim() ?? "" };
+  // Text-only secondary roles (Chunk 4b) — sanitize + cap so a hallucinated
+  // crowd can't bloat the storyboard/video prompts.
+  const supportingCast: SupportingRole[] = (plan.supportingCast ?? [])
+    .filter(
+      (c): c is { role: string; appearance: string } =>
+        Boolean(c) && typeof c.role === "string" && c.role.trim().length > 0,
+    )
+    .slice(0, 3)
+    .map((c) => ({
+      role: c.role.trim(),
+      appearance: (c.appearance ?? "").trim(),
+    }));
+  return { personBrief: plan.personBrief?.trim() ?? "", supportingCast };
 }

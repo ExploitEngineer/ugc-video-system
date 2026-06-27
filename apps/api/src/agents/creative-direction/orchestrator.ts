@@ -15,7 +15,12 @@
 // flips awaiting_confirmation→running (driver advances via nextStep), a revise
 // flips →regenerating (driver re-runs the stage of currentStep).
 
-import { isMultiSegment, segmentCountFor, type Step } from "@ugc/shared";
+import {
+  detectPlaceholders,
+  isMultiSegment,
+  segmentCountFor,
+  type Step,
+} from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
@@ -40,12 +45,16 @@ import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
 import type { SkillContext } from "../types.js";
+import { FALLBACK_AD_TYPE_ID, getAdType } from "../ad-types/registry.js";
+import { reconcile } from "../ad-types/reconcile.js";
+import type { HookSelection } from "../ad-types/types.js";
 import { interpretAdStyle } from "./interpret-style/index.js";
 import { describeProduct } from "./describe-product/index.js";
 import {
   narrativeOutline,
   PANELS_PER_SEGMENT,
 } from "./narrative-outline/index.js";
+import { creativeBrief } from "./creative-brief/index.js";
 import { planPersonBrief } from "./person-brief/index.js";
 import { derivePersonBrief } from "./derive-person-brief/index.js";
 import {
@@ -65,10 +74,14 @@ import {
   segmentStoryboards,
 } from "./inputs.js";
 import {
+  type AssetCtx,
   gateForCurrentStep,
   gateForNext,
   genStepForRevise,
+  hasAnyReference,
   nextStep,
+  willGeneratePerson,
+  willGenerateProduct,
 } from "./plan.js";
 
 type RunRow = typeof schema.runs.$inferSelect;
@@ -142,12 +155,36 @@ async function ownsRun(runId: string, myId?: string): Promise<boolean> {
   return run?.lockedBy === myId;
 }
 
-function buildCtx(run: RunRow): SkillContext {
+/** Asset signals for a run: registry asset policy for its adType + uploads. */
+function assetCtxFor(
+  run: RunRow,
+  uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
+): AssetCtx {
+  const policy = getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).assetPolicy;
+  return {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: Boolean(uploads.productUpload),
+    hasPersonUpload: Boolean(uploads.personUpload),
+    characterEnabled: run.characterEnabled,
+  };
+}
+
+function buildCtx(
+  run: RunRow,
+  uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
+): SkillContext {
   const { openai, video } = providers();
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
-    adType: run.adType ?? "ugc",
+    // Open `runs.ad_type` id (Chunk E detector). The prompt builders dispatch
+    // per-type fragments via the registry (Chunk F); legacy ugc/inspirational
+    // values resolve through the registry's aliases.
+    adType: run.adType ?? FALLBACK_AD_TYPE_ID,
+    hooks: (run.hooks as HookSelection | null) ?? undefined,
+    hasProduct: Boolean(uploads.productUpload),
+    hasPerson: Boolean(uploads.personUpload),
     productBrief: run.productBrief ?? "",
     productUse: (run.productUse as SkillContext["productUse"]) ?? undefined,
     personBrief: run.personBrief ?? "",
@@ -159,6 +196,17 @@ function buildCtx(run: RunRow): SkillContext {
     visualStyle: isMultiSegment(run.duration)
       ? (run.visualStyle ?? undefined)
       : undefined,
+    // Service ads only — the creative-director brief (cast + scenes + hook + CTA),
+    // planned by the `creative_brief` step and read back here on the next loop.
+    creativeBrief:
+      (run.creativeBrief as SkillContext["creativeBrief"]) ?? undefined,
+    // Optional user-typed brand guidelines, injected into the prompts.
+    brandText: run.brandText ?? undefined,
+    // Chunk 4 — the Character On/Off toggle for this run (drives the person sheet).
+    characterEnabled: run.characterEnabled,
+    // Chunk 4b — text-only supporting roles planned from the prompt (product types).
+    supportingCast:
+      (run.supportingCast as SkillContext["supportingCast"]) ?? undefined,
     openai,
     video,
   };
@@ -274,12 +322,15 @@ async function executeStep(
     }
 
     case "storyboard": {
+      // Product sheet is optional — no-product ad types (graphic-text manifestos,
+      // explainers, promos…) render text/graphics with no product reference.
       const product = await latestProductSheet(runId);
-      if (!product) throw new Error("no product sheet before storyboard");
       const personSheetRef = await resolvePersonRef(runId, personUpload);
       await writeStepEvent({ runId, step, status: "started" });
       const res = await imageAgent.storyboardGenerator(ctx, {
-        productSheetRef: { source: product.assetUrl, mime: "image/png" },
+        productSheetRef: product
+          ? { source: product.assetUrl, mime: "image/png" }
+          : undefined,
         personSheetRef,
         userPrompt,
         directive,
@@ -365,6 +416,22 @@ async function executeStep(
 
     // ── 60s pipeline ────────────────────────────────────────────────────
 
+    case "creative_brief": {
+      // Service ads: the creative director plans the synthesized cast + scenes
+      // (the multi-scene brief) BEFORE the storyboard — there is no product or
+      // person upload to anchor from. Persisted to runs.creative_brief.
+      await writeStepEvent({ runId, step, status: "started" });
+      const brief = await creativeBrief(ctx, { userPrompt });
+      await setRun(runId, { creativeBrief: brief });
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { scenes: brief.scenes.length, framework: brief.framework },
+      });
+      return {};
+    }
+
     case "narrative_outline": {
       // Plan the whole 60s arc as four segment summaries BEFORE any storyboard,
       // so each storyboard can be handed the others' summaries (continuity).
@@ -399,13 +466,12 @@ async function executeStep(
       //   • revise (directive) → rebuild the whole master and re-crop ALL N
       //     (newest-per-index supersedes the old crop rows; no deletes).
       const segCount = segmentCountFor(ctx.duration);
+      // Product sheet optional (no-product ad types render without it).
       const product = await latestProductSheet(runId);
-      if (!product) throw new Error("no product sheet before segment storyboards");
       const personSheetRef = await resolvePersonRef(runId, personUpload);
-      const productSheetRef: ImageRef = {
-        source: product.assetUrl,
-        mime: "image/png",
-      };
+      const productSheetRef: ImageRef | undefined = product
+        ? { source: product.assetUrl, mime: "image/png" }
+        : undefined;
 
       const haveMaster = await persistedMasterStoryboard(runId);
       const crops = await persistedSegmentStoryboardIndices(runId);
@@ -574,10 +640,26 @@ async function executeStep(
 async function runReferencePhase(
   ctx: SkillContext,
   tag?: string,
-): Promise<{ failedStep?: Step; err?: unknown }> {
+): Promise<{ failedStep?: Step; err?: unknown; hasReference: boolean }> {
   const runId = ctx.runId;
   const { productUpload, personUpload } = await loadUploads(runId);
   const userPrompt = (await readRun(runId))?.prompt ?? "";
+
+  // Chunk G — conditional asset steps. A product sheet comes only from an upload
+  // (never synthesized); a person sheet is generated when uploaded OR when the
+  // ad type REQUIRES a person (then synthesized). An optional asset with no
+  // upload is SKIPPED, so a neither-asset type can reach the storyboard directly.
+  const policy = getAdType(ctx.adType).assetPolicy;
+  const asset: AssetCtx = {
+    productRequired: policy.product === "required",
+    personRequired: policy.person === "required",
+    hasProductUpload: Boolean(productUpload),
+    hasPersonUpload: Boolean(personUpload),
+    // Chunk 4 — the Character toggle, not the asset policy, decides the person sheet.
+    characterEnabled: ctx.characterEnabled ?? true,
+  };
+  const genProduct = willGenerateProduct(asset);
+  const genPerson = willGeneratePerson(asset);
 
   // Person branch: when inventing a person (a product but no uploaded person),
   // plan + persist the brief FIRST, then generate the sheet — `executeStep`
@@ -585,15 +667,29 @@ async function runReferencePhase(
   // With an uploaded person the brief is skipped (the sheet is built from the
   // photo). The product branch runs alongside and never waits on the brief.
   const personBranch = async (): Promise<void> => {
-    if (productUpload && !personUpload) {
-      // Invent the person from the product — the sheet skill READS this brief,
-      // so it must be persisted BEFORE the person_sheet step.
-      const { personBrief } = await planPersonBrief(ctx, {
+    if (!genPerson) {
+      logRun(runId, "↪ skip person_sheet (character toggle off, none uploaded)", tag);
+      return;
+    }
+    if (!personUpload) {
+      // No uploaded person but the character toggle is On → SYNTHESIZE the main
+      // character. Plan the brief FIRST (the sheet skill READS runs.personBrief),
+      // from the uploaded product if one exists, else from the prompt alone. The
+      // planner also extracts any text-only supporting cast (Chunk 4b) — persisted
+      // so the next loop's ctx (storyboard) picks it up.
+      const { personBrief, supportingCast } = await planPersonBrief(ctx, {
         userPrompt,
-        productUpload,
+        ...(productUpload ? { productUpload } : {}),
       });
-      await setRun(runId, { personBrief });
-      logRun(runId, `person brief: "${personBrief}"`, tag);
+      await setRun(runId, {
+        personBrief,
+        ...(supportingCast.length ? { supportingCast } : {}),
+      });
+      logRun(
+        runId,
+        `person brief (synthesized): "${personBrief}"${supportingCast.length ? ` (+${supportingCast.length} supporting role${supportingCast.length > 1 ? "s" : ""})` : ""}`,
+        tag,
+      );
       await executeStep(ctx, "person_sheet");
       return;
     }
@@ -626,7 +722,6 @@ async function runReferencePhase(
       await Promise.all([deriveBrief, executeStep(ctx, "person_sheet")]);
       return;
     }
-    await executeStep(ctx, "person_sheet");
   };
 
   // Product-identity branch — vision over the upload → a factual product brief,
@@ -666,15 +761,15 @@ async function runReferencePhase(
   };
 
   const [product, person] = await Promise.allSettled([
-    executeStep(ctx, "product_sheet"),
+    genProduct ? executeStep(ctx, "product_sheet") : Promise.resolve(),
     personBranch(),
     productBriefBranch(),
   ]);
-  if (product.status === "rejected")
-    return { failedStep: "product_sheet", err: product.reason };
+  if (genProduct && product.status === "rejected")
+    return { failedStep: "product_sheet", err: product.reason, hasReference: false };
   if (person.status === "rejected")
-    return { failedStep: "person_sheet", err: person.reason };
-  return {};
+    return { failedStep: "person_sheet", err: person.reason, hasReference: false };
+  return { hasReference: hasAnyReference(asset) };
 }
 
 /**
@@ -692,37 +787,91 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     tag,
   );
 
-  // Phase 0 — interpret the ad style once, when leaving `queued`. The
-  // product-derived person brief is NOT planned here: it's deferred into the
-  // parallel reference phase (concurrent with the product sheet), so the product
-  // sheet — which needs neither the brief nor its vision call — starts at once.
+  // Uploads are immutable for the life of the run — load once and reuse for the
+  // detector ground truth and every ctx build.
+  const uploads = await loadUploads(runId);
+  const hasProduct = Boolean(uploads.productUpload);
+  const personUploaded = Boolean(uploads.personUpload);
+
+  // Phase 0 — interpret the ad style + classify the ad type / hooks once, when
+  // leaving `queued`. The product-derived person brief is NOT planned here: it's
+  // deferred into the parallel reference phase (concurrent with the product
+  // sheet), so the product sheet — which needs neither the brief nor its vision
+  // call — starts at once.
   if (run.status === "queued") {
-    const ctx = buildCtx(run);
+    const ctx = buildCtx(run, uploads);
     logRun(runId, "▶ interpreting ad style …", tag);
     try {
-      const { adStyle, adType } = await interpretAdStyle(ctx, {
+      // Fix 8: bracket fill-in slots ([SHOCK STAT], [PRICE], …) the user left
+      // unresolved. Surfaced to the detector so it records anything it invents,
+      // and persisted into detector_meta below.
+      const unresolvedPlaceholders = detectPlaceholders(run.prompt);
+      const detected = await interpretAdStyle(ctx, {
         userPrompt: run.prompt,
+        hasProduct,
+        hasPerson: personUploaded,
+        productBrief: run.productBrief ?? "",
+        personBrief: run.personBrief ?? "",
+        unresolvedPlaceholders,
       });
+      // Honor an explicit user dropdown pick (Chunk J): keep the locked adType,
+      // still take the detector's adStyle + hooks. Reconcile still applies asset
+      // safety (a product-required type with no product downgrades).
+      const locked =
+        run.adTypeSource === "user" && run.adType ? run.adType : null;
+      const plan = reconcile(
+        {
+          adType: locked ?? detected.adType,
+          hooks: detected.hooks,
+          confidence: detected.confidence,
+        },
+        hasProduct,
+        personUploaded,
+        run.characterEnabled,
+      );
+      const hookLabel = [plan.hooks.visualLead.id, plan.hooks.overlay?.id]
+        .filter(Boolean)
+        .join("+");
       if (
         !(await setRunIfActive(runId, {
-          adStyle,
-          adType,
+          adStyle: detected.adStyle,
+          adType: plan.adType,
+          adTypeSource: run.adTypeSource ?? "auto",
+          hooks: plan.hooks,
+          adTypeConfidence: detected.confidence,
+          detectorMeta: {
+            rationale: detected.rationale,
+            assetIntent: detected.assetIntent,
+            synthesizePerson: plan.synthesizePerson,
+            detectedHooks: detected.hooks,
+            // Fix 9 near-miss + Fix 8 placeholder/invented-value telemetry —
+            // omitted when empty so the shape stays clean for confident runs.
+            ...(detected.topCandidates.length
+              ? { topCandidates: detected.topCandidates }
+              : {}),
+            ...(unresolvedPlaceholders.length
+              ? { unresolvedPlaceholders }
+              : {}),
+            ...(detected.inventedValues.length
+              ? { inventedValues: detected.inventedValues }
+              : {}),
+          },
           status: "running",
           currentStep: null,
         }))
       ) {
         return; // cancelled during interpretation — leave it terminal
       }
-      logRun(runId, `ad style: "${adStyle}" · ad type: ${adType}`, tag);
+      logRun(
+        runId,
+        `ad style: "${detected.adStyle}" · ad type: ${plan.adType} (${run.adTypeSource ?? "auto"}) · hooks: ${hookLabel}`,
+        tag,
+      );
     } catch (err) {
       await failRun(runId, null, err);
       return;
     }
   }
-
-  // Uploads are immutable for the life of the run — compute the branch once.
-  const { personUpload } = await loadUploads(runId);
-  const personUploaded = Boolean(personUpload);
 
   for (;;) {
     run = await readRun(runId);
@@ -741,7 +890,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       return;
     }
 
-    const ctx = buildCtx(run);
+    const ctx = buildCtx(run, uploads);
 
     // ── regenerating: re-run the generation step of the revised gate, with
     // the user's feedback threaded into the agent prompt ──
@@ -752,9 +901,15 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         await failRun(runId, null, new Error("regenerating without a gate step"));
         return;
       }
-      // Reference gate always re-runs person_sheet (product is hidden); the
-      // storyboard gate re-runs the storyboard (15s) / segment storyboards (60s).
-      const genStep = genStepForRevise(gate, "person", run.duration);
+      // Reference gate re-runs person_sheet (product is hidden) — or product_sheet
+      // on a person-skipped run; the storyboard gate re-runs the storyboard (15s)
+      // / segment storyboards (60s).
+      const genStep = genStepForRevise(
+        gate,
+        "person",
+        run.duration,
+        assetCtxFor(run, uploads),
+      );
       const message = run.feedback?.trim() ?? "";
       const t0 = Date.now();
 
@@ -780,7 +935,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
           const sb = master ?? (await latestStoryboardSheet(runId));
           if (sb) currentArtifact = { source: sb.assetUrl, mime: "image/png" };
         } else {
-          currentArtifact = await resolvePersonRef(runId, personUpload);
+          currentArtifact = await resolvePersonRef(runId, uploads.personUpload);
         }
         if (currentArtifact) {
           directive = await planRevision(ctx.openai, {
@@ -856,18 +1011,41 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // ── running: execute the next step (or the parallel reference phase) ──
     let step: Step | null;
     let outcome: CriticOutcome | undefined;
+    // Whether the reference phase produced any sheet — collapses the reference
+    // gate when neither was generated (Chunk G). True for every non-reference step.
+    let referenceExists = true;
     const t0 = Date.now();
 
     if (run.currentStep === null) {
-      // First generation: product + person sheets run CONCURRENTLY. `person_sheet`
-      // is always the checkpoint the phase advances to — the gate/advance block
-      // below treats it exactly like a single completed reference step.
-      step = "person_sheet";
-      logRun(runId, "▶ product_sheet + person_sheet (parallel) …", tag);
-      const { failedStep, err } = await runReferencePhase(ctx, tag);
-      if (failedStep) {
-        await failRun(runId, failedStep, err);
-        return;
+      if ((run.adType ?? "") === "service") {
+        // Service path: the creative-director brief runs FIRST (it plans the
+        // synthesized cast + scenes). No product/person reference sheets, so
+        // there is no reference gate.
+        step = "creative_brief";
+        logRun(runId, "▶ creative brief …", tag);
+        try {
+          ({ outcome } = await executeStep(ctx, step));
+        } catch (err) {
+          await failRun(runId, step, err);
+          return;
+        }
+        referenceExists = false;
+      } else {
+        // First generation: product + person sheets run CONCURRENTLY (each
+        // skipped when its asset is optional + not uploaded). `person_sheet` is
+        // always the checkpoint the phase advances to — the gate/advance block
+        // below treats it exactly like a single completed reference step.
+        step = "person_sheet";
+        logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
+        const { failedStep, err, hasReference } = await runReferencePhase(
+          ctx,
+          tag,
+        );
+        if (failedStep) {
+          await failRun(runId, failedStep, err);
+          return;
+        }
+        referenceExists = hasReference;
       }
     } else {
       step = nextStep(
@@ -924,7 +1102,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // Independent of the Critic — gateForNext works whether or not inspection
     // steps run.
     const next = nextStep(step, personUploaded, run.criticEnabled, run.duration);
-    const gate = gateForNext(next);
+    const gate = gateForNext(next, referenceExists);
     if (run.mode === "confirm" && gate) {
       logRun(
         runId,

@@ -12,6 +12,11 @@ can see precisely what reaches GPT Image 2 and Seedance 2.0.
 > params, providers, data model, resilience) — e.g. to paste into a chat — see
 > [system-context.md](system-context.md). This doc is the deeper flow narrative.
 
+> **Reasoning/vision model:** the `gpt-4.1` mentions throughout this doc denote
+> the reasoning/vision slot, which now defaults to **Claude Sonnet 4.6 via
+> OpenRouter** (`gpt-4.1` is the fallback when `OPENROUTER_API_KEY` is unset).
+> Image generation stays `gpt-image-2`; video stays Seedance 2.0.
+
 > Two contracts worth keeping in your head while reading:
 >
 > 1. **Parallel reference sheets.** The product sheet and the person sheet are

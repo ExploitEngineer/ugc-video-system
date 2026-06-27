@@ -10,15 +10,26 @@
 // video model as the ordered shot guide; the detailed `sceneDescription` and
 // `transcript` ride in the video prompt as text.
 
-import type { AdType, AspectRatio } from "@ugc/shared";
+import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
-import type { ProductUse } from "../../types.js";
+import type { CreativeBrief, ProductUse, SupportingRole } from "../../types.js";
+import { getAdType } from "../../ad-types/registry.js";
+import { lookBase } from "../../ad-types/fragments/looks.js";
+import { buildFragmentCtx } from "../../ad-types/fragment-ctx.js";
+import { hookOpening } from "../../ad-types/hooks/compose.js";
+import type { HookSelection } from "../../ad-types/types.js";
 import type { RevisionDirective } from "../../creative-direction/plan-revision/index.js";
+import { formatBrand } from "../../../lib/brand.js";
 
 export interface StoryboardPromptInput {
   adStyle: string;
-  adType: AdType;
+  /** OPEN ad-type id — dispatched through the ad-type registry for per-type fragments. */
+  adType: string;
+  /** Resolved hook selection (Chunk E); its opening directive is spliced into scene 1 only. */
+  hooks?: HookSelection;
+  /** Whether a product is present (storyboard always has a product sheet → defaults true). */
+  hasProduct?: boolean;
   /**
    * Factual product identity anchor (category / materials / colors / markings)
    * from `runs.product_brief`. Pins what the product IS in TEXT so a drifting
@@ -78,6 +89,21 @@ export interface StoryboardPromptInput {
    * prompts) so the whole ad shares one grade/lens/lighting/palette.
    */
   visualStyle?: string;
+  /**
+   * SERVICE ads only — the creative-director brief (`runs.creative_brief`). When
+   * present with real scenes it is the AUTHORITATIVE multi-scene story the sheet
+   * renders (scene i → panel i, synthesized cast held constant). Absent ⇒ the
+   * planner invents the script as before (the product ad-types).
+   */
+  creativeBrief?: CreativeBrief;
+  /** Optional user-typed brand guidelines (`runs.brand_text`), injected verbatim. */
+  brandText?: string;
+  /**
+   * Chunk 4b — text-only supporting roles (`runs.supporting_cast`) for product
+   * ads. Rendered from text (no reference sheet) and held consistent across
+   * panels. Ignored for service ads (the creative brief carries their cast).
+   */
+  supportingCast?: SupportingRole[];
 }
 
 export interface StoryboardScene {
@@ -124,6 +150,8 @@ function directiveBlock(d: RevisionDirective): string[] {
 export function buildStoryboardPrompt({
   adStyle,
   adType,
+  hooks,
+  hasProduct,
   productBrief,
   productUse,
   personBrief,
@@ -138,11 +166,31 @@ export function buildStoryboardPrompt({
   visualStyle,
   full60s,
   segmentCount,
+  creativeBrief,
+  brandText,
+  supportingCast,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
   const product = productBrief.trim();
   const person = personBrief.trim();
+  const brandLine = formatBrand(brandText);
+
+  // Ad-type registry dispatch (Chunk F): the per-type / per-look prompt fragments
+  // replace the old `adType === "ugc"` ternaries. Legacy ids resolve via aliases,
+  // so a `ugc`/`inspirational` run is byte-identical.
+  const def = getAdType(adType);
+  const fctx = buildFragmentCtx({
+    adStyle: style,
+    productBrief,
+    personBrief,
+    hasProduct: hasProduct ?? true, // a storyboard always has a product sheet
+    hasPerson,
+    hooks,
+    duration: (segmentCount ?? 1) * 15,
+    segmentIndex,
+    segmentCount,
+  });
 
   // ── MULTI-SEGMENT ONE-MASTER mode (full60s): this single sheet is the WHOLE
   // multi-segment storyboard — N×4 panels in an N-row grid of ONE continuous
@@ -234,7 +282,17 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // PANEL LABELS badge range — 01..N×4 vs 01..04.
+  // graphic_text panels ARE the finished ad frames (kinetic typography), so the
+  // production annotations (number badge + descriptive bottom caption bar) must
+  // NOT be burned in — they read as an unfinished "storyboard", not an ad, and
+  // then leak into the video. Every other look is a real storyboard sheet that
+  // keeps its badge + caption bar (the video step now strips them at render).
+  // graphic_text was removed (ad-gen refactor); no surviving type is a clean
+  // graphic sheet, so this is always false. The dead graphic branches it gates
+  // are pruned in the Chunk 6 storyboard rework.
+  const cleanGraphic = false;
+
+  // PANEL LABELS badge range — 01..N×4 vs 01..04. Suppressed for graphic_text.
   const labelBadge = isMaster
     ? [
         `- A scene-number BADGE in a top corner of each panel: 01 through ${lastBadge}, in`,
@@ -243,6 +301,39 @@ export function buildStoryboardPrompt({
     : [
         "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
         "  reading order. Small, clean, legible.",
+      ];
+
+  // Panel-labelling block — graphic_text gets clean finished frames (no badge,
+  // no caption bar); every other look keeps the storyboard badge + a SINGLE
+  // uniform caption-bar style across all panels (fixes per-panel colour drift).
+  const panelLabelBlock = cleanGraphic
+    ? [
+        "PANEL FRAMES — each of the 4 panels is a FINISHED, self-contained graphic",
+        "frame (broadcast-ready), separated only by thin plain gutters: NO number",
+        "badge, NO bottom caption bar, NO shot-type label, NO meta/description text.",
+        "The frame's OWN kinetic typography (headline, stat, code, CTA) is the only",
+        "text and must be rendered VERBATIM and perfectly legible. Add NO arrows,",
+        "callouts, timecodes, watermarks, framing brackets or panels-within-a-panel",
+        "— just the four clean designed frames.",
+      ]
+    : [
+        "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
+        ...labelBadge,
+        "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
+        "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
+        "  clean uppercase storyboard lettering — like the supplied example sheet.",
+        "- ALL FOUR caption bars share ONE identical style: the SAME single colour,",
+        "  opacity, height and font on every panel — never a different colour per",
+        "  panel. The badge and caption stay crisp and readable, never overlapping",
+        "  the subject's face or the product's markings.",
+        "Apart from the per-panel number badge and its caption bar, add NO other",
+        "graphics of ANY kind: no titles, subtitles, timecodes, motion or camera",
+        "ARROWS, callouts, hand-drawn marks, logos or watermarks, and NO stray boxes,",
+        "bars, rectangles, color blocks, framing brackets, vignettes or",
+        "panels-within-a-panel anywhere. Convey motion through the imagery itself",
+        "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
+        "uninterrupted photographs — the ONLY non-photographic marks on the whole",
+        "sheet are the four number badges and the four caption bars.",
       ];
 
   // Closing JSON-spec fragments (word budget, layout phrase, badge range, count).
@@ -272,7 +363,7 @@ export function buildStoryboardPrompt({
         "only the CAMERA (shot type, angle, distance) and the small moment/action move",
         "from panel to panel. Build this arc from the user's prompt and the product —",
         "do NOT split it into separate vignettes.",
-        ...(adType === "ugc"
+        ...(def.lookFamily === "ugc_authentic"
           ? [
               "Because this is UGC, the continuous action IS the person presenting the",
               `product to camera in that one spot — across the ${totalWordLower} panels they keep`,
@@ -284,21 +375,29 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // User-block "produce the script" line — N×4 vs 4.
-  const produceLine = isMaster
+  // User-block "produce the script" line — graphic clean frames vs N×4 vs 4.
+  const produceLine = cleanGraphic
     ? [
-        `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
-        "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
-        `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
-        `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
-        "and no arrows.",
+        "Review them, then produce the 4-scene script (each scene's on-frame text as",
+        "its panelCaption) and the composite sheet plan — exactly 4 FINISHED,",
+        "self-contained graphic frames in a 2×2 grid separated by thin gutters; NO",
+        "number badges, NO caption bars, NO arrows — each frame's own typography IS",
+        "the design.",
       ]
-    : [
-        "Review them, then produce the 4-scene script (with spoken transcripts and a",
-        "brief panelCaption per scene) and the composite storyboard-sheet plan —",
-        "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
-        "its panelCaption bar, in order; no other text and no arrows.",
-      ];
+    : isMaster
+      ? [
+          `Review them, then produce the ${totalPanels}-scene script (with spoken transcripts and`,
+          "a brief panelCaption per scene) and the composite storyboard-sheet plan —",
+          `exactly ${totalPanels} keyframe panels in a ${rows}×4 grid, each LABELLED with its number`,
+          `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
+          "and no arrows.",
+        ]
+      : [
+          "Review them, then produce the 4-scene script (with spoken transcripts and a",
+          "brief panelCaption per scene) and the composite storyboard-sheet plan —",
+          "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+          "its panelCaption bar, in order; no other text and no arrows.",
+        ];
 
   // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
   // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
@@ -311,16 +410,26 @@ export function buildStoryboardPrompt({
   const hasUse = Boolean(useVerb);
   const hasPrep = Boolean(accessVerb);
 
+  // Positional image binding — refs are pushed product-first, then person
+  // (storyboard/index.ts:146-148), so with a product sheet attached the person
+  // sheet is Image 2, else Image 1. gpt-image-2's images.edit gives no per-image
+  // role, so the prompt MUST name which attached image is which BY NUMBER —
+  // without it identity drifts to the product category's default (skincare→woman).
+  const hasProd = hasProduct ?? true;
+  const personImgNo = hasProd ? 2 : 1;
+
   // TEXT identity anchor — pins what the product IS so a drifting reference
   // sheet can't make the storyboard render a different kind of item.
   const productAnchor = product
     ? [
         "THE PRODUCT IS (authoritative identity — this exact item, nothing else):",
         product,
-        "Every panel MUST show THIS product — the same category, form, materials,",
-        "colors and markings described above AND shown in the product sheet. If the",
-        "product sheet ever looks ambiguous, this text wins: never substitute a",
-        "different kind of item. State this product by name in the `imagePrompt`.",
+        "Every panel MUST show THIS product — the same category, form, materials and",
+        "markings described above AND shown in Image 1 (the product sheet). For exact",
+        "COLOUR and finish Image 1 (the product sheet) is the sole authority: match its hues",
+        "precisely, never invent, restyle or shift the colour. If the sheet's KIND of",
+        "item ever looks ambiguous, this text wins: never substitute a different kind",
+        "of item. State this product by name in the `imagePrompt`.",
       ]
     : [];
 
@@ -332,9 +441,13 @@ export function buildStoryboardPrompt({
     ? [
         "CHARACTER ANCHOR (the on-screen person — lock this and keep it 100%",
         "constant across ALL FOUR scenes, captions and transcripts):",
+        `- The person is the EXACT human shown in Image ${personImgNo} (the person sheet):`,
+        "  replicate their face, apparent gender, age, hair and skin tone IDENTICALLY",
+        "  in every panel — never invent a different person, never blend in features",
+        "  from any other attached image.",
         person
-          ? "- From the attached PERSON SHEET (authoritative), plus the person brief below, read and FIX the person's apparent"
-          : "- From the attached PERSON SHEET (authoritative) read and FIX the person's apparent",
+          ? `- From Image ${personImgNo} (the person sheet, authoritative), plus the person brief below, read and FIX the person's apparent`
+          : `- From Image ${personImgNo} (the person sheet, authoritative) read and FIX the person's apparent`,
         "  GENDER PRESENTATION, approximate age range, hair (length / color /",
         "  style), skin tone and build.",
         ...(person ? [`- Person brief: ${person}`] : []),
@@ -352,49 +465,55 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // Ad-type-specific direction for the script + transcripts.
-  const typeBlock =
-    adType === "ugc"
+  // UPLOADED-PRODUCT FOCUS — when a real product was uploaded (Image 1), promote
+  // it to a featured on-screen HERO even for product-OPTIONAL types (brand-story,
+  // inspirational, lifestyle…), which otherwise treat the product as optional
+  // background and under-feature it. Skipped for graphic_text (explainer), whose
+  // product appears as a designed graphic element, not live photography.
+  const uploadedProductFocus =
+    fctx.hasProduct && !cleanGraphic
       ? [
-          "AD TYPE — UGC (a real person SHOWING the product to camera):",
-          "- The ad is a REAL PERSON talking TO CAMERA about the product the way",
-          "  they'd show it to a friend — relaxed, genuine, off-the-cuff. NOT a",
-          "  scripted ad, review read or sales pitch, and NOT silent lifestyle b-roll.",
-          "- They ACTIVELY DEMONSTRATE the product to the lens across the panels: hold",
-          "  it up close to camera, take it off / put it on (or pick it up / handle",
-          "  it), turn or rotate it to show its key parts and details, point at a",
-          "  feature, and show it actually working — like a creator doing a real",
-          "  hands-on review. The PRODUCT is the focus of most panels, shown clearly",
-          "  and large to camera, NOT just worn or held passively in the background.",
-          "- They look at and address the camera. The flow is natural: show the",
-          "  product → demonstrate / use it → an honest reaction. It ENDS on a real",
-          "  personal verdict, never a sales close or call-to-action.",
-          "- AVOID passive lifestyle filler that hides the product: walking in,",
-          "  dropping a bag, stretching, relaxing, gazing away, or candid moments not",
-          "  addressed to camera.",
-          "- Each scene's `transcript` is one natural spoken line the on-screen",
-          "  person says in that scene (first person, the way people really talk —",
-          "  contractions, casual phrasing, not ad copy), tied to what they're",
-          "  SHOWING/doing with the product. Keep lines short and let their length",
-          "  vary; the lines flow as one continuous, natural bit of talking.",
+          "UPLOADED PRODUCT — a real product was provided (Image 1, the product",
+          "sheet), so it is a FEATURED on-screen subject of THIS ad, never optional",
+          "set-dressing:",
+          "- Feature THIS exact product, identity-locked to Image 1, prominently and",
+          "  in sharp focus in the MAJORITY of the panels — woven naturally into the",
+          "  ad type's treatment (story, mood, demo or proof), not replacing it.",
+          "- Never omit the product, bury it in the deep background, or swap it for a",
+          "  generic stand-in; whenever a panel shows it, it is unmistakably the",
+          "  product from Image 1, at true-to-life scale.",
         ]
-      : [
-          "AD TYPE — Inspirational (open-ended cinematic):",
-          "- The ad is an evocative, cinematic scene that follows whatever the",
-          "  user describes (mood, journey, lifestyle, story), with the product",
-          "  woven in naturally. The arc builds an emotional through-line over",
-          "  the ~15s.",
-          "- Each scene's `transcript` is a VOICEOVER NARRATION line for that",
-          "  scene (evocative, ~1 short sentence), spoken over the visuals — it is",
-          "  NOT necessarily lip-synced by anyone on screen. The four lines should",
-          "  read as one cohesive voiceover.",
-        ];
+      : [];
+
+  // Ad-type-specific direction for the script + transcripts (registry dispatch).
+  const typeBlock = def.fragments.storyboardTypeBlock(fctx);
+
+  // Opening hook — its directive applies to SCENE 1 ONLY (scenes 2..N carry no
+  // hook). Empty when no hook resolved (legacy/older runs) → byte-identical.
+  const hookBlock = fctx.hooks
+    ? [
+        "",
+        "OPENING HOOK — applies ONLY to scene 1 (the first panel / opening beat);",
+        "scenes 2..N carry NO hook directive:",
+        ...hookOpening(fctx.hooks).storyboardScene1,
+      ]
+    : [];
+
+  // Newly-wired fragment seams: transcript style (TYPE-driven) + shot direction
+  // + caption style (LOOK-driven). Empty for the two legacy types (their .md
+  // omits transcript and the ugc/cinematic look bases return [] for the others),
+  // so splicing them is byte-identical for legacy and adds per-type direction for
+  // the new ad types.
+  const transcriptStyle = def.fragments.storyboardTranscriptStyle(fctx);
+  const shotDirection = def.fragments.storyboardShotDirection(fctx);
+  const captionStyle = def.fragments.storyboardCaptionStyle(fctx);
 
   // Script grounding — forces the four spoken lines to be specific to THIS
   // product, THIS person and THIS scene, and to never repeat. Kills the
   // generic, interchangeable filler ("I love this", "you'll love it") that
   // appears when the model has no concrete anchor.
-  const speaker = adType === "ugc" ? "the on-screen person" : "the voiceover";
+  const speaker =
+    def.fragments.storyboardSpeakerLabel(fctx)[0] ?? "the on-screen person";
   // Anchor the script in what THIS product actually does (from productUse) so two
   // different products yield clearly different scripts — kills cross-ad sameness.
   const benefitAnchor = hasUse
@@ -436,10 +555,24 @@ export function buildStoryboardPrompt({
     "- TRUE-TO-LIFE SCALE & PLACEMENT: render it at real-world size relative to the",
     "  hand / body / face (a ring is finger-sized, glasses face-sized, a bottle",
     "  hand-sized), placed exactly where it naturally sits — worn on the correct",
-    "  body part or held in the hand.",
+    "  body part or held in the hand. Read it as the subject by FRAMING THE SHOT",
+    "  CLOSE (a close or medium shot), NOT by enlarging the object beyond its real",
+    "  size — it must never float, dominate the frame or dwarf the hand/body that",
+    "  holds it.",
+    "- PHYSICAL SIZE ANCHOR: in every panel that shows the product, describe its",
+    "  size RELATIVE to a known object in frame — the hand, the desk, a standard",
+    '  mug, the person\'s body (e.g. "held in one hand, reaching from fingertips to',
+    '  mid-palm", or "on the desk, about as tall as the mug beside it").',
+    "- The product appears at its true real-world size relative to the hand / desk /",
+    "  person in frame. Never enlarge, inflate, or scale up the product for emphasis;",
+    "  it must look physically plausible next to the objects around it.",
     "- Always the real, solid item from the product sheet — the bare product, the",
     "  ONLY instance in the panel; not a box, packaging, blister pack, pouch or an",
     "  unboxing, and not a print / photo / logo of it on a box, poster or screen.",
+    "- ONE SOLID OBJECT: the product is a single solid item with fixed geometry —",
+    "  hands grip its OUTER SURFACE and never pass through it. Show it doing exactly",
+    "  ONE clear, real, physically-correct action per panel; it does not morph,",
+    "  stretch or sprout shape-shifting parts.",
     "- Operate it the REAL way: if its use needs opening (twist off a cap, flip a",
     "  lid, unclasp a strap), SHOW that action as a natural beat; it stays the same",
     "  single real item (not shattered or split into separate loose pieces).",
@@ -494,33 +627,148 @@ export function buildStoryboardPrompt({
     "  physically real moment consistent with the use-sequence above.",
   ];
 
-  // Ad-type-conditional keyframe rendering. UGC must read as authentic phone
-  // footage, not a glossy studio commercial (identity/fidelity is unaffected).
-  const keyframeLook =
-    adType === "ugc"
-      ? [
-          "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-          "  a glossy studio commercial: natural / available light from real windows",
-          "  or lamps, a real lived-in everyday setting with ordinary background",
-          "  detail, candid handheld-style framing, the person relaxed and real",
-          "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
-          "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
-          "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
-          "  sheets — only lighting, setting and framing read as real UGC, never",
-          "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
-        ]
-      : [
-          "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
-          "  intentional lighting, rich color and depth, a still lifted straight from a",
-          "  high-end commercial.",
-        ];
+  // Keyframe look — LOOK-driven fragment (registry dispatch). UGC reads as
+  // authentic phone footage, cinematic as a polished commercial keyframe.
+  const keyframeLook = def.fragments.storyboardKeyframeLook(fctx);
+
+  // The `imagePrompt` board-spec sentence. graphic_text drops the badge +
+  // caption-bar + product clauses (clean designed frames). Every other look
+  // keeps them and pins TRUE-TO-LIFE product scale by FRAMING CLOSE — not by
+  // enlarging the object — so the product reads as the clear subject without
+  // floating or dominating (the too-big / too-small failure).
+  const boardSpecBody = cleanGraphic
+    ? [
+        `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
+        "enough to be specific, but NOT a rule restatement. It MUST cover: the 2×2",
+        `four-panel layout with thin plain gutters at ${resolutionLabel}; each panel a`,
+        "FINISHED graphic frame with NO number badge and NO bottom caption bar, the",
+        "frame's own kinetic typography rendered VERBATIM and perfectly legible as the",
+        "design; and",
+        lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
+      ]
+    : [
+        `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
+        `enough to be specific, but NOT a rule restatement. It MUST cover: ${layoutPhrase}`,
+        `plain separator borders at ${resolutionLabel}; each panel's number badge`,
+        `${badgeRangePhrase} + a thin uppercase storyboard-style bottom caption bar`,
+        "(the EXACT caption text is appended after your prompt automatically — so",
+        "describe the bar's STYLE and placement only; do NOT write the caption words",
+        'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
+        "other text and NO arrows; the product worn / in real use as the real solid",
+        "item at TRUE real-world scale, FRAMED CLOSE so it reads as the clear subject",
+        "at its true size relative to the hand / desk / person — NOT enlarged beyond",
+        "its real size (never oversized, dominating, floating, a",
+        "box/packaging/unboxing, or duplicated); each panel showing the product in",
+        "its CORRECT causal state from",
+        hasUse
+          ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
+          : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
+        "and",
+        lookBase(def.lookFamily).closingLookClause(fctx)[0] ?? "",
+      ];
+
+  // SERVICE ads — the creative-director brief is the AUTHORITATIVE multi-scene
+  // story (no product/person upload to anchor from). Render it scene i → panel i
+  // with the synthesized cast held identical across panels. Absent ⇒ the planner
+  // invents the script as before (the product ad-types).
+  const brief =
+    creativeBrief && creativeBrief.scenes.some((s) => s.action?.trim())
+      ? creativeBrief
+      : undefined;
+  const plannedStoryBlock = brief
+    ? [
+        "PLANNED STORY (authored by the creative director — RENDER THIS EXACT",
+        "STORY, scene i → panel i, in order; do NOT invent a different story):",
+        ...(brief.concept ? [`- Concept: ${brief.concept}`] : []),
+        ...(brief.cast.length
+          ? [
+              "- Cast — these people are SYNTHESIZED (no reference photo), so keep",
+              "  each one's face, hair, build and wardrobe IDENTICAL in every panel",
+              "  they appear in:",
+              ...brief.cast.map((c) => `  - ${c.name}: ${c.identity}`),
+            ]
+          : []),
+        ...(brief.hook?.line
+          ? [
+              `- OPENING HOOK — scene 1 (panel 1) MUST open on this (${brief.hook.type}): "${brief.hook.line}"`,
+            ]
+          : []),
+        "- Scenes (each is ONE panel, in play order):",
+        ...brief.scenes.map((s, i) => {
+          const who = s.charactersPresent?.length
+            ? ` | who: ${s.charactersPresent.join(", ")}`
+            : "";
+          const say = s.dialogue?.length
+            ? ` | says: ${s.dialogue
+                .map((d) => `${d.speaker}: "${d.line}"`)
+                .join(" / ")}`
+            : "";
+          const txt = s.onScreenText
+            ? ` | on-screen text: "${s.onScreenText}"`
+            : "";
+          const place = [s.setting, s.lighting]
+            .filter((x) => x?.trim())
+            .join(" — ");
+          return `  ${i + 1}. ${place}${who} | action: ${s.action}${say}${txt}`;
+        }),
+        "- MULTI-SCENE: render each panel in its scene's OWN authored setting +",
+        "  lighting/grade. When consecutive scenes SHARE a setting (the same",
+        "  location), render that location and its recurring props (furniture,",
+        "  fixtures, signage, devices) IDENTICALLY across those panels — same",
+        "  colours, layout and dressing; the world only CHANGES when the authored",
+        "  setting changes (a colour-grade shift is fine). Each cast member's face,",
+        "  hair and wardrobe stay IDENTICAL across every panel. The panels connect",
+        "  CAUSALLY into one continuous story.",
+        "- ON-SCREEN TEXT: render any app / device / UI screen as realistic but with",
+        "  SHORT, ABSTRACT placeholder text — do NOT spell out long readable rows or",
+        "  lists (small text always renders garbled); at most a heading or one value",
+        "  is crisp. The FEW hero text elements (the brand name, a single stat /",
+        "  number, the end-card line) are the ONLY crisp text: render each in quotes",
+        "  or ALL CAPS, 1-5 words MAX, lettered VERBATIM letter-for-letter (spell a",
+        "  brand name out exactly) — no extra or duplicate characters, no invented",
+        "  logos or wording.",
+        "- END CARD: if the planned story's last scene is an end card, render that",
+        "  panel as a clean, DESIGNED brand frame — the brand name / logo centred, a",
+        "  short tagline and URL on the brand background colour; NO people, NO clutter.",
+        "",
+      ]
+    : [];
+  const plannedScriptDirective = brief
+    ? [
+        "RENDER THE PLANNED STORY — for EACH panel i, take its setting, lighting,",
+        "who-is-present, action and spoken line from PLANNED STORY scene i above;",
+        "write that panel's `sceneDescription` and `transcript` from it and a",
+        "matching `panelCaption`. Do NOT invent a different story, reorder, drop or",
+        "merge scenes.",
+        "",
+      ]
+    : [];
+
+  // Chunk 4b — text-only supporting roles (product types only; the service brief
+  // already carries its own cast). Rendered from text, never a reference sheet.
+  const supportRoles = brief
+    ? []
+    : (supportingCast ?? []).filter((c) => c.role?.trim());
+  const supportingCastBlock = supportRoles.length
+    ? [
+        "- SUPPORTING CAST (text only — these people have NO reference sheet;",
+        "  render each from the description below and keep them CONSISTENT across",
+        "  the panels they appear in). They are SECONDARY to the main person and",
+        "  the product — never the hero of a panel, and never block or upstage them:",
+        ...supportRoles.map((c) => `  - ${c.role}: ${c.appearance}`),
+      ]
+    : [];
 
   const system = [
     "You are the StoryBoard Generator skill of an ad-video Image Agent.",
-    "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity:",
+    "The attached reference sheets are the SINGLE SOURCE OF TRUTH for identity.",
+    "ATTACHED IMAGES — bind identity to them BY NUMBER (this exact order):",
+    hasProd
+      ? "- Image 1 = the PRODUCT reference sheet: render THIS exact item, matching its shape, colour, finish and markings in every panel."
+      : "",
     hasPerson
-      ? "a product sheet AND a person sheet are attached."
-      : "a product sheet is attached (no person in this ad).",
+      ? `- Image ${personImgNo} = the PERSON reference sheet: the human in Image ${personImgNo} is the EXACT on-screen person. Copy their face, apparent gender, age, hair and skin tone IDENTICALLY in every panel; never invent a different person, and never change or flip their gender — a "men's"/"women's" product does NOT set the person's gender.`
+      : "- No person in this ad.",
     "",
     "STEP 1 — REVIEW. First study the attached sheet(s) together with the user's",
     "prompt and the ad style. Note the product (its real form, materials,",
@@ -529,22 +777,33 @@ export function buildStoryboardPrompt({
     "and what the user wants the ad to say.",
     "",
     ...(product ? [...productAnchor, ""] : []),
+    ...(uploadedProductFocus.length ? [...uploadedProductFocus, ""] : []),
     ...(characterAnchor.length ? [...characterAnchor, ""] : []),
+    ...plannedStoryBlock,
     ...typeBlock,
+    ...hookBlock,
     "",
+    ...(brandLine ? [brandLine, ""] : []),
     ...scriptGrounding,
+    ...transcriptStyle,
     "",
-    ...useSequenceBlock,
-    "",
-    ...presentationBlock,
-    "",
+    // Product use-sequence + presentation blocks only when a product is present
+    // (no-product ad types skip them). With a product these are unchanged.
+    ...(fctx.hasProduct
+      ? [...useSequenceBlock, "", ...presentationBlock, ""]
+      : []),
+    ...plannedScriptDirective,
     ...scriptStep,
     "- `sceneDescription` — ONE tight, concrete sentence (~15-30 words): the",
     "  setting (a real, ordinary place that fits how THIS product is actually",
     "  used — not a styled studio or stock-commercial cliché), the key action, and",
-    "  what the PRODUCT visibly DOES to show it is genuinely working (substitute",
-    "  THIS product's real motion — a watch's hand sweeping; a cap twisted off and",
-    "  the liquid level dropping; a shoe flexing).",
+    "  what the PRODUCT visibly DOES to show it is genuinely working. When the",
+    "  product is being USED, STATE THE MECHANICAL INTERACTION explicitly — which",
+    "  part moves, in which direction, and what the product physically does",
+    '  (e.g. "index finger depresses the pump; fine mist sprays forward and',
+    '  slightly left"), never a vague "using the product". Substitute THIS',
+    "  product's real motion — a watch's hand sweeping; a cap twisted off and",
+    "  the liquid level dropping; a shoe flexing.",
     "  Keep it LEAN — no padding, no second/extra clauses; richer than the",
     "  panelCaption but close to it in spirit. It feeds the video step, which does",
     "  BETTER with short, focused direction than long paragraphs — do NOT write a",
@@ -575,10 +834,14 @@ export function buildStoryboardPrompt({
     "  frame lifted straight from the finished ad.",
     ...antiRepetition,
     ...keyframeLook,
+    ...shotDirection,
+    ...captionStyle,
     "- Keep the product (and the person, if present) faithfully consistent with",
     "  the attached reference sheets in EVERY panel — the SAME product with all",
-    "  its real markings, text and logos intact, the same person, same colors,",
-    "  materials and proportions. Do not restyle, garble, or invent product text.",
+    "  its real markings, text and logos intact, the same person, materials and",
+    "  proportions. The reference sheets are the COLOUR authority: match their",
+    "  exact hues and finish, never invent or shift the colour. Do not restyle,",
+    "  garble, or invent product text.",
     ...(hasPerson
       ? [
           "- PERSON: the attached PERSON SHEET IMAGE is the AUTHORITATIVE source for",
@@ -594,45 +857,15 @@ export function buildStoryboardPrompt({
           "  references too.",
         ]
       : []),
+    ...supportingCastBlock,
     "",
-    "PANEL LABELS — REQUIRED on every panel (this is a real storyboard sheet):",
-    ...labelBadge,
-    "- A one-line CAPTION in a thin legible bar along the BOTTOM of each panel,",
-    "  reading EXACTLY the scene's `panelCaption` (shot type + brief action), in",
-    "  clean uppercase storyboard lettering — like the supplied example sheet.",
-    "- The badge and caption must be crisp and readable, never overlapping the",
-    "  subject's face or the product's markings.",
-    "Apart from the per-panel number badge and its caption bar, add NO other",
-    "graphics of ANY kind: no titles, subtitles, timecodes, motion or camera",
-    "ARROWS, callouts, hand-drawn marks, logos or watermarks, and NO stray boxes,",
-    "bars, rectangles, color blocks, framing brackets, vignettes or",
-    "panels-within-a-panel anywhere. Convey motion through the imagery itself",
-    "(pose, blur, framing), never with arrows. Panel interiors stay pure,",
-    "uninterrupted photographs — the ONLY non-photographic marks on the whole",
-    "sheet are the four number badges and the four caption bars.",
+    ...panelLabelBlock,
     "",
     `Honor the ad style ("${style}") in framing, pacing, and mood.`,
     "",
     "Respond with STRICT JSON only, no prose, matching:",
     '{ "imagePrompt": string, "scenes": [ { "index": number, "cameraAngle": string, "actionMovement": string, "sceneDescription": string, "panelCaption": string, "transcript": string, "adStyle": string } ] }',
-    `\`imagePrompt\` is ONE self-contained paragraph, roughly ${imagePromptWords} words — long`,
-    `enough to be specific, but NOT a rule restatement. It MUST cover: ${layoutPhrase}`,
-    `plain separator borders at ${resolutionLabel}; each panel's number badge`,
-    `${badgeRangePhrase} + a thin uppercase storyboard-style bottom caption bar`,
-    "(the EXACT caption text is appended after your prompt automatically — so",
-    "describe the bar's STYLE and placement only; do NOT write the caption words",
-    'yourself, and do NOT add a "quote the panelCaption" meta-instruction); NO',
-    "other text and NO arrows; the product worn / in real use as",
-    "the real solid item at TRUE real-world scale and correctly placed (never",
-    "oversized, dominating or floating; never a box/packaging/unboxing, never",
-    "duplicated); each panel showing the product in its CORRECT causal state from",
-    hasUse
-      ? `the use-sequence (${hasPrep ? `${changedState} once the person ${accessVerb}, and it visibly works — ${functionSignal}` : `the product visibly working — ${functionSignal}`}), the state persistent across panels;`
-      : "the use-sequence (e.g. cap removed and held in the other hand when drinking);",
-    "and",
-    adType === "ugc"
-      ? "the authentic UGC phone-captured look (natural light, real setting, candid framing)."
-      : "the polished cinematic keyframe look.",
+    ...boardSpecBody,
     hasPerson
       ? `It MUST also state the SAME person is rendered photorealistically (real, lifelike face and skin) with consistent apparent gender and identity in every one of the ${isMaster ? totalWordLower : "four"} panels, faithful to the person sheet.`
       : "",

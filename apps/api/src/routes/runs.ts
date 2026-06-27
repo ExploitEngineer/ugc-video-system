@@ -8,6 +8,7 @@
 import type { AssetKind } from "@ugc/shared";
 import {
   createRunInputSchema,
+  detectPlaceholders,
   feedbackInputSchema,
   isMultiSegment,
 } from "@ugc/shared";
@@ -23,6 +24,7 @@ import {
   getOpenAI,
   interpretFeedback,
 } from "../agents/creative-direction/index.js";
+import { getAdType } from "../agents/ad-types/registry.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
 import { db, schema } from "../db/index.js";
@@ -147,10 +149,12 @@ async function loadRunList(): Promise<Run[]> {
       prompt: schema.runs.prompt,
       adStyle: schema.runs.adStyle,
       adType: schema.runs.adType,
+      adTypeSource: schema.runs.adTypeSource,
       mode: schema.runs.mode,
       aspectRatio: schema.runs.aspectRatio,
       duration: schema.runs.duration,
       criticEnabled: schema.runs.criticEnabled,
+      characterEnabled: schema.runs.characterEnabled,
       status: schema.runs.status,
       currentStep: schema.runs.currentStep,
       error: schema.runs.error,
@@ -243,7 +247,7 @@ async function fileToBytes(file: File): Promise<Uint8Array> {
  * before we store them verbatim (the product image is NOT re-encoded). Rejects
  * mislabeled/undecodable content with a 422.
  */
-async function assertImageBytes(bytes: Uint8Array, field: string): Promise<void> {
+async function assertImageBytes(bytes: Uint8Array, field: string): Promise<string> {
   let format: string | undefined;
   try {
     format = (await sharp(Buffer.from(bytes)).metadata()).format;
@@ -253,6 +257,11 @@ async function assertImageBytes(bytes: Uint8Array, field: string): Promise<void>
   if (!format || !["png", "jpeg", "webp"].includes(format)) {
     throw unprocessable(`${field} is not a PNG, JPEG, or WebP image.`);
   }
+  // Return the TRUE mime sniffed from the bytes — the client-declared part type
+  // is unreliable (a WebP commonly arrives labelled image/png), and storing the
+  // wrong mime makes downstream AI calls send a mismatched data URI that Anthropic
+  // rejects as an opaque "400 Provider returned error".
+  return `image/${format}`;
 }
 
 /** Confirm MP4 bytes by the ISO-BMFF `ftyp` box marker at offset 4 (the
@@ -274,7 +283,11 @@ runs.post(
   async (c) => {
   const body = await c.req.parseBody();
 
-  const productImage = validateImage(body.productImage, "productImage", true);
+  // Product + person are BOTH optional uploads now — some ad types (graphic-text
+  // manifestos, explainers, promos…) need neither. The per-type requirement is
+  // enforced below for an explicit pick; person is never a required upload (it is
+  // synthesized when the type needs it).
+  const productImage = validateImage(body.productImage, "productImage", false);
   const personImage = validateImage(body.personImage, "personImage", false);
 
   const parsed = createRunInputSchema.safeParse({
@@ -287,6 +300,16 @@ runs.post(
     // only if explicitly "true". The studio UI no longer sends this field.
     criticEnabled: body.criticEnabled === "true",
     hasPersonImage: personImage !== null,
+    // Character On/Off toggle (Chunk 4). FormData carries a string; omitted by
+    // legacy/API clients → resolved from the ad-type default below.
+    ...(body.characterEnabled !== undefined
+      ? { characterEnabled: body.characterEnabled === "true" }
+      : {}),
+    // Optional ad-type override (Chunk J). FormData omits it / sends "auto" for
+    // the default auto-detect path.
+    ...(body.adType ? { adType: body.adType } : {}),
+    // Optional user-typed brand guidelines (multipart text field).
+    ...(body.brandText ? { brandText: body.brandText } : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -294,24 +317,56 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, duration, criticEnabled } = parsed.data;
+  const { prompt, mode, aspectRatio, duration, criticEnabled, adType, brandText } =
+    parsed.data;
+  // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
+  // they surface immediately in detector_meta (the worker re-derives + enriches
+  // this with any invented values once the detector runs).
+  const unresolvedPlaceholders = detectPlaceholders(prompt);
+  // An explicit pick (anything but "auto") LOCKS the type — the detector still
+  // fills adStyle + hooks but honors this adType (orchestrator). "auto"/omitted
+  // leaves it null for full auto-detection.
+  const userAdType = adType && adType !== "auto" ? adType : null;
 
-  // Normalize the person photo BEFORE any DB inserts (a 422 here must not
-  // leave an orphaned run): pad/clamp it into BytePlus's CreateAsset limits
-  // (aspect 0.4–2.5, height 300–6000) so the stored `person_upload` is always
-  // usable as a face asset. The product image is left untouched — it never
-  // reaches CreateAsset, and padding bars would leak into generated stills.
-  const productBytes = await fileToBytes(productImage as File);
-  // Verify the bytes really decode as an allowed image — the declared MIME is
-  // client-controlled and the product image is stored verbatim.
-  await assertImageBytes(productBytes, "productImage");
-  const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [
-    {
+  // Character On/Off toggle (Chunk 4): whether a main on-screen character is
+  // generated (uploaded or synthesized). When the client omits it, default from
+  // the picked ad-type's `characterDefault` (the form always sends it).
+  const characterEnabled =
+    parsed.data.characterEnabled ??
+    getAdType(userAdType ?? "service").characterDefault;
+
+  // Per-type asset requirement: an explicit pick whose policy REQUIRES a product
+  // must include one. Auto-detect stays permissive (the detector + reconcile
+  // handle whatever was uploaded — a product-required type with no product
+  // downgrades to a no-product type).
+  if (
+    userAdType &&
+    getAdType(userAdType).assetPolicy.product === "required" &&
+    !productImage
+  ) {
+    throw badRequest(
+      `The "${getAdType(userAdType).displayName}" ad type needs a product image.`,
+    );
+  }
+
+  // Build the upload set. Product is left untouched (it never reaches BytePlus
+  // CreateAsset, where padding bars would leak into stills). The person photo is
+  // normalized into CreateAsset's limits (aspect 0.4–2.5, height 300–6000) so the
+  // stored `person_upload` is always usable as a face asset. Done BEFORE any DB
+  // insert so a 422 here never leaves an orphaned run.
+  const uploads: { kind: AssetKind; bytes: Uint8Array; mime: string }[] = [];
+  if (productImage) {
+    const productBytes = await fileToBytes(productImage as File);
+    // Verify the bytes really decode as an allowed image — the declared MIME is
+    // client-controlled and the product image is stored verbatim. Use the SNIFFED
+    // mime (not the client part type) so a mislabelled WebP is stored honestly.
+    const productMime = await assertImageBytes(productBytes, "productImage");
+    uploads.push({
       kind: "product_upload",
       bytes: productBytes,
-      mime: (productImage as File).type,
-    },
-  ];
+      mime: productMime,
+    });
+  }
   if (personImage) {
     const norm = await normalizePersonImage(
       await fileToBytes(personImage),
@@ -335,6 +390,14 @@ runs.post(
       aspectRatio,
       duration,
       criticEnabled,
+      characterEnabled,
+      ...(brandText ? { brandText } : {}),
+      ...(userAdType
+        ? { adType: userAdType, adTypeSource: "user" as const }
+        : {}),
+      ...(unresolvedPlaceholders.length
+        ? { detectorMeta: { unresolvedPlaceholders } }
+        : {}),
       status: "queued",
       // Insert the run already LOCKED so the worker can't claim it yet. Without
       // this, the worker (which polls for `queued` rows with a free/stale lock)

@@ -15,7 +15,6 @@
 // thing that may touch these rows; the public anon key gets zero access.
 
 import type {
-  AdType,
   ArtifactStatus,
   AspectRatio,
   AssetKind,
@@ -25,7 +24,6 @@ import type {
   Step,
 } from "@ugc/shared";
 import {
-  adTypeSchema,
   aspectRatioSchema,
   assetKindSchema,
   artifactStatusSchema,
@@ -44,6 +42,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  real,
   text,
   timestamp,
   uuid,
@@ -72,10 +71,6 @@ export const modeEnum = pgEnum(
 export const aspectRatioEnum = pgEnum(
   "aspect_ratio",
   aspectRatioSchema.options as [AspectRatio, ...AspectRatio[]],
-);
-export const adTypeEnum = pgEnum(
-  "ad_type",
-  adTypeSchema.options as [AdType, ...AdType[]],
 );
 export const artifactStatusEnum = pgEnum(
   "artifact_status",
@@ -108,16 +103,25 @@ export const runs = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     prompt: text("prompt").notNull(), // raw user prompt
     adStyle: text("ad_style"), // interpreted style propagated to agents
-    adType: adTypeEnum("ad_type"), // ugc | inspirational, inferred at interpret step
+    adType: text("ad_type"), // OPEN kebab id (was a pg enum) — text so new ad types need no migration; resolved via the ad-type registry (Chunk C)
+    adTypeSource: text("ad_type_source"), // "auto" (detected) | "user" (explicit dropdown pick); null = pre-feature/legacy
+    hooks: jsonb("hooks"), // resolved hook selection { visualLead, overlay }, set by the detector (Chunk E)
+    adTypeConfidence: real("ad_type_confidence"), // detector self-reported 0–1 confidence (coarse gate only)
+    detectorMeta: jsonb("detector_meta"), // detector rationale + assetIntent (debug/telemetry)
     personBrief: text("person_brief"), // product-derived person/wardrobe brief; drives the (parallel) person sheet
     productBrief: text("product_brief"), // factual product identity anchor (category/materials/colors/markings); threaded to storyboard + critic
     productUse: jsonb("product_use"), // causal use-sequence {accessVerb,changedState,persistenceCue,functionSignal,useVerb}; baked into the storyboard still
+    creativeBrief: jsonb("creative_brief"), // service-ad only: creative-director brief { concept, framework, hook, cast, scenes, cta } — multi-scene plan with no product/person upload
+    brandText: text("brand_text"), // optional user-typed brand guidelines (tone, palette, do/don'ts), injected into the prompts
+    brandGuidelines: jsonb("brand_guidelines"), // optional structured brand kit extracted from an uploaded brand file (5b); injected alongside brand_text
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     duration: durationEnum("duration").notNull().default("15s"), // 15s single-clip pipeline | 60s four-clip merged pipeline
     narrativeOutline: jsonb("narrative_outline"), // 60s only: { segments: [{ index, beat, summary }], visualStyle } — continuity arc planned before any storyboard
     visualStyle: text("visual_style"), // 60s only: locked visual-style bible (grade/lens/lighting/palette/time-of-day arc), injected verbatim into all 4 storyboard + 4 video prompts
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
+    characterEnabled: boolean("character_enabled").notNull().default(true), // Chunk 4 toggle: generate ONE main on-screen character (uploaded or synthesized). The create-run route sets it explicitly from the ad-type's characterDefault; this column default only covers direct inserts.
+    supportingCast: jsonb("supporting_cast"), // Chunk 4b: text-only supporting roles [{ role, appearance }] planned from the prompt, woven into storyboard + video prompts (no extra reference sheets)
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
     error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)

@@ -15,11 +15,21 @@ const serverEnvSchema = z.object({
   // OpenAI — GPT Image 2 + LLM reasoning/critique
   OPENAI_API_KEY: z.string().min(1),
 
-  // OpenRouter — Claude Sonnet 4.6 for the vision/label-reading steps
-  // (describeProduct, derivePersonBrief). OpenAI-SDK-compatible endpoint.
-  // Optional: when unset, those steps silently fall back to gpt-4.1, so the
-  // server still boots and runs without it.
+  // OpenRouter — Claude Sonnet 4.6 is now the DEFAULT reasoning/vision backend
+  // for every `chat()` call (image gen stays gpt-image-2). OpenAI-SDK-compatible
+  // endpoint. Optional: when unset, all reasoning/vision silently falls back to
+  // gpt-4.1, so the server still boots and runs without it.
   OPENROUTER_API_KEY: z.string().min(1).optional(),
+
+  // Reasoning/vision model ids — overridable per-deploy without touching code.
+  // `OPENAI_CHAT_MODEL` = the gpt-4.1 fallback (used when OPENROUTER_API_KEY is
+  // unset or a caller forces backend:"openai"). `OPENROUTER_CLAUDE_MODEL` = the
+  // default Claude backend slug (VERIFY live via GET …/v1/models before deploy).
+  OPENAI_CHAT_MODEL: z.string().min(1).default("gpt-4.1"),
+  OPENROUTER_CLAUDE_MODEL: z
+    .string()
+    .min(1)
+    .default("anthropic/claude-sonnet-4.6"),
 
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
   // The `ark-` key authenticates VIDEO GENERATION (inference) only.

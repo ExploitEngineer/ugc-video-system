@@ -18,7 +18,9 @@ export type RunStatus = z.infer<typeof runStatusSchema>;
 /**
  * Discrete pipeline units (`runs.currentStep`, `step_events.step`).
  *
- * The first six are the ~15s pipeline. The last four are the multi-segment
+ * `creative_brief` runs ONLY for the `service` ad-type (the creative-director
+ * step: short prompt → multi-scene brief; no product/person sheets). The 15s
+ * product/person pipeline and the last four multi-segment
  * pipeline (`isMultiSegment(duration)` — 30/45/60s): `narrative_outline` is
  * dormant; `segment_storyboard`/`segment_video` are single steps that fan out
  * over the run's N segments internally (the "which segment" dimension lives in
@@ -26,6 +28,7 @@ export type RunStatus = z.infer<typeof runStatusSchema>;
  * concatenates the N clips into the final video. A 15s run never emits these.
  */
 export const stepSchema = z.enum([
+  "creative_brief",
   "product_sheet",
   "person_sheet",
   "product_inspection",
@@ -88,6 +91,22 @@ export type AspectRatio = z.infer<typeof aspectRatioSchema>;
  */
 export const adTypeSchema = z.enum(["ugc", "inspirational"]);
 export type AdType = z.infer<typeof adTypeSchema>;
+
+/**
+ * OPEN ad-type id — validated as SHAPE (non-empty kebab-case), NOT membership,
+ * so adding a new ad type needs no enum migration (the `errorCode` precedent).
+ * Unrecognised ids resolve via the ad-type registry's fallback (Chunk C), not
+ * rejection. The legacy `adTypeSchema` union above is kept for back-compat.
+ */
+export const adTypeIdSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-z][a-z0-9-]*$/, "adType must be a kebab-case id");
+export type AdTypeId = z.infer<typeof adTypeIdSchema>;
+
+/** How the run's adType was set: auto-detected, or an explicit user dropdown pick. */
+export const adTypeSourceSchema = z.enum(["auto", "user"]);
+export type AdTypeSource = z.infer<typeof adTypeSourceSchema>;
 
 /** Approval state of a generated artifact (sheets, video). */
 export const artifactStatusSchema = z.enum(["draft", "approved", "rejected"]);
