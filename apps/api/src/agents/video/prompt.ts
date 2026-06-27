@@ -336,7 +336,7 @@ export function buildDeterministicVideoPrompt(input: {
     })
     .join("; ");
   const audio = isService
-    ? "Audio: each character speaks their line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); light location ambience and a fitting score."
+    ? "Audio: each character speaks their line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; light location ambience and a fitting score."
     : ugc
       ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.`
       : `Audio: ${voice} narrates each line as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.`;
