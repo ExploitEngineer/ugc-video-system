@@ -75,6 +75,15 @@ const serverEnvSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   DATABASE_URL: z.string().url(),
+  // Run pending migrations on server startup. Default true (dev + single-instance
+  // deploys). Set "false" in production when the app connects through a connection
+  // POOLER that can't run DDL (the Supabase transaction pooler can't `CREATE
+  // SCHEMA`), and apply migrations out-of-band via a direct/session connection
+  // (`pnpm --filter api db:migrate`). Keeps a pooler-only boot from crash-looping.
+  DB_MIGRATE_ON_BOOT: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 
   // F7 background worker — in-process loop that drives runs through the
   // pipeline. Disable (e.g. in tests) to keep the HTTP server passive.
