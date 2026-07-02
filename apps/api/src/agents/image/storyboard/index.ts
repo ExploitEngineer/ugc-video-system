@@ -156,9 +156,9 @@ async function renderStoryboard(
     // product/label fidelity and per-panel sharpness ride directly into Seedance.
     quality: "high",
   });
-  // Pull the gpt-image warm cast back toward neutral (capped ±8%, PNG-preserving,
+  // Pull the gpt-image warm cast back toward neutral (capped ±8%, WebP-preserving,
   // best-effort) so the sheet — and the video it drives — reads true-to-life
-  // instead of the unrealistic orange tint. Returns PNG, so `mime` stays correct.
+  // instead of the unrealistic orange tint. Returns WebP, so `mime` stays correct.
   const bytes = await neutralizeCast(rawBytes);
   log.debug("✓ image generated", { bytes: bytes.length, mime });
   return { bytes, mime, scenes: plan.scenes, imagePrompt };

@@ -75,6 +75,7 @@ async function padIntoBand(
   mime: string,
   width: number,
   height: number,
+  forceJpeg = false,
 ): Promise<NormalizedImageResult> {
   const aspect = width / height;
 
@@ -105,16 +106,21 @@ async function padIntoBand(
     img = img.resize({ height: outH < MIN_HEIGHT ? UPSCALE_HEIGHT : DOWNSCALE_HEIGHT });
   }
 
-  if (!needsPad && !needsResize) {
+  // Already provider-compliant AND in an accepted format → pass through
+  // byte-identical. `forceJpeg` overrides this for WebP sheets bound to BytePlus
+  // CreateAsset, which rejects WebP — transcode to JPEG even when in-band.
+  const needsTranscode = forceJpeg && mime !== "image/jpeg";
+  if (!needsPad && !needsResize && !needsTranscode) {
     return { bytes, mime, adjusted: false };
   }
 
   const out = new Uint8Array(await img.jpeg({ quality: 92 }).toBuffer());
-  log.info("✓ normalized image for provider aspect/height limits", {
+  log.info("✓ normalized image for provider aspect/height/format limits", {
     source: `${width}x${height}`,
     aspect: aspect.toFixed(3),
     padded: needsPad,
     resized: needsResize,
+    transcoded: needsTranscode,
   });
   return { bytes: out, mime: "image/jpeg", adjusted: true };
 }
@@ -153,15 +159,18 @@ export async function normalizePersonImage(
  * BytePlus `CreateAsset` aspect/height limits — the safety net the upload guard
  * provides for uploads. Non-throwing: pads when out-of-band, returns the bytes
  * byte-identical (and `adjusted: false`) when already compliant or unreadable.
- * Callers register the returned bytes with the provider and DO NOT overwrite the
- * stored original, so OpenAI references / the UI keep the un-padded image.
+ * Pass `{ forceJpeg: true }` to also transcode a compliant WebP sheet to JPEG
+ * (BytePlus CreateAsset rejects WebP — 4K sheets are now WebP). Callers register
+ * the returned bytes with the provider and DO NOT overwrite the stored original,
+ * so OpenAI references / the UI keep the un-padded image.
  */
 export async function padToProviderAspect(
   bytes: Uint8Array,
   mime: string,
+  opts: { forceJpeg?: boolean } = {},
 ): Promise<NormalizedImageResult> {
   const img = sharp(Buffer.from(bytes)).rotate();
   const dims = await readDims(img);
   if (!dims) return { bytes, mime, adjusted: false };
-  return padIntoBand(img, bytes, mime, dims.width, dims.height);
+  return padIntoBand(img, bytes, mime, dims.width, dims.height, opts.forceJpeg);
 }

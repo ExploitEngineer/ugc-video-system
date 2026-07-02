@@ -36,6 +36,13 @@ function extFor(contentType: string): string {
 /** Upload retry tuning — mirrors the BytePlus provider's transient-failure policy. */
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_BACKOFF_MS = 800;
+/**
+ * Hard ceiling per upload attempt. The Supabase client has no upload timeout, so
+ * a silently-stalled connection (opens, never responds) would hang the caller
+ * forever. On timeout we surface a synthetic transient error so the attempt is
+ * retried, then fails cleanly — never an eternal hang.
+ */
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 /**
  * A bare undici/network failure (the `fetch failed` / connection-reset / timeout
@@ -76,9 +83,28 @@ export async function uploadAsset({
 
   let lastMessage = "";
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(storagePath, bytes, { contentType, upsert: false });
+    // Race the upload against a timeout — the client itself has none, so a
+    // stalled connection would otherwise hang forever. A timeout resolves to a
+    // synthetic transient error (matches TRANSIENT_UPLOAD_ERROR → retried).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const { error } = await Promise.race([
+      supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, bytes, { contentType, upsert: false }),
+      new Promise<{ error: { message: string } }>((resolve) => {
+        timer = setTimeout(
+          () =>
+            resolve({
+              error: {
+                message: `storage upload timed out after ${UPLOAD_TIMEOUT_MS}ms (network)`,
+              },
+            }),
+          UPLOAD_TIMEOUT_MS,
+        );
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
 
     if (!error) return { storagePath, url: getPublicUrl(storagePath) };
 
