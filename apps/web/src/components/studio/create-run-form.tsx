@@ -1,6 +1,7 @@
 "use client";
 
 import type { AdTypeMenuItem, AspectRatio, Duration, Mode } from "@ugc/shared";
+import { isMultiSegment } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -16,6 +17,7 @@ import {
   RectangleVerticalIcon,
   SlidersHorizontalIcon,
   UserIcon,
+  Wand2Icon,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -34,7 +36,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createRun, fetchAdTypes } from "@/lib/api";
+import { createRun, fetchAdTypes, fetchPlainlyConfig } from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +73,11 @@ export function CreateRunForm({
   // generated (uploaded or synthesized). Defaults from the picked ad-type and
   // re-syncs when the type changes.
   const [characterEnabled, setCharacterEnabled] = useState(true);
+  // Plainly interactive pre-merge stage — pause after the segment clips to
+  // assemble/brand them via a Plainly template. Only offered for multi-segment
+  // runs when the server has Plainly configured; default on when available.
+  const [plainlyConfigured, setPlainlyConfigured] = useState(false);
+  const [plainlyEnabled, setPlainlyEnabled] = useState(true);
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -82,6 +89,9 @@ export function CreateRunForm({
     let active = true;
     fetchAdTypes().then((list) => {
       if (active) setAdTypes(list);
+    });
+    fetchPlainlyConfig().then((cfg) => {
+      if (active) setPlainlyConfigured(cfg.configured);
     });
     return () => {
       active = false;
@@ -108,6 +118,9 @@ export function CreateRunForm({
   const isService = adType === "service";
   const showCharacterControl = !isService && Boolean(selectedType);
   const showPersonUpload = !isService && characterEnabled;
+  // Plainly stage only applies to multi-segment runs (the ones that merge) and
+  // only when the server has it configured.
+  const showPlainly = plainlyConfigured && isMultiSegment(duration);
 
   // Drop a stale person file when the upload is hidden (toggle off / service) so
   // it is never sent for a character-off run.
@@ -158,6 +171,7 @@ export function CreateRunForm({
     fd.set("duration", duration);
     fd.set("adType", adType);
     fd.set("characterEnabled", String(characterEnabled));
+    if (showPlainly) fd.set("plainlyEnabled", String(plainlyEnabled));
     if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
@@ -231,6 +245,12 @@ export function CreateRunForm({
                 file={personFile}
                 onFile={setPersonFile}
                 onError={setError}
+              />
+            )}
+            {showPlainly && (
+              <PlainlyChip
+                value={plainlyEnabled}
+                onChange={setPlainlyEnabled}
               />
             )}
             <OptionsMenu
@@ -567,6 +587,44 @@ function CharacterChip({
         )}
       </span>
       Character {value ? "on" : "off"}
+    </button>
+  );
+}
+
+/** Compact Plainly On/Off chip — when on, the run pauses after its segment clips
+ *  so you can brand one of them with a ready-made Plainly template before the
+ *  final video (else the clips are merged with ffmpeg as usual). */
+function PlainlyChip({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      aria-pressed={value}
+      title={
+        value
+          ? "Plainly on — pause after the clips to brand one with a ready-made template. Click to turn off."
+          : "Plainly off — merge the clips directly (ffmpeg). Click to turn on."
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        value
+          ? "border-brand/50 bg-brand/10 text-foreground"
+          : "border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 border-dashed",
+      )}
+    >
+      <span className="relative inline-flex items-center justify-center">
+        <Wand2Icon className="size-3.5" />
+        {!value && (
+          <span className="bg-current pointer-events-none absolute left-1/2 top-1/2 h-[1.5px] w-[150%] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full" />
+        )}
+      </span>
+      Plainly {value ? "on" : "off"}
     </button>
   );
 }

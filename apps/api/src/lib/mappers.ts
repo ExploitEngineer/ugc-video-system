@@ -12,6 +12,7 @@ import {
   hookSelectionSchema,
   isMultiSegment,
   narrativeOutlineSchema,
+  plainlyEditSchema,
   runErrorCodeSchema,
   sceneSchema,
   stepEventStatusSchema,
@@ -94,6 +95,7 @@ export type RunListRow = Pick<
   | "duration"
   | "criticEnabled"
   | "characterEnabled"
+  | "plainlyEnabled"
   | "status"
   | "currentStep"
   | "error"
@@ -121,6 +123,7 @@ export function toRunDto(row: RunListRow): Run {
     duration: row.duration,
     criticEnabled: row.criticEnabled,
     characterEnabled: row.characterEnabled,
+    plainlyEnabled: row.plainlyEnabled,
     status: row.status,
     // Pass `currentStep` through verbatim — null means "no step has completed
     // yet" (fresh run) or "parallel reference phase in flight". Coalescing it to
@@ -202,6 +205,8 @@ export function toRunDetailDto(
     hooks: hookSelectionSchema.safeParse(run.hooks).data ?? null,
     adTypeConfidence: run.adTypeConfidence ?? null,
     detectorMeta: run.detectorMeta ?? null,
+    // Plainly editing state (jsonb) — validate at the wire boundary; drop on drift.
+    plainlyEdit: plainlyEditSchema.safeParse(run.plainlyEdit).data ?? null,
     // Registry-resolved display name + look family for the resolved adType.
     adTypeDisplayName: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).displayName,
     lookFamily: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).lookFamily,

@@ -11,14 +11,16 @@ import {
   detectPlaceholders,
   feedbackInputSchema,
   isMultiSegment,
+  plainlyEditSchema,
 } from "@ugc/shared";
-import type { Run, RunDetail } from "@ugc/shared";
+import type { PlainlyEdit, Run, RunDetail } from "@ugc/shared";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import sharp from "sharp";
+import { z } from "zod";
 import {
   gateForCurrentStep,
   getOpenAI,
@@ -26,7 +28,16 @@ import {
 } from "../agents/creative-direction/index.js";
 import { getAdType } from "../agents/ad-types/registry.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
-import { persistAsset } from "../agents/persist.js";
+import { segmentVideos } from "../agents/creative-direction/inputs.js";
+import { persistAsset, persistSheet } from "../agents/persist.js";
+import {
+  createPlainlyProvider,
+  designVariantDuration,
+  isPlainlyConfigured,
+  normalizeRenderParameters,
+  type PlainlyTemplateParam,
+} from "../providers/plainly/index.js";
+import { env } from "../config/index.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
 import { normalizePersonImage } from "../lib/image/normalize.js";
@@ -41,8 +52,12 @@ import {
   onRunChanged,
 } from "../lib/run-events.js";
 import { assertStatus, getRunOr404, loadRunDetail } from "../lib/runs.js";
-import { deleteRunObjects, uploadAsset } from "../lib/storage.js";
-import { extractAudio } from "../lib/video/merge.js";
+import {
+  deleteRunObjects,
+  uploadAsset,
+  uploadTransient,
+} from "../lib/storage.js";
+import { extractAudio, muteVideo, replaceAudioWithMusic } from "../lib/video/merge.js";
 
 const ALLOWED_IMAGE_MIME = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -155,6 +170,7 @@ async function loadRunList(): Promise<Run[]> {
       duration: schema.runs.duration,
       criticEnabled: schema.runs.criticEnabled,
       characterEnabled: schema.runs.characterEnabled,
+      plainlyEnabled: schema.runs.plainlyEnabled,
       status: schema.runs.status,
       currentStep: schema.runs.currentStep,
       error: schema.runs.error,
@@ -310,6 +326,10 @@ runs.post(
     ...(body.adType ? { adType: body.adType } : {}),
     // Optional user-typed brand guidelines (multipart text field).
     ...(body.brandText ? { brandText: body.brandText } : {}),
+    // Plainly interactive pre-merge stage toggle (multipart string).
+    ...(body.plainlyEnabled !== undefined
+      ? { plainlyEnabled: body.plainlyEnabled === "true" }
+      : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -334,6 +354,14 @@ runs.post(
   const characterEnabled =
     parsed.data.characterEnabled ??
     getAdType(userAdType ?? "service").characterDefault;
+
+  // Plainly stage: honored ONLY for multi-segment runs (the ones that merge) and
+  // only when the server has a Plainly key — otherwise forced off so the run
+  // proceeds straight to the ffmpeg merge as before.
+  const plainlyEnabled =
+    Boolean(parsed.data.plainlyEnabled) &&
+    isMultiSegment(duration) &&
+    isPlainlyConfigured();
 
   // Per-type asset requirement: an explicit pick whose policy REQUIRES a product
   // must include one. Auto-detect stays permissive (the detector + reconcile
@@ -391,6 +419,7 @@ runs.post(
       duration,
       criticEnabled,
       characterEnabled,
+      plainlyEnabled,
       ...(brandText ? { brandText } : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
@@ -647,6 +676,349 @@ runs.post(
 
   log.info("edited-video saved", { run: id, withScene: scene !== null });
   return c.json(await loadRunDetail(id), 201);
+});
+
+// ── Plainly interactive pre-merge stage ───────────────────────────────────
+// While a run is paused at `awaiting_edit`, these routes drive Plainly renders
+// on demand: discover a template's params, submit a render, poll it (the browser
+// polls — the worker is NOT involved), then accept (re-host as the final video)
+// or skip (fall back to the ffmpeg merge). See apps/api/docs/plainly-integration.md.
+
+const plainlyRenderInputSchema = z.object({
+  projectId: z.string().trim().min(1),
+  templateId: z.string().trim().min(1),
+  parameters: z.record(z.string(), z.string()).default({}),
+  // When true, the clip's audio (the Seedance voice) is stripped before the
+  // render, so the output carries only the template's own audio.
+  muteClipAudio: z.boolean().optional().default(false),
+});
+
+// Per-clip accept: a finished render becomes the branded replacement for ONE
+// segment (not the final video). Carries the template + params so we can record
+// what was applied to that segment.
+const plainlyClipAcceptInputSchema = z.object({
+  renderId: z.string().trim().min(1),
+  segmentIndex: z.number().int().min(0),
+  projectId: z.string().trim().min(1),
+  templateId: z.string().trim().min(1),
+  parameters: z.record(z.string(), z.string()).default({}),
+  // Recorded on the segment edit so re-branding restores the toggle (the render
+  // already baked the mute — accept does NOT re-mute).
+  muteClipAudio: z.boolean().optional().default(false),
+});
+
+/** The clip-slot param name (the MEDIA/video layer the run's clip fills). */
+function clipVideoParamName(
+  params: PlainlyTemplateParam[],
+): string | undefined {
+  return params.find(
+    (p) =>
+      (p.layerType ?? "").toUpperCase() === "MEDIA" &&
+      (p.mediaType ?? "").toLowerCase() === "video",
+  )?.name;
+}
+
+/** The music-slot param name (the MEDIA/audio layer, e.g. `newsMusic`). */
+function clipAudioParamName(
+  params: PlainlyTemplateParam[],
+): string | undefined {
+  return params.find(
+    (p) =>
+      (p.layerType ?? "").toUpperCase() === "MEDIA" &&
+      (p.mediaType ?? "").toLowerCase() === "audio",
+  )?.name;
+}
+
+/** Read a run's `plainly_edit` jsonb as a typed object (or a fresh empty one). */
+function readPlainlyEdit(run: typeof schema.runs.$inferSelect): PlainlyEdit {
+  return (
+    plainlyEditSchema.safeParse(run.plainlyEdit).data ??
+    plainlyEditSchema.parse({})
+  );
+}
+
+/** Guard: the Plainly feature must be configured server-side. */
+function assertPlainlyReady(): void {
+  if (!isPlainlyConfigured()) {
+    throw unprocessable(
+      "Plainly is not configured on the server (set PLAINLY_API_KEY).",
+    );
+  }
+}
+
+// GET /runs/:id/plainly/templates?projectId&templateId — discover a template's
+// parameter names/types (+ this run's clip URLs to fill the media params). Falls
+// back to the configured default template when the query omits ids.
+runs.get("/:id/plainly/templates", async (c) => {
+  const id = c.req.param("id");
+  await getRunOr404(id);
+  assertPlainlyReady();
+  const projectId =
+    c.req.query("projectId") ?? env.PLAINLY_DEFAULT_PROJECT_ID ?? "";
+  const templateId =
+    c.req.query("templateId") ?? env.PLAINLY_DEFAULT_TEMPLATE_ID ?? "";
+  // The run's clips (newest-per-segment), so the UI can map one to the `image`
+  // slot. Branded state is derived client-side from each asset's `meta.plainly`.
+  const clips = (await segmentVideos(id)).map((s) => ({
+    segmentIndex: s.segmentIndex,
+    url: s.assetUrl,
+  }));
+  if (!projectId || !templateId) {
+    return c.json({
+      projectId: projectId || null,
+      templateId: templateId || null,
+      params: [],
+      clips,
+    });
+  }
+  const tpl = await createPlainlyProvider().getTemplate(projectId, templateId);
+  return c.json({ projectId, templateId, params: tpl.params, clips });
+});
+
+// POST /runs/:id/plainly/renders — submit a render with the params the UI
+// assembled (clip URLs already mapped to the media params).
+runs.post("/:id/plainly/renders", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["awaiting_edit"], "Run is not awaiting a Plainly edit.");
+  assertPlainlyReady();
+  const parsed = plainlyRenderInputSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    throw badRequest(
+      parsed.error.issues[0]?.message ?? "Invalid render input",
+      parsed.error.issues,
+    );
+  }
+  const { projectId, templateId, parameters, muteClipAudio } = parsed.data;
+  const provider = createPlainlyProvider();
+  // Apply blank-value rules (clear DATA params with "", drop blank media slots)
+  // using the template's param types so optional fields behave predictably.
+  const tpl = await provider.getTemplate(projectId, templateId);
+
+  // Original voice OFF → feed Plainly a muted copy of the clip, so the rendered
+  // template has no Seedance voice (only its own audio). Plainly bakes audio at
+  // render time, so the input must be muted; doing it on the output is impossible.
+  const renderParams = { ...parameters };
+  if (muteClipAudio) {
+    const clipParam = clipVideoParamName(tpl.params);
+    const clipUrl = clipParam ? renderParams[clipParam] : undefined;
+    if (clipParam && clipUrl) {
+      const { bytes, mime } = await muteVideo(clipUrl);
+      const mutedUrl = await uploadTransient({
+        runId: id,
+        label: "plainly-mute",
+        bytes,
+        contentType: mime,
+      });
+      renderParams[clipParam] = mutedUrl;
+      log.info("plainly clip muted for render", { run: id, clipParam });
+    } else {
+      log.warn("muteClipAudio set but no video clip param found — sending as-is", {
+        run: id,
+      });
+    }
+  }
+
+  const cleaned = normalizeRenderParameters(tpl.params, renderParams);
+  const render = await provider.submitRender({
+    projectId,
+    templateId,
+    parameters: cleaned,
+  });
+
+  // Record the chosen template + params + this render attempt on plainly_edit.
+  const edit = readPlainlyEdit(run);
+  edit.projectId = projectId;
+  edit.templateId = templateId;
+  edit.params = parameters;
+  edit.renders.push({ renderId: render.renderId, state: render.rawState });
+  await db
+    .update(schema.runs)
+    .set({ plainlyEdit: edit, updatedAt: new Date() })
+    .where(eq(schema.runs.id, id));
+  notifyRunChanged(id);
+
+  log.info("plainly render submitted", {
+    run: id,
+    renderId: render.renderId,
+    state: render.rawState,
+  });
+  return c.json({ renderId: render.renderId, state: render.rawState }, 201);
+});
+
+// GET /runs/:id/plainly/renders/:renderId — poll one render (browser polls this).
+// `previewUrl` is Plainly's TEMPORARY output URL — used only for in-session
+// preview; only an ACCEPTED render is re-hosted permanently.
+runs.get("/:id/plainly/renders/:renderId", async (c) => {
+  const id = c.req.param("id");
+  await getRunOr404(id);
+  assertPlainlyReady();
+  const renderId = c.req.param("renderId");
+  const render = await createPlainlyProvider().pollRender(renderId);
+  return c.json({
+    state: render.state,
+    rawState: render.rawState,
+    previewUrl: render.output ?? null,
+    error: render.error ?? null,
+  });
+});
+
+// POST /runs/:id/plainly/clips/accept — adopt a finished render as the branded
+// replacement for ONE segment clip. Re-hosts it as a `segment_video` with the
+// SAME segmentIndex (+ a newer createdAt), so `segmentVideos()` (newest-per-index)
+// picks it for the final merge. The run STAYS `awaiting_edit` — the user can brand
+// more clips, then `finalize` to merge. No completion here.
+runs.post("/:id/plainly/clips/accept", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["awaiting_edit"], "Run is not awaiting a Plainly edit.");
+  assertPlainlyReady();
+  const parsed = plainlyClipAcceptInputSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    throw badRequest(
+      parsed.error.issues[0]?.message ?? "Invalid accept input",
+      parsed.error.issues,
+    );
+  }
+  const { renderId, segmentIndex, projectId, templateId, parameters, muteClipAudio } =
+    parsed.data;
+
+  const provider = createPlainlyProvider();
+  const render = await provider.pollRender(renderId);
+  if (render.state !== "completed" || !render.output) {
+    throw unprocessable(
+      `Render ${renderId} is not finished (state: ${render.rawState}).`,
+    );
+  }
+
+  // Music override: if the user supplied a music URL, the public designs still
+  // bake their STOCK track (no param removes it), so we own the audio — strip the
+  // render's baked audio and mux only the user's music. Best-effort: a bad URL
+  // falls back to the untouched render so a typo can't lose a good render.
+  const tpl = await provider.getTemplate(projectId, templateId);
+  const musicParam = clipAudioParamName(tpl.params);
+  const musicUrl = musicParam ? (parameters[musicParam] ?? "").trim() : "";
+  let bytes: Uint8Array;
+  let mime: string;
+  if (musicUrl) {
+    try {
+      ({ bytes, mime } = await replaceAudioWithMusic(render.output, musicUrl));
+      log.info("plainly render audio replaced with user music", { run: id });
+    } catch (err) {
+      log.warn("music override failed — using the raw render audio", {
+        run: id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      ({ bytes, mime } = await provider.downloadOutput(render.output));
+    }
+  } else {
+    ({ bytes, mime } = await provider.downloadOutput(render.output));
+  }
+  const durationSec = designVariantDuration(projectId, templateId) ?? 15;
+
+  const persisted = await persistSheet({
+    runId: id,
+    kind: "segment_video",
+    bytes,
+    mime: mime.startsWith("video/") ? mime : "video/mp4",
+    // `meta` mirrors a raw segment clip (segmentIndex for ordering) + a `plainly`
+    // flag so the UI can badge it Branded.
+    meta: { segmentIndex, plainly: true, renderId },
+    artifactInsert: async (tx, assetId) => {
+      const [row] = await tx
+        .insert(schema.videos)
+        .values({
+          runId: id,
+          assetId,
+          durationSec: String(durationSec),
+          segmentIndex,
+          hasAudio: true,
+          providerMeta: {
+            provider: "plainly",
+            renderId,
+            projectId,
+            templateId,
+            parameters,
+          },
+          status: "completed",
+        })
+        .returning();
+      return row;
+    },
+  });
+
+  // Record the per-clip branding on plainly_edit (stays awaiting_edit).
+  const edit = readPlainlyEdit(run);
+  edit.segments[String(segmentIndex)] = {
+    segmentIndex,
+    renderId,
+    projectId,
+    templateId,
+    params: parameters,
+    assetId: persisted.assetId,
+    muteClipAudio,
+  };
+  await db
+    .update(schema.runs)
+    .set({ plainlyEdit: edit, updatedAt: new Date() })
+    .where(eq(schema.runs.id, id));
+  notifyRunChanged(id);
+
+  log.info("plainly render accepted as branded segment", {
+    run: id,
+    renderId,
+    segmentIndex,
+  });
+  return c.json(await loadRunDetail(id), 201);
+});
+
+// POST /runs/:id/plainly/finalize — done branding: run the ffmpeg merge over the
+// newest-per-segment clips (branded where edited, raw otherwise). Same state
+// transition as `skip` — the branded segment rows already exist, so the merge
+// consumes them automatically.
+runs.post("/:id/plainly/finalize", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["awaiting_edit"], "Run is not awaiting a Plainly edit.");
+  await db
+    .update(schema.runs)
+    .set({
+      plainlyEnabled: false,
+      status: "running",
+      lockedAt: null,
+      lockedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.runs.id, id));
+  notifyRunChanged(id);
+  log.info("plainly finalize — merging branded + raw clips", { run: id });
+  return c.json(await loadRunDetail(id));
+});
+
+// POST /runs/:id/plainly/skip — abandon the Plainly stage and fall back to the
+// ffmpeg merge: clear the toggle + flip to `running` so the worker advances
+// segment_video → merge.
+runs.post("/:id/plainly/skip", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(run, ["awaiting_edit"], "Run is not awaiting a Plainly edit.");
+  await db
+    .update(schema.runs)
+    .set({
+      plainlyEnabled: false,
+      status: "running",
+      lockedAt: null,
+      lockedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.runs.id, id));
+  notifyRunChanged(id);
+  log.info("plainly stage skipped — falling back to ffmpeg merge", { run: id });
+  return c.json(await loadRunDetail(id));
 });
 
 // ── GET /runs/:id/audio-track — ensure a standalone audio asset exists ────

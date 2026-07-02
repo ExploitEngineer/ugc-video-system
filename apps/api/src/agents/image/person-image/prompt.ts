@@ -68,7 +68,9 @@ const SHEET_RULES =
  * SHORT edit instruction for an image-to-image revise of the attached prior
  * person sheet. Applies only the requested changes and preserves everything else.
  */
-export function buildPersonEditInstruction(directive: RevisionDirective): string {
+export function buildPersonEditInstruction(
+  directive: RevisionDirective,
+): string {
   const changes = directive.changes.length
     ? directive.changes.map((c) => `- ${c}`).join("\n")
     : "- (no specific change provided)";

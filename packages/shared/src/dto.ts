@@ -136,6 +136,12 @@ export const runSchema = z.object({
   criticEnabled: z.boolean(),
   /** Whether a main on-screen character is generated for this run (Chunk 4). */
   characterEnabled: z.boolean(),
+  /**
+   * Whether this run uses the interactive Plainly pre-merge stage: after the
+   * segment clips it pauses at `awaiting_edit` for the user to assemble/brand via
+   * a Plainly template (else the ffmpeg merge runs as before). Multi-segment only.
+   */
+  plainlyEnabled: z.boolean().default(false),
   status: runStatusSchema,
   /**
    * The LAST COMPLETED step — `null` before the first step finishes (a fresh
@@ -155,6 +161,51 @@ export const runSchema = z.object({
   updatedAt: z.string(),
 });
 export type Run = z.infer<typeof runSchema>;
+
+/** One Plainly render attempt recorded on `runs.plainly_edit.renders`. */
+export const plainlyRenderRecordSchema = z.object({
+  renderId: z.string(),
+  /** Raw Plainly state at the time recorded (PENDING | … | DONE | ERROR). */
+  state: z.string(),
+  /** Plainly's (expiring) output URL, if the render finished. */
+  outputUrl: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+export type PlainlyRenderRecord = z.infer<typeof plainlyRenderRecordSchema>;
+
+/** One branded segment recorded on `runs.plainly_edit.segments[segmentIndex]`. */
+export const plainlySegmentEditSchema = z.object({
+  segmentIndex: z.number().int(),
+  renderId: z.string(),
+  projectId: z.string(),
+  templateId: z.string(),
+  params: z.record(z.string(), z.string()).default({}),
+  /** The re-hosted branded clip asset that replaced this segment. */
+  assetId: z.string().optional(),
+  /** Whether the original clip voice was muted before this render (the user's
+   *  "original voice off" choice) — persisted so re-branding restores the toggle. */
+  muteClipAudio: z.boolean().optional(),
+});
+export type PlainlySegmentEdit = z.infer<typeof plainlySegmentEditSchema>;
+
+/**
+ * The per-run Plainly editing state persisted to `runs.plainly_edit`. In the
+ * per-clip model the user brands individual segments before the final merge:
+ * `segments` is keyed by segmentIndex → the branding applied to that clip. The
+ * render history lives in `renders`. (`projectId`/`templateId`/`params`/
+ * `acceptedRenderId` are retained for back-compat with the earlier single-clip
+ * flow.) All optional — null until the user starts the Plainly stage.
+ */
+export const plainlyEditSchema = z.object({
+  projectId: z.string().optional(),
+  templateId: z.string().optional(),
+  params: z.record(z.string(), z.string()).default({}),
+  renders: z.array(plainlyRenderRecordSchema).default([]),
+  acceptedRenderId: z.string().optional(),
+  /** Per-clip branding, keyed by segmentIndex (as a string). */
+  segments: z.record(z.string(), plainlySegmentEditSchema).default({}),
+});
+export type PlainlyEdit = z.infer<typeof plainlyEditSchema>;
 
 /**
  * One planned storyboard scene — the script for ~3-4s of the ad. `transcript`
@@ -228,6 +279,12 @@ export const runDetailSchema = runSchema.extend({
   hooks: hookSelectionSchema.nullable(),
   adTypeConfidence: z.number().nullable(),
   detectorMeta: z.unknown().nullable(),
+  /**
+   * Per-run Plainly editing state (chosen template, assembled params, render
+   * history, accepted render). Null until the user starts the Plainly stage, and
+   * always null when `plainlyEnabled` is false.
+   */
+  plainlyEdit: plainlyEditSchema.nullable(),
   /** Registry display name for the resolved `adType` (server-mapped) — for the chip. */
   adTypeDisplayName: z.string(),
   /** The resolved ad type's look family (server-mapped) — drives the spoken/voiceover label. */
@@ -264,6 +321,12 @@ export const createRunInputSchema = z.object({
    * person-REQUIRED gate.
    */
   characterEnabled: z.boolean().optional(),
+  /**
+   * Whether to use the interactive Plainly pre-merge stage for this run. The
+   * create-run route only honors it for multi-segment runs when the server has
+   * a Plainly API key configured; otherwise it's forced off.
+   */
+  plainlyEnabled: z.boolean().optional(),
   /**
    * Optional ad-type override (Chunk J). `"auto"` (or omitted) = let the
    * detector classify; any other kebab id LOCKS the type (`ad_type_source` =

@@ -20,7 +20,8 @@
     "critic:verify": "tsx scripts/verify-critic.ts",
     "video:verify": "tsx scripts/verify-video.ts",
     "cda:verify": "tsx scripts/verify-cda.ts",
-    "byteplus:probe": "tsx scripts/probe-byteplus.ts"
+    "byteplus:probe": "tsx scripts/probe-byteplus.ts",
+    "plainly:smoke": "tsx scripts/plainly-smoke.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

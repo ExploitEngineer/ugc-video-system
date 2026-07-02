@@ -56,18 +56,12 @@ export const runStatusEnum = pgEnum(
   "run_status",
   runStatusSchema.options as [RunStatus, ...RunStatus[]],
 );
-export const stepEnum = pgEnum(
-  "step",
-  stepSchema.options as [Step, ...Step[]],
-);
+export const stepEnum = pgEnum("step", stepSchema.options as [Step, ...Step[]]);
 export const assetKindEnum = pgEnum(
   "asset_kind",
   assetKindSchema.options as [AssetKind, ...AssetKind[]],
 );
-export const modeEnum = pgEnum(
-  "mode",
-  modeSchema.options as [Mode, ...Mode[]],
-);
+export const modeEnum = pgEnum("mode", modeSchema.options as [Mode, ...Mode[]]);
 export const aspectRatioEnum = pgEnum(
   "aspect_ratio",
   aspectRatioSchema.options as [AspectRatio, ...AspectRatio[]],
@@ -122,6 +116,8 @@ export const runs = pgTable(
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
     characterEnabled: boolean("character_enabled").notNull().default(true), // Chunk 4 toggle: generate ONE main on-screen character (uploaded or synthesized). The create-run route sets it explicitly from the ad-type's characterDefault; this column default only covers direct inserts.
     supportingCast: jsonb("supporting_cast"), // Chunk 4b: text-only supporting roles [{ role, appearance }] planned from the prompt, woven into storyboard + video prompts (no extra reference sheets)
+    plainlyEnabled: boolean("plainly_enabled").notNull().default(false), // Plainly stage: pause after the segment clips at awaiting_edit for an interactive AE-template assemble/brand before the final video (multi-segment only; set by the create-run route only when a Plainly key is configured)
+    plainlyEdit: jsonb("plainly_edit"), // Plainly editing state { projectId, templateId, params, renders:[{renderId,state,outputUrl}], acceptedRenderId } — see shared plainlyEditSchema
     status: runStatusEnum("status").notNull().default("queued"),
     currentStep: stepEnum("current_step"),
     error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)
