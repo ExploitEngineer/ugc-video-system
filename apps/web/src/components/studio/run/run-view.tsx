@@ -6,12 +6,14 @@ import { motion } from "framer-motion";
 import {
   BotIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   ClapperboardIcon,
   ClockIcon,
   ExpandIcon,
   FilmIcon,
   GaugeIcon,
   ListChecksIcon,
+  PaletteIcon,
   PencilIcon,
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
@@ -316,6 +318,20 @@ export function RunView({ runId }: { runId: string }) {
             {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
           </Chip>
         </div>
+        {/* Brand guidelines the user supplied — collapsed by default so a long
+            brief doesn't dominate the bubble. */}
+        {run.brandText && (
+          <details className="group mt-3">
+            <summary className="text-muted-foreground/80 hover:text-foreground flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-medium transition-colors">
+              <PaletteIcon className="size-3.5" />
+              Brand guidelines
+              <ChevronDownIcon className="size-3 transition-transform group-open:rotate-180" />
+            </summary>
+            <p className="text-foreground/80 mt-1.5 text-xs leading-relaxed whitespace-pre-wrap text-pretty">
+              {run.brandText}
+            </p>
+          </details>
+        )}
       </UserMessage>
 
       {/* Creative Direction agent — the AI's reading of the brief (the adStyle

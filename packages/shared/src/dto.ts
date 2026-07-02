@@ -289,6 +289,8 @@ export const runDetailSchema = runSchema.extend({
    * always null when `plainlyEnabled` is false.
    */
   plainlyEdit: plainlyEditSchema.nullable(),
+  /** The user-typed brand guidelines (tone/palette/wording/do's), null when not set. */
+  brandText: z.string().nullable(),
   /** Registry display name for the resolved `adType` (server-mapped) — for the chip. */
   adTypeDisplayName: z.string(),
   /** The resolved ad type's look family (server-mapped) — drives the spoken/voiceover label. */

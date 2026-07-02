@@ -210,6 +210,8 @@ export function toRunDetailDto(
     // Registry-resolved display name + look family for the resolved adType.
     adTypeDisplayName: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).displayName,
     lookFamily: getAdType(run.adType ?? FALLBACK_AD_TYPE_ID).lookFamily,
+    // The user-typed brand guidelines, surfaced read-only in the run view.
+    brandText: run.brandText ?? null,
     skippedSteps,
   };
 }
