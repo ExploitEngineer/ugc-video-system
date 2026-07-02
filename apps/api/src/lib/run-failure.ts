@@ -38,7 +38,7 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
   PERSON_IMAGE_INVALID:
     "One of the reference images has a shape the video service can't use. If you uploaded a person photo, try one closer to a standard portrait or square format.",
   PROVIDER_CONTENT_BLOCKED:
-    "Part of this generation was blocked by the provider's safety filters. Try a different photo or adjust your prompt.",
+    "The video provider's safety filter blocked part of this generation — usually because the ad tried to reproduce a real brand logo, watermark, or a recognizable third-party app/UI, or used a reference photo the filter won't accept. Re-running the same inputs won't change the result: remove that element from your prompt (you can drop in a real logo afterward in the editor) or swap the reference photo, then run again.",
   PROVIDER_RATE_LIMITED:
     "The generation service is busy right now. Please try again in a few minutes.",
   VIDEO_MERGE_FAILED:
@@ -64,7 +64,7 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
   },
   {
     pattern:
-      /sensitivecontentdetected|moderation\b|content.?policy|safety system|flagged|sensitive information|output video may contain/i,
+      /sensitivecontentdetected|moderation\b|content.?policy|safety system|flagged|sensitive information|output video may contain|copyright|trademark|intellectual property/i,
     code: "PROVIDER_CONTENT_BLOCKED",
   },
   {
