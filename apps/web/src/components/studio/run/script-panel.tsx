@@ -4,6 +4,12 @@ import type { RunDetail, Scene } from "@ugc/shared";
 import { motion } from "framer-motion";
 import { ClapperboardIcon, MicIcon, QuoteIcon, ZapIcon } from "lucide-react";
 
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Card, CardContent } from "@/components/ui/card";
 
 /** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
@@ -44,7 +50,7 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
 
   return (
     <Card>
-      <CardContent className="py-6">
+      <CardContent className="py-4">
         <div className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <ClapperboardIcon className="text-brand size-4" />
           <h2 className="text-sm font-semibold">Scene script</h2>
@@ -58,35 +64,66 @@ export function ScriptPanel({ run }: { run: RunDetail }) {
           )}
         </div>
 
-        <div className="flex flex-col gap-6">
-          {segments.map((scenes, segIdx) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: segments are a fixed ordered list (segment 0..3), never reordered
-            <div key={segIdx} className="flex flex-col gap-3">
-              {grouped && (
-                <div className="text-muted-foreground flex items-center gap-2 text-xs font-semibold">
-                  <span className="bg-brand/10 text-brand rounded-md px-2 py-0.5 tabular-nums">
-                    Segment {segIdx + 1}
+        {grouped ? (
+          // Multi-segment: collapse each segment behind an accordion so a 30/45/60s
+          // run (up to 16 scenes) stays scannable. Segment 1 is open by default.
+          <Accordion
+            type="single"
+            collapsible
+            defaultValue="seg-0"
+            className="flex flex-col gap-2"
+          >
+            {segments.map((scenes, segIdx) => (
+              <AccordionItem
+                // biome-ignore lint/suspicious/noArrayIndexKey: segments are a fixed ordered list (segment 0..3), never reordered
+                key={`seg-${segIdx}`}
+                value={`seg-${segIdx}`}
+                className="border-border/60 bg-card/30 rounded-xl border px-3 last:border-b"
+              >
+                <AccordionTrigger className="py-3 hover:no-underline">
+                  <span className="flex items-center gap-2 text-xs font-semibold">
+                    <span className="bg-brand/10 text-brand rounded-md px-2 py-0.5 tabular-nums">
+                      Segment {segIdx + 1}
+                    </span>
+                    <span className="text-muted-foreground/60">
+                      ~{(segIdx + 1) * 15 - 15}–{(segIdx + 1) * 15}s
+                    </span>
+                    <span className="text-muted-foreground/50 font-normal">
+                      {scenes.length} scenes
+                    </span>
                   </span>
-                  <span className="text-muted-foreground/60">
-                    ~{(segIdx + 1) * 15 - 15}–{(segIdx + 1) * 15}s
-                  </span>
-                </div>
-              )}
-              <ol className="flex flex-col gap-3">
-                {scenes.map((scene, i) => (
-                  <SceneRow
-                    key={`${segIdx}-${scene.index}-${i}`}
-                    scene={scene}
-                    delay={i * 0.04}
-                    isUgc={isUgc}
-                    lineLabel={lineLabel}
-                    hook={segIdx === 0 && i === 0 ? openingHook : null}
-                  />
-                ))}
-              </ol>
-            </div>
-          ))}
-        </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-3">
+                  <ol className="flex flex-col gap-3">
+                    {scenes.map((scene, i) => (
+                      <SceneRow
+                        key={`${segIdx}-${scene.index}-${i}`}
+                        scene={scene}
+                        delay={i * 0.04}
+                        isUgc={isUgc}
+                        lineLabel={lineLabel}
+                        hook={segIdx === 0 && i === 0 ? openingHook : null}
+                      />
+                    ))}
+                  </ol>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        ) : (
+          <ol className="flex flex-col gap-3">
+            {segments[0].map((scene, i) => (
+              <SceneRow
+                key={`${scene.index}-${i}`}
+                scene={scene}
+                delay={i * 0.04}
+                isUgc={isUgc}
+                lineLabel={lineLabel}
+                hook={i === 0 ? openingHook : null}
+              />
+            ))}
+          </ol>
+        )}
       </CardContent>
     </Card>
   );
