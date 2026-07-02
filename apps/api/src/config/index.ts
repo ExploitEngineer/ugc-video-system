@@ -85,6 +85,26 @@ const serverEnvSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
 
+  // Plainly Videos — cloud After Effects rendering for the optional interactive
+  // pre-merge branding stage (assemble + brand the Seedance clips via an AE
+  // template). OPTIONAL: when PLAINLY_API_KEY is unset the feature is off and
+  // runs use the ffmpeg merge as before. Basic auth (the key is the username,
+  // password empty). See apps/api/docs/plainly-integration.md.
+  PLAINLY_API_KEY: z.string().min(1).optional(),
+  PLAINLY_API_BASE_URL: z
+    .string()
+    .url()
+    .default("https://api.plainlyvideos.com/api/v2"),
+  // Optional default template for quick runs/tests — a Plainly Design id or your
+  // own uploaded+analyzed project + template.
+  PLAINLY_DEFAULT_PROJECT_ID: z.string().optional(),
+  PLAINLY_DEFAULT_TEMPLATE_ID: z.string().optional(),
+  PLAINLY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  // Max wall-clock to keep polling ONE Plainly render before giving up (an AE
+  // render of a 30–60s assembly can take minutes). 30 min mirrors the Seedance
+  // poll timeout.
+  PLAINLY_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(1800000),
+
   // F7 background worker — in-process loop that drives runs through the
   // pipeline. Disable (e.g. in tests) to keep the HTTP server passive.
   WORKER_ENABLED: z

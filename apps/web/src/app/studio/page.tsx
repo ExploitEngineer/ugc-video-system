@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function StudioPage() {
   return (
-    <div className="relative flex min-h-full flex-col items-center justify-center px-4 py-12 sm:px-6">
+    <div className="relative flex min-h-full flex-col items-center justify-center px-4 py-8 sm:px-6">
       <div
         aria-hidden
         className="bg-grid pointer-events-none absolute inset-0 opacity-60"

@@ -6,18 +6,21 @@ import { motion } from "framer-motion";
 import {
   BotIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   ClapperboardIcon,
   ClockIcon,
   ExpandIcon,
   FilmIcon,
   GaugeIcon,
   ListChecksIcon,
+  PaletteIcon,
   PencilIcon,
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
   SparklesIcon,
   TagIcon,
   TriangleAlertIcon,
+  Wand2Icon,
   ZapIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -47,7 +50,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchRun } from "@/lib/api";
+import { fetchRun, skipPlainly } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
 import { useRunStream } from "@/lib/use-run-stream";
 
@@ -151,6 +154,17 @@ export function RunView({ runId }: { runId: string }) {
     onError: () => toast.error("Couldn’t send feedback — try again"),
   });
 
+  // Skip the Plainly stage → fall back to the ffmpeg merge (flips the run back to
+  // `running`; SSE then streams the merge → final video).
+  const skipPlainlyMutation = useMutation({
+    mutationFn: () => skipPlainly(runId),
+    onSuccess: (detail) => {
+      queryClient.setQueryData(queryKey, detail);
+      toast.message("Merging your clips…");
+    },
+    onError: () => toast.error("Couldn’t skip — try again"),
+  });
+
   // Record this run in the sidebar history — covers both freshly-created runs
   // and ones opened directly by URL. addRun is idempotent per id. If the run is
   // confirmed missing (404), drop it from history so the ghost entry can't keep
@@ -230,14 +244,26 @@ export function RunView({ runId }: { runId: string }) {
   const isMulti = isMultiSegment(run.duration);
   const segCount = segmentCountFor(run.duration);
   const masterPanels = segCount * 4;
+  // A Plainly-branded clip is a 2nd segment_video for the same index — keep only
+  // the newest per index (the one the merge uses) so the grid shows one each.
   const segmentClips = isMulti
-    ? run.assets
-        .filter((a) => a.kind === "segment_video")
-        .sort(
-          (a, b) =>
-            Number(a.meta?.segmentIndex ?? Number.POSITIVE_INFINITY) -
-            Number(b.meta?.segmentIndex ?? Number.POSITIVE_INFINITY),
-        )
+    ? [
+        ...run.assets
+          .filter((a) => a.kind === "segment_video")
+          .reduce((byIndex, a) => {
+            const idx = Number(
+              a.meta?.segmentIndex ?? Number.POSITIVE_INFINITY,
+            );
+            const prev = byIndex.get(idx);
+            if (!prev || a.createdAt > prev.createdAt) byIndex.set(idx, a);
+            return byIndex;
+          }, new Map<number, (typeof run.assets)[number]>())
+          .values(),
+      ].sort(
+        (a, b) =>
+          Number(a.meta?.segmentIndex ?? Number.POSITIVE_INFINITY) -
+          Number(b.meta?.segmentIndex ?? Number.POSITIVE_INFINITY),
+      )
     : [];
   // Multi-segment: the ONE N×4-panel master storyboard (all N segments × four
   // panels in a single sheet). The N cropped row strips (`storyboard_sheet`) are
@@ -260,7 +286,7 @@ export function RunView({ runId }: { runId: string }) {
   const running = run.status === "running" || run.status === "regenerating";
 
   return (
-    <div className="flex flex-col gap-6 pb-4">
+    <div className="flex flex-col gap-5 pb-4">
       {/* The user's "message" — their prompt plus every option they picked. */}
       <UserMessage>
         <p className="leading-relaxed text-pretty">{run.prompt}</p>
@@ -292,6 +318,20 @@ export function RunView({ runId }: { runId: string }) {
             {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
           </Chip>
         </div>
+        {/* Brand guidelines the user supplied — collapsed by default so a long
+            brief doesn't dominate the bubble. */}
+        {run.brandText && (
+          <details className="group mt-3">
+            <summary className="text-muted-foreground/80 hover:text-foreground flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-medium transition-colors">
+              <PaletteIcon className="size-3.5" />
+              Brand guidelines
+              <ChevronDownIcon className="size-3 transition-transform group-open:rotate-180" />
+            </summary>
+            <p className="text-foreground/80 mt-1.5 text-xs leading-relaxed whitespace-pre-wrap text-pretty">
+              {run.brandText}
+            </p>
+          </details>
+        )}
       </UserMessage>
 
       {/* Creative Direction agent — the AI's reading of the brief (the adStyle
@@ -342,11 +382,50 @@ export function RunView({ runId }: { runId: string }) {
       <AgentMessage label="Pipeline">
         {running && <NowRunning run={run} />}
         <Card>
-          <CardContent className="py-6">
+          <CardContent className="py-4">
             <StepTimeline run={run} />
           </CardContent>
         </Card>
       </AgentMessage>
+
+      {/* Agent — paused for the interactive Plainly stage. Rendered directly
+          under the pipeline so the choice sits beside the "Waiting on you" merge
+          row, not buried below the scene-script/segments galleries. */}
+      {run.status === "awaiting_edit" && (
+        <AgentMessage label="Customize with Plainly">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="border-brand/40 bg-brand/10 flex flex-col gap-3 rounded-xl border px-4 py-3.5"
+          >
+            <div className="flex items-start gap-2">
+              <Wand2Icon className="text-brand mt-0.5 size-4 shrink-0" />
+              <p className="text-foreground/90 text-sm leading-relaxed">
+                Your {segCount} clips are ready — this is the last step before
+                the merge. Brand any of them with ready-made templates (each
+                branded clip replaces that segment), then merge into your final
+                video. Or skip to merge the raw clips.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-6">
+              <Button asChild variant="brand" size="sm">
+                <Link href={`/studio/${run.id}/plainly`}>
+                  <Wand2Icon className="size-4" />
+                  Customize with Plainly
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => skipPlainlyMutation.mutate()}
+                disabled={skipPlainlyMutation.isPending}
+              >
+                Skip — merge the clips
+              </Button>
+            </div>
+          </motion.div>
+        </AgentMessage>
+      )}
 
       {/* Agent — the generated scene script, once it exists. */}
       {hasScript && (
@@ -468,28 +547,33 @@ export function RunView({ runId }: { runId: string }) {
         </AgentMessage>
       )}
 
-      {/* Reply composer (step-by-step) / cancel (automatic) / new chat. */}
-      {run.mode === "confirm" && !isTerminal(run.status) && (
-        <FeedbackBar
-          run={run}
-          pending={pending}
-          onSubmitFeedback={(message) => feedbackMutation.mutate(message)}
-          onCancel={() => mutation.mutate("cancel")}
-        />
-      )}
+      {/* Reply composer (step-by-step) / cancel (automatic) / new chat. The
+          Plainly pause has its own card above, so suppress these there. */}
+      {run.mode === "confirm" &&
+        !isTerminal(run.status) &&
+        run.status !== "awaiting_edit" && (
+          <FeedbackBar
+            run={run}
+            pending={pending}
+            onSubmitFeedback={(message) => feedbackMutation.mutate(message)}
+            onCancel={() => mutation.mutate("cancel")}
+          />
+        )}
 
-      {run.mode === "automatic" && !isTerminal(run.status) && (
-        <div className="flex justify-center">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => mutation.mutate("cancel")}
-            disabled={pending}
-          >
-            Cancel run
-          </Button>
-        </div>
-      )}
+      {run.mode === "automatic" &&
+        !isTerminal(run.status) &&
+        run.status !== "awaiting_edit" && (
+          <div className="flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => mutation.mutate("cancel")}
+              disabled={pending}
+            >
+              Cancel run
+            </Button>
+          </div>
+        )}
 
       {isTerminal(run.status) && (
         <AgentMessage label="Start a new chat">

@@ -274,7 +274,12 @@ export async function videoBuilder(
     referenceImages = productUrl ? [productUrl] : [];
     personReferences = [];
     personReferences.push(
-      await providerSafeFaceUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
+      await providerSafeFaceUrl(
+        storyboardUrl,
+        ctx.runId,
+        "storyboard_sheet",
+        log,
+      ),
     );
     if (faceUrl) {
       personReferences.push(

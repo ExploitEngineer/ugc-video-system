@@ -42,7 +42,7 @@ export function Faq() {
             <p className="text-brand text-sm font-semibold tracking-wide uppercase">
               FAQ
             </p>
-            <h2 className="text-display mt-3 text-3xl sm:text-4xl">
+            <h2 className="text-display mt-3 text-2xl sm:text-3xl">
               Questions, answered
             </h2>
             <p className="text-muted-foreground mt-4 max-w-md text-pretty">

@@ -72,7 +72,9 @@ export async function latestStepEventStatus(
   const [row] = await db
     .select({ status: schema.stepEvents.status })
     .from(schema.stepEvents)
-    .where(and(eq(schema.stepEvents.runId, runId), eq(schema.stepEvents.step, step)))
+    .where(
+      and(eq(schema.stepEvents.runId, runId), eq(schema.stepEvents.step, step)),
+    )
     .orderBy(desc(schema.stepEvents.createdAt))
     .limit(1);
   return (row?.status as StepEventStatus | undefined) ?? null;
@@ -101,7 +103,8 @@ export async function closeInFlightStepsOnCancel(
   // First row per step (rows are newest-first) = that step's latest status.
   const latestByStep = new Map<Step, string>();
   for (const r of rows) {
-    if (!latestByStep.has(r.step as Step)) latestByStep.set(r.step as Step, r.status);
+    if (!latestByStep.has(r.step as Step))
+      latestByStep.set(r.step as Step, r.status);
   }
   const inFlight = [...latestByStep.entries()]
     .filter(([, status]) => status === "started")

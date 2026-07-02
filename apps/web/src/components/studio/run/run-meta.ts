@@ -248,6 +248,10 @@ export function stepState(run: RunDetail, step: Step): StepState {
   // At a confirm-mode gate the current (passed) step carries the gate state.
   if (idx === currentIdx && run.status === "awaiting_confirmation")
     return "awaiting";
+  // Plainly pre-merge pause: the run parks at `awaiting_edit` AFTER the segment
+  // clips and BEFORE merge, so `merge` is the step waiting on the user's choice.
+  // Surface it as "awaiting" (a live pause) instead of a dead "pending" row.
+  if (step === "merge" && run.status === "awaiting_edit") return "awaiting";
   if (idx === currentIdx && run.status === "regenerating")
     return "regenerating";
   if (hasFailed) return "failed";

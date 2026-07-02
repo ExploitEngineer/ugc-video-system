@@ -63,24 +63,21 @@ export interface UploadAssetResult {
   url: string;
 }
 
-/** Upload bytes under `runs/{runId}/{kind}-{uuid}.{ext}` → path + public URL. */
-export async function uploadAsset({
-  runId,
-  kind,
-  bytes,
-  contentType,
-}: UploadAssetInput): Promise<UploadAssetResult> {
-  // The random UUID keeps `storagePath` stable across retries, so re-uploading
-  // after a transient failure can never collide with a prior attempt.
-  const storagePath = `runs/${runId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
-
+/** Upload bytes to an exact storage path (with the shared transient-retry policy)
+ *  → public URL. The path's random UUID must be stable across retries so a retry
+ *  after a network blip can never collide with a prior attempt. */
+async function uploadBytesToPath(
+  storagePath: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<string> {
   let lastMessage = "";
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
     const { error } = await supabase.storage
       .from(BUCKET)
       .upload(storagePath, bytes, { contentType, upsert: false });
 
-    if (!error) return { storagePath, url: getPublicUrl(storagePath) };
+    if (!error) return getPublicUrl(storagePath);
 
     lastMessage = error.message;
     // Fail fast on real errors (missing bucket, bad key) — only retry network blips.
@@ -93,6 +90,40 @@ export async function uploadAsset({
       ? `Storage upload failed after ${UPLOAD_MAX_ATTEMPTS} attempts (network error): ${lastMessage}`
       : `Storage upload failed (bucket "${BUCKET}" — does it exist?): ${lastMessage}`,
   );
+}
+
+/** Upload bytes under `runs/{runId}/{kind}-{uuid}.{ext}` → path + public URL. */
+export async function uploadAsset({
+  runId,
+  kind,
+  bytes,
+  contentType,
+}: UploadAssetInput): Promise<UploadAssetResult> {
+  const storagePath = `runs/${runId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  const url = await uploadBytesToPath(storagePath, bytes, contentType);
+  return { storagePath, url };
+}
+
+/**
+ * Upload a TRANSIENT intermediate file (NOT a tracked asset — no DB row) and
+ * return only its public URL. Used for the muted clip fed to Plainly when the
+ * user turns the original voice off: Plainly needs a fetchable URL, but the file
+ * is throwaway (cleaned up with the run's other objects on delete). `label`
+ * becomes the filename prefix so these are recognisable in the bucket.
+ */
+export async function uploadTransient({
+  runId,
+  label,
+  bytes,
+  contentType,
+}: {
+  runId: string;
+  label: string;
+  bytes: Uint8Array;
+  contentType: string;
+}): Promise<string> {
+  const storagePath = `runs/${runId}/${label}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  return uploadBytesToPath(storagePath, bytes, contentType);
 }
 
 /** Stable public URL for an object in the public bucket. */

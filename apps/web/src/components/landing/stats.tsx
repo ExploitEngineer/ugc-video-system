@@ -31,7 +31,7 @@ export function Stats() {
           <p className="text-brand text-sm font-semibold tracking-wide uppercase">
             The short version
           </p>
-          <h2 className="text-display mt-3 text-3xl sm:text-4xl">
+          <h2 className="text-display mt-3 text-2xl sm:text-3xl">
             A whole production crew in one prompt
           </h2>
         </Reveal>
@@ -40,7 +40,7 @@ export function Stats() {
           {STATS.map((s) => (
             <RevealItem key={s.label} className="h-full">
               <div className="bg-card flex h-full flex-col gap-1 p-7">
-                <span className="text-brand-gradient text-display text-4xl tabular-nums sm:text-5xl">
+                <span className="text-brand-gradient text-display text-3xl tabular-nums sm:text-4xl">
                   {s.value}
                 </span>
                 <span className="mt-1 text-sm font-semibold">{s.label}</span>

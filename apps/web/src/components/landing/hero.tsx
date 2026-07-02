@@ -66,7 +66,7 @@ export function Hero() {
 
           <motion.h1
             {...fade(0.08)}
-            className="text-display mt-7 max-w-xl text-5xl leading-[1.02] tracking-tight text-balance sm:text-6xl xl:text-7xl"
+            className="text-display mt-7 max-w-xl text-4xl leading-[1.02] tracking-tight text-balance sm:text-5xl xl:text-6xl"
           >
             One product image into a{" "}
             <span className="text-brand-gradient">finished ad video</span>
@@ -104,7 +104,7 @@ export function Hero() {
           >
             <Button
               asChild
-              size="lg"
+              size="default"
               variant="brand"
               className="group relative w-full overflow-hidden sm:w-auto"
             >
@@ -116,7 +116,7 @@ export function Hero() {
             </Button>
             <Button
               asChild
-              size="lg"
+              size="default"
               variant="outline"
               className="w-full sm:w-auto"
             >

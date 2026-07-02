@@ -7,6 +7,11 @@ import { env } from "./config/index.js";
 import { onError } from "./lib/errors.js";
 import { createLogger } from "./lib/log.js";
 import { adTypeMenuList } from "./agents/ad-types/menu.js";
+import {
+  createPlainlyProvider,
+  isPlainlyConfigured,
+} from "./providers/plainly/index.js";
+import { brand } from "./routes/brand.js";
 import { runs } from "./routes/runs.js";
 
 export function createApp() {
@@ -40,7 +45,25 @@ export function createApp() {
   // grows automatically as new ad types are registered.
   app.get("/ad-types", (c) => c.json(adTypeMenuList()));
 
+  // Plainly capability + defaults — lets the create-form decide whether to offer
+  // the "Customize with Plainly" toggle and prefill the default template.
+  app.get("/plainly/config", (c) =>
+    c.json({
+      configured: isPlainlyConfigured(),
+      defaultProjectId: env.PLAINLY_DEFAULT_PROJECT_ID ?? null,
+      defaultTemplateId: env.PLAINLY_DEFAULT_TEMPLATE_ID ?? null,
+    }),
+  );
+
+  // The curated public designs the editor offers as single-clip branded wraps —
+  // confirmed live against Plainly's catalog + enriched with preview MP4s. Falls
+  // back to the pinned list when the catalog is unreachable.
+  app.get("/plainly/designs", async (c) =>
+    c.json({ designs: await createPlainlyProvider().listDesignsEnriched() }),
+  );
+
   app.route("/runs", runs);
+  app.route("/brand", brand);
 
   app.notFound((c) => c.json({ error: "Not found" }, 404));
   app.onError(onError);

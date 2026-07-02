@@ -355,6 +355,99 @@ export async function mergeSegmentUrls(
 }
 
 /**
+ * Strip the audio from a clip — copy the video stream, drop audio (`-an`), so no
+ * re-encode (fast + lossless). Used by the Plainly stage when the user turns the
+ * original voice OFF: we feed Plainly the muted clip, so the rendered template
+ * carries only its own audio (music bed), never the Seedance voice. Plainly bakes
+ * audio at render time, so muting must happen on the INPUT — it can't be removed
+ * from the output afterward. Reuses the merge semaphore + ffmpeg runner.
+ */
+export async function muteVideo(
+  videoUrl: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-mute-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.mp4");
+    log.info("▶ muting clip audio");
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-c", "copy", // stream-copy video (no re-encode)
+        "-an", // drop the audio track
+        "-movflags", "+faststart",
+        out,
+      ],
+      "mute-clip",
+    );
+    const bytes = await readFile(out);
+    log.info("✓ clip muted", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Replace a clip's audio with a single music track. The public Plainly designs
+ * bake the template's STOCK music into the render and expose no param to remove
+ * it (a `newsMusic` URL adds/overrides only one layer; a separate baked track —
+ * and the clip's own voice — still plays). So when the user supplies their own
+ * music we OWN the final audio: drop the rendered output's audio entirely (the
+ * `0:a` stream is never mapped) and mux ONLY the user's track, looped + trimmed
+ * to the video length (`-shortest`). Video is stream-copied (no re-encode); only
+ * the new audio encodes. Music-only on purpose — designs re-time the clip to
+ * their fixed duration, so re-muxing the raw clip voice would desync. Reuses the
+ * merge semaphore + signal/timeout-aware ffmpeg runner.
+ */
+export async function replaceAudioWithMusic(
+  videoUrl: string,
+  musicUrl: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-clipaudio-${randomUUID()}-`));
+  try {
+    const video = join(dir, "video.mp4");
+    await fetchToFile(videoUrl, video);
+    const music = join(dir, "music.bin");
+    await fetchToFile(musicUrl, music);
+    const out = join(dir, "out.mp4");
+    log.info("▶ replacing clip audio with music track");
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", video,
+        // Loop the music to cover the full video; `-shortest` trims it.
+        "-stream_loop", "-1",
+        "-i", music,
+        "-map", "0:v", // branded visuals
+        "-map", "1:a", // ONLY the music (output's baked audio is dropped)
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-threads", String(FFMPEG_THREADS),
+        "-shortest",
+        "-movflags", "+faststart",
+        out,
+      ],
+      "replace-audio",
+    );
+    const bytes = await readFile(out);
+    log.info("✓ clip audio replaced", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Extract the audio track of a video as a standalone AAC/m4a file. Used by the
  * editor's "separate audio lane" feature: the baked-in audio (Seedance-native,
  * or the merged multi-segment mix) can't be detached inside CE.SDK, so the API

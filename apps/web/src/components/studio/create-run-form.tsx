@@ -1,6 +1,7 @@
 "use client";
 
 import type { AdTypeMenuItem, AspectRatio, Duration, Mode } from "@ugc/shared";
+import { BRAND_MAX, isMultiSegment } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -15,7 +16,9 @@ import {
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
   SlidersHorizontalIcon,
+  UploadIcon,
   UserIcon,
+  Wand2Icon,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -34,7 +37,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createRun, fetchAdTypes } from "@/lib/api";
+import {
+  createRun,
+  fetchAdTypes,
+  fetchPlainlyConfig,
+  parseBrandFile,
+} from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +79,11 @@ export function CreateRunForm({
   // generated (uploaded or synthesized). Defaults from the picked ad-type and
   // re-syncs when the type changes.
   const [characterEnabled, setCharacterEnabled] = useState(true);
+  // Plainly interactive pre-merge stage — pause after the segment clips to
+  // assemble/brand them via a Plainly template. Only offered for multi-segment
+  // runs when the server has Plainly configured; default on when available.
+  const [plainlyConfigured, setPlainlyConfigured] = useState(false);
+  const [plainlyEnabled, setPlainlyEnabled] = useState(true);
   const [adTypes, setAdTypes] = useState<AdTypeMenuItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -82,6 +95,9 @@ export function CreateRunForm({
     let active = true;
     fetchAdTypes().then((list) => {
       if (active) setAdTypes(list);
+    });
+    fetchPlainlyConfig().then((cfg) => {
+      if (active) setPlainlyConfigured(cfg.configured);
     });
     return () => {
       active = false;
@@ -108,6 +124,9 @@ export function CreateRunForm({
   const isService = adType === "service";
   const showCharacterControl = !isService && Boolean(selectedType);
   const showPersonUpload = !isService && characterEnabled;
+  // Plainly stage only applies to multi-segment runs (the ones that merge) and
+  // only when the server has it configured.
+  const showPlainly = plainlyConfigured && isMultiSegment(duration);
 
   // Drop a stale person file when the upload is hidden (toggle off / service) so
   // it is never sent for a character-off run.
@@ -158,6 +177,7 @@ export function CreateRunForm({
     fd.set("duration", duration);
     fd.set("adType", adType);
     fd.set("characterEnabled", String(characterEnabled));
+    if (showPlainly) fd.set("plainlyEnabled", String(plainlyEnabled));
     if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
@@ -231,6 +251,12 @@ export function CreateRunForm({
                 file={personFile}
                 onFile={setPersonFile}
                 onError={setError}
+              />
+            )}
+            {showPlainly && (
+              <PlainlyChip
+                value={plainlyEnabled}
+                onChange={setPlainlyEnabled}
               />
             )}
             <OptionsMenu
@@ -425,6 +451,28 @@ function OptionsMenu({
   brandText: string;
   onBrandText: (v: string) => void;
 }) {
+  const brandFileRef = useRef<HTMLInputElement>(null);
+  const [parsingBrand, setParsingBrand] = useState(false);
+  const [brandError, setBrandError] = useState<string | null>(null);
+
+  async function handleBrandFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the user re-pick the same file
+    if (!file) return;
+    setBrandError(null);
+    setParsingBrand(true);
+    try {
+      const { brandText: brief } = await parseBrandFile(file);
+      onBrandText(brief);
+    } catch (err) {
+      setBrandError(
+        err instanceof Error ? err.message : "Couldn't read that file.",
+      );
+    } finally {
+      setParsingBrand(false);
+    }
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -453,13 +501,49 @@ function OptionsMenu({
             <ModeToggle value={mode} onChange={onMode} />
           </Field>
           <Field label="Brand guidelines">
-            <textarea
-              value={brandText}
-              onChange={(e) => onBrandText(e.target.value)}
-              rows={3}
-              placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
-              className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 text-xs outline-none"
-            />
+            <div className="flex flex-col gap-1.5">
+              <div className="relative">
+                <textarea
+                  value={brandText}
+                  onChange={(e) => onBrandText(e.target.value)}
+                  rows={2}
+                  maxLength={BRAND_MAX}
+                  placeholder="Optional — a quick note (tone, colours). Upload a file for detail."
+                  className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 pb-5 text-xs outline-none"
+                />
+                <span className="text-muted-foreground/60 pointer-events-none absolute right-2 bottom-1.5 font-mono text-[10px] tabular-nums">
+                  {brandText.length}/{BRAND_MAX}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={brandFileRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  onChange={handleBrandFile}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={parsingBrand}
+                  onClick={() => brandFileRef.current?.click()}
+                  className="border-border/60 bg-background/40 text-muted-foreground hover:border-brand/40 hover:text-foreground inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
+                >
+                  {parsingBrand ? (
+                    <Loader2Icon className="size-3 animate-spin" />
+                  ) : (
+                    <UploadIcon className="size-3" />
+                  )}
+                  {parsingBrand ? "Reading…" : "Upload file"}
+                </button>
+                <span className="text-muted-foreground/50 text-[10px]">
+                  PDF, .txt, .md — summarized for you
+                </span>
+              </div>
+              {brandError && (
+                <p className="text-destructive text-[11px]">{brandError}</p>
+              )}
+            </div>
           </Field>
         </div>
       </PopoverContent>
@@ -567,6 +651,44 @@ function CharacterChip({
         )}
       </span>
       Character {value ? "on" : "off"}
+    </button>
+  );
+}
+
+/** Compact Plainly On/Off chip — when on, the run pauses after its segment clips
+ *  so you can brand one of them with a ready-made Plainly template before the
+ *  final video (else the clips are merged with ffmpeg as usual). */
+function PlainlyChip({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      aria-pressed={value}
+      title={
+        value
+          ? "Plainly on — pause after the clips to brand one with a ready-made template. Click to turn off."
+          : "Plainly off — merge the clips directly (ffmpeg). Click to turn on."
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        value
+          ? "border-brand/50 bg-brand/10 text-foreground"
+          : "border-border/60 text-muted-foreground hover:border-brand/40 hover:text-foreground hover:bg-brand/10 border-dashed",
+      )}
+    >
+      <span className="relative inline-flex items-center justify-center">
+        <Wand2Icon className="size-3.5" />
+        {!value && (
+          <span className="bg-current pointer-events-none absolute left-1/2 top-1/2 h-[1.5px] w-[150%] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full" />
+        )}
+      </span>
+      Plainly {value ? "on" : "off"}
     </button>
   );
 }

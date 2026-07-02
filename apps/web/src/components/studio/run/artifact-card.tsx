@@ -25,12 +25,12 @@ export function ArtifactCard({
 
   if (isVideo && isRealVideo) {
     return (
-      <div className="overflow-hidden rounded-xl border">
+      <div className="bg-media flex justify-center overflow-hidden rounded-xl border">
         {/* biome-ignore lint/a11y/useMediaCaption: mock artifact, no captions */}
         <video
           src={asset.url}
           controls
-          className="aspect-video w-full bg-media"
+          className="max-h-[70vh] w-full object-contain"
         />
       </div>
     );

@@ -1097,6 +1097,25 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       await setRunIfActive(runId, { status: "completed", currentStep: step });
       return;
     }
+    // Plainly interactive stage: after the LAST segment clip, pause for the user
+    // to assemble + brand via a Plainly AE template instead of running the ffmpeg
+    // merge. Independent of `mode` — it's a feature gate, not a confirm gate. The
+    // worker ignores `awaiting_edit`; the Plainly accept route finalizes the run,
+    // and the skip route clears `plainlyEnabled` + flips to `running` so this loop
+    // then advances segment_video → merge (the ffmpeg fallback).
+    if (step === "segment_video" && run.plainlyEnabled) {
+      logRun(
+        runId,
+        `✓ ${step} → plainlyEnabled ⇒ PAUSE for Plainly edit`,
+        tag,
+      );
+      await setRunIfActive(runId, {
+        status: "awaiting_edit",
+        currentStep: step,
+      });
+      logRun(runId, "⏸ PAUSED — awaiting Plainly edit", tag);
+      return;
+    }
     // Step-by-step gate: pause if completing this step lands us at a gate
     // boundary (next step is storyboard/outline or video/segment_video).
     // Independent of the Critic — gateForNext works whether or not inspection

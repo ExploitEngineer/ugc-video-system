@@ -9,6 +9,11 @@ export const runStatusSchema = z.enum([
   "queued",
   "running",
   "awaiting_confirmation",
+  // Paused after the segment clips for the interactive Plainly stage: the user
+  // assembles/brands the clips via a Plainly template before the final video.
+  // Worker skips this status (like awaiting_confirmation); resumed by the
+  // Plainly accept/skip routes, NOT by the confirm /feedback action.
+  "awaiting_edit",
   "regenerating",
   "completed",
   "failed",
