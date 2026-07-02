@@ -66,7 +66,7 @@ export async function condenseBrandBrief(rawText: string): Promise<string> {
           "Output PLAIN TEXT only (no markdown headings, no preamble). Capture, when present: " +
           "brand name; colour palette (hex if given); typography; tone & voice; words/phrases to " +
           "use and to avoid; visual do's and don'ts; tagline. Omit anything not in the source — " +
-          "never invent. Be specific and compact; aim for under 250 words.",
+          "never invent. Be specific and tight; aim for under 180 words.",
       },
       {
         role: "user",

@@ -17,9 +17,11 @@ import {
   stepSchema,
 } from "./enums";
 
-/** Max length of the brand-guidelines text (typed or parsed). Shared so the
- * client counter/cap and the server Zod bound never drift. */
-export const BRAND_MAX = 4000;
+/** Max length of the brand-guidelines text (typed or parsed). Kept short: the
+ * typed field is for quick notes — detail belongs in an uploaded file, which is
+ * condensed to fit this same bound. Shared so the client counter/cap and the
+ * server Zod bound never drift. */
+export const BRAND_MAX = 1500;
 
 /** A stored file (image sheet or final video) attached to a run. */
 export const assetSchema = z.object({

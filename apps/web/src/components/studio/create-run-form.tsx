@@ -506,9 +506,9 @@ function OptionsMenu({
                 <textarea
                   value={brandText}
                   onChange={(e) => onBrandText(e.target.value)}
-                  rows={3}
+                  rows={2}
                   maxLength={BRAND_MAX}
-                  placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
+                  placeholder="Optional — a quick note (tone, colours). Upload a file for detail."
                   className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 pb-5 text-xs outline-none"
                 />
                 <span className="text-muted-foreground/60 pointer-events-none absolute right-2 bottom-1.5 font-mono text-[10px] tabular-nums">
