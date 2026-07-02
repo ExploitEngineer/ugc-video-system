@@ -1,7 +1,7 @@
 "use client";
 
 import type { AdTypeMenuItem, AspectRatio, Duration, Mode } from "@ugc/shared";
-import { isMultiSegment } from "@ugc/shared";
+import { BRAND_MAX, isMultiSegment } from "@ugc/shared";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircleIcon,
@@ -473,13 +473,19 @@ function OptionsMenu({
             <ModeToggle value={mode} onChange={onMode} />
           </Field>
           <Field label="Brand guidelines">
-            <textarea
-              value={brandText}
-              onChange={(e) => onBrandText(e.target.value)}
-              rows={3}
-              placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
-              className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 text-xs outline-none"
-            />
+            <div className="relative">
+              <textarea
+                value={brandText}
+                onChange={(e) => onBrandText(e.target.value)}
+                rows={3}
+                maxLength={BRAND_MAX}
+                placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
+                className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 pb-5 text-xs outline-none"
+              />
+              <span className="text-muted-foreground/60 pointer-events-none absolute right-2 bottom-1.5 font-mono text-[10px] tabular-nums">
+                {brandText.length}/{BRAND_MAX}
+              </span>
+            </div>
           </Field>
         </div>
       </PopoverContent>

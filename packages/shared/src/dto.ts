@@ -17,6 +17,10 @@ import {
   stepSchema,
 } from "./enums";
 
+/** Max length of the brand-guidelines text (typed or parsed). Shared so the
+ * client counter/cap and the server Zod bound never drift. */
+export const BRAND_MAX = 4000;
+
 /** A stored file (image sheet or final video) attached to a run. */
 export const assetSchema = z.object({
   id: z.string(),
@@ -335,7 +339,7 @@ export const createRunInputSchema = z.object({
    */
   adType: z.string().trim().optional(),
   /** Optional user-typed brand guidelines (tone, palette, wording, do/don'ts). */
-  brandText: z.string().trim().max(4000).optional(),
+  brandText: z.string().trim().max(BRAND_MAX).optional(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
 
