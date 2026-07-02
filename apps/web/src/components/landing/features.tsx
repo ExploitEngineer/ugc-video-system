@@ -50,7 +50,7 @@ export function Features() {
           <p className="text-brand text-sm font-semibold tracking-wide uppercase">
             Features
           </p>
-          <h2 className="text-display mt-3 text-3xl sm:text-4xl lg:text-5xl">
+          <h2 className="text-display mt-3 text-2xl sm:text-3xl lg:text-4xl">
             Built around how the pipeline actually works
           </h2>
         </Reveal>

@@ -284,7 +284,7 @@ export function RunView({ runId }: { runId: string }) {
   const running = run.status === "running" || run.status === "regenerating";
 
   return (
-    <div className="flex flex-col gap-6 pb-4">
+    <div className="flex flex-col gap-5 pb-4">
       {/* The user's "message" — their prompt plus every option they picked. */}
       <UserMessage>
         <p className="leading-relaxed text-pretty">{run.prompt}</p>
@@ -366,7 +366,7 @@ export function RunView({ runId }: { runId: string }) {
       <AgentMessage label="Pipeline">
         {running && <NowRunning run={run} />}
         <Card>
-          <CardContent className="py-6">
+          <CardContent className="py-4">
             <StepTimeline run={run} />
           </CardContent>
         </Card>

@@ -38,7 +38,7 @@ export function HowItWorks() {
           <p className="text-brand text-sm font-semibold tracking-wide uppercase">
             How it works
           </p>
-          <h2 className="text-display mt-3 text-3xl sm:text-4xl lg:text-5xl">
+          <h2 className="text-display mt-3 text-2xl sm:text-3xl lg:text-4xl">
             From a single image to a finished ad in four moves
           </h2>
         </Reveal>
@@ -47,7 +47,7 @@ export function HowItWorks() {
           {STEPS.map((step) => (
             <RevealItem key={step.n}>
               <div className="group bg-card flex h-full gap-5 rounded-3xl border border-border/60 p-6 transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-brand/40 hover:shadow-[0_24px_60px_-24px_color-mix(in_oklch,var(--brand)_35%,transparent)]">
-                <span className="text-brand-gradient text-display text-5xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
+                <span className="text-brand-gradient text-display text-4xl leading-none tabular-nums transition-transform duration-300 group-hover:scale-105">
                   {step.n}
                 </span>
                 <div>

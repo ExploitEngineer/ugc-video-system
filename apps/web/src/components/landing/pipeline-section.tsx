@@ -28,7 +28,7 @@ export function PipelineSection() {
           <p className="text-brand text-sm font-semibold tracking-wide uppercase">
             The pipeline
           </p>
-          <h2 className="text-display mt-3 text-3xl sm:text-4xl lg:text-5xl">
+          <h2 className="text-display mt-3 text-2xl sm:text-3xl lg:text-4xl">
             Three stages, one cooperating crew of agents
           </h2>
           <p className="text-muted-foreground mt-4 text-pretty">

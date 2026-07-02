@@ -19,7 +19,7 @@ export function CtaBand() {
               className="pointer-events-none absolute -top-24 left-1/2 size-72 -translate-x-1/2 rounded-full bg-sheen blur-3xl"
             />
             <div aria-hidden className="noise-overlay absolute inset-0" />
-            <h2 className="text-display text-brand-foreground relative text-4xl sm:text-5xl">
+            <h2 className="text-display text-brand-foreground relative text-3xl sm:text-4xl">
               Make your first ad video
             </h2>
             <p className="text-brand-foreground/85 relative mx-auto mt-4 max-w-xl text-pretty">
@@ -30,7 +30,7 @@ export function CtaBand() {
             <div className="relative mt-9 flex justify-center">
               <Button
                 asChild
-                size="lg"
+                size="default"
                 variant="secondary"
                 className="group shadow-lg"
               >

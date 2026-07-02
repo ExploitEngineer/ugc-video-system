@@ -18,12 +18,12 @@ export function StudioIntro() {
 
   return (
     <>
-      <Reveal className="mb-8 text-center">
-        <span className="border-border/70 bg-background/60 text-muted-foreground mb-5 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium backdrop-blur">
+      <Reveal className="mb-6 text-center">
+        <span className="border-border/70 bg-background/60 text-muted-foreground mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium backdrop-blur">
           <SparklesIcon className="text-brand size-3.5" />
           Adverra Studio
         </span>
-        <h1 className="text-display text-4xl tracking-tight text-balance sm:text-5xl">
+        <h1 className="text-display text-3xl tracking-tight text-balance sm:text-4xl">
           Describe your <span className="text-brand-gradient">ad video</span>
         </h1>
         <p className="text-muted-foreground mx-auto mt-4 max-w-md text-pretty">
@@ -41,7 +41,7 @@ export function StudioIntro() {
         />
       </Reveal>
 
-      <Reveal delay={0.16} className="mt-7">
+      <Reveal delay={0.16} className="mt-6">
         <p className="text-muted-foreground mb-2.5 text-center text-xs font-medium">
           Need a starting point? Try one:
         </p>
