@@ -47,6 +47,13 @@ const MODE_LABEL: Record<Mode, string> = {
   confirm: "Step-by-step",
 };
 
+// Temporary UI locks while we tune 15s-clip quality. Every run is a single ~15s
+// automatic clip for now, so the duration + mode controls are HIDDEN (not
+// removed) — the toggles still exist and wire up. Flip a flag to bring one back
+// once 15s is solid. Aspect ratio + brand guidelines stay user-facing.
+const SHOW_DURATION_CONTROL = false;
+const SHOW_MODE_CONTROL = false;
+
 export function CreateRunForm({
   initialPrompt = "",
   autoFocus = false,
@@ -61,10 +68,10 @@ export function CreateRunForm({
   const [mode, setMode] = useState<Mode>("automatic");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [duration, setDuration] = useState<Duration>("15s");
-  // Auto-detect removed — the user always picks a type (the detector still infers
-  // adStyle + hooks). Default to testimonial (UGC review): product-optional +
-  // person synthesized, so it never blocks submit.
-  const [adType, setAdType] = useState<string>("service");
+  // Default to auto — the LLM detector selects the ad type from the prompt + the
+  // attached assets (product/person). A manual dropdown pick still overrides and
+  // LOCKS the type. "auto" never blocks submit (no product-required gate).
+  const [adType, setAdType] = useState<string>("auto");
   // Optional brand guidelines (tone, palette, wording) — injected into the prompts.
   const [brandText, setBrandText] = useState("");
   // Character On/Off toggle (Chunk 4) — whether a main on-screen character is
@@ -90,8 +97,13 @@ export function CreateRunForm({
 
   // Reset the character toggle to the picked type's default when the type
   // changes (and once the menu first loads). A later manual toggle persists —
-  // this only refires when adType/adTypes change.
+  // this only refires when adType/adTypes change. In auto the flag isn't sent
+  // (the server derives it), so keep it on to expose the optional person upload.
   useEffect(() => {
+    if (adType === "auto") {
+      setCharacterEnabled(true);
+      return;
+    }
     const t = adTypes.find((o) => o.id === adType);
     if (t) setCharacterEnabled(t.characterDefault);
   }, [adType, adTypes]);
@@ -157,7 +169,10 @@ export function CreateRunForm({
     fd.set("aspectRatio", aspectRatio);
     fd.set("duration", duration);
     fd.set("adType", adType);
-    fd.set("characterEnabled", String(characterEnabled));
+    // Auto mode: omit the character flag so the server applies its default
+    // (character on — a person is synthesized when none is uploaded). A manual
+    // pick sends the toggle as chosen, honoring that type's default/override.
+    if (adType !== "auto") fd.set("characterEnabled", String(characterEnabled));
     if (brandText.trim()) fd.set("brandText", brandText.trim());
 
     startTransition(async () => {
@@ -443,15 +458,19 @@ function OptionsMenu({
         className="ring-glow w-80 rounded-2xl border-border/70 p-4"
       >
         <div className="flex flex-col gap-4">
-          <Field label="Duration">
-            <DurationToggle value={duration} onChange={onDuration} />
-          </Field>
+          {SHOW_DURATION_CONTROL && (
+            <Field label="Duration">
+              <DurationToggle value={duration} onChange={onDuration} />
+            </Field>
+          )}
           <Field label="Aspect ratio">
             <AspectRatioToggle value={aspectRatio} onChange={onAspect} />
           </Field>
-          <Field label="Mode">
-            <ModeToggle value={mode} onChange={onMode} />
-          </Field>
+          {SHOW_MODE_CONTROL && (
+            <Field label="Mode">
+              <ModeToggle value={mode} onChange={onMode} />
+            </Field>
+          )}
           <Field label="Brand guidelines">
             <textarea
               value={brandText}
@@ -485,10 +504,11 @@ function Field({
   );
 }
 
-/** Ad-type dropdown — the registry's types (no Auto-detect). The pick LOCKS the
- *  type for the run; the detector still infers adStyle + hooks. Themed shadcn
- *  DropdownMenu (not a native select) so the open list matches the dark theme;
- *  scrolls and scales cleanly from 2 to 16+ types. */
+/** Ad-type dropdown. Defaults to "Auto" — the detector picks the type from the
+ *  prompt + attached assets. Any manual pick LOCKS the type for the run (the
+ *  detector still infers adStyle + hooks). Themed shadcn DropdownMenu (not a
+ *  native select) so the open list matches the dark theme; scrolls and scales
+ *  cleanly from 2 to 16+ types. */
 function AdTypeSelect({
   value,
   onChange,
@@ -498,13 +518,16 @@ function AdTypeSelect({
   onChange: (t: string) => void;
   options: AdTypeMenuItem[];
 }) {
-  const label = options.find((o) => o.id === value)?.displayName ?? value;
+  const label =
+    value === "auto"
+      ? "Auto"
+      : (options.find((o) => o.id === value)?.displayName ?? value);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title="Pick the ad type to generate."
+          title="Ad type — Auto lets the AI pick from your prompt + uploads, or choose one to lock it."
           className="border-border/60 bg-background/40 text-foreground hover:border-brand/40 data-[state=open]:border-brand/50 inline-flex max-w-[12rem] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium outline-none transition-colors"
         >
           <span className="truncate">{label}</span>
@@ -514,9 +537,16 @@ function AdTypeSelect({
       <DropdownMenuContent
         align="start"
         sideOffset={6}
-        className="ring-glow max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-2xl border-border/70"
+        className="ring-glow max-h-64 min-w-[13rem] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto rounded-2xl border-border/70"
       >
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          <DropdownMenuRadioItem
+            value="auto"
+            title="Let the AI choose the ad type from your prompt and uploads."
+            className="text-xs"
+          >
+            Auto (let AI decide)
+          </DropdownMenuRadioItem>
           {options.map((o) => (
             <DropdownMenuRadioItem
               key={o.id}
