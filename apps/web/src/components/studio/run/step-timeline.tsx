@@ -110,6 +110,20 @@ function UpNextPill() {
   );
 }
 
+/**
+ * Pill for the merge step while the run is parked at the Plainly stage
+ * (`awaiting_edit`) — makes the pre-merge pause read as "waiting on you" with the
+ * choice rendered right below the timeline, instead of a dead "Ready to confirm".
+ */
+function PlainlyPausePill() {
+  return (
+    <span className="border-brand/40 bg-brand/10 text-brand inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium">
+      <PauseIcon className="size-2.5" />
+      Waiting on you — choose below
+    </span>
+  );
+}
+
 function Indicator({
   state,
   n,
@@ -247,6 +261,9 @@ export function StepTimeline({ run }: { run: RunDetail }) {
             ? `${run.stepEvents.filter((e) => e.step === "segment_video" && e.status === "passed").length}/${segmentCountFor(run.duration)}`
             : undefined;
         const last = i === order.length - 1;
+        // The merge step while parked at the Plainly stage — its pill points the
+        // user to the choice card rendered just below the timeline.
+        const plainlyPause = step === "merge" && run.status === "awaiting_edit";
         const dim = (state === "pending" || state === "skipped") && !upNext;
         const live =
           upNext ||
@@ -296,6 +313,8 @@ export function StepTimeline({ run }: { run: RunDetail }) {
                 </h3>
                 {upNext ? (
                   <UpNextPill />
+                ) : plainlyPause ? (
+                  <PlainlyPausePill />
                 ) : (
                   <StatusPill state={state} note={segNote} />
                 )}

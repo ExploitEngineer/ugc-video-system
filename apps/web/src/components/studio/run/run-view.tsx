@@ -388,6 +388,45 @@ export function RunView({ runId }: { runId: string }) {
         </Card>
       </AgentMessage>
 
+      {/* Agent — paused for the interactive Plainly stage. Rendered directly
+          under the pipeline so the choice sits beside the "Waiting on you" merge
+          row, not buried below the scene-script/segments galleries. */}
+      {run.status === "awaiting_edit" && (
+        <AgentMessage label="Customize with Plainly">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="border-brand/40 bg-brand/10 flex flex-col gap-3 rounded-xl border px-4 py-3.5"
+          >
+            <div className="flex items-start gap-2">
+              <Wand2Icon className="text-brand mt-0.5 size-4 shrink-0" />
+              <p className="text-foreground/90 text-sm leading-relaxed">
+                Your {segCount} clips are ready — this is the last step before
+                the merge. Brand any of them with ready-made templates (each
+                branded clip replaces that segment), then merge into your final
+                video. Or skip to merge the raw clips.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-6">
+              <Button asChild variant="brand" size="sm">
+                <Link href={`/studio/${run.id}/plainly`}>
+                  <Wand2Icon className="size-4" />
+                  Customize with Plainly
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => skipPlainlyMutation.mutate()}
+                disabled={skipPlainlyMutation.isPending}
+              >
+                Skip — merge the clips
+              </Button>
+            </div>
+          </motion.div>
+        </AgentMessage>
+      )}
+
       {/* Agent — the generated scene script, once it exists. */}
       {hasScript && (
         <AgentMessage label="Scene script">
@@ -431,43 +470,6 @@ export function RunView({ runId }: { runId: string }) {
               </div>
             </div>
           )}
-        </AgentMessage>
-      )}
-
-      {/* Agent — paused for the interactive Plainly stage (brand one clip). */}
-      {run.status === "awaiting_edit" && (
-        <AgentMessage label="Customize with Plainly">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="border-brand/40 bg-brand/10 flex flex-col gap-3 rounded-xl border px-4 py-3.5"
-          >
-            <div className="flex items-start gap-2">
-              <Wand2Icon className="text-brand mt-0.5 size-4 shrink-0" />
-              <p className="text-foreground/90 text-sm leading-relaxed">
-                Your {segCount} clips are ready. Brand any of them with
-                ready-made templates — each branded clip replaces that segment —
-                then merge them all into your final video. Or skip to merge the
-                raw clips.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 pl-6">
-              <Button asChild variant="brand" size="sm">
-                <Link href={`/studio/${run.id}/plainly`}>
-                  <Wand2Icon className="size-4" />
-                  Customize with Plainly
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => skipPlainlyMutation.mutate()}
-                disabled={skipPlainlyMutation.isPending}
-              >
-                Skip — merge the clips
-              </Button>
-            </div>
-          </motion.div>
         </AgentMessage>
       )}
 
