@@ -16,6 +16,7 @@ import {
   RectangleHorizontalIcon,
   RectangleVerticalIcon,
   SlidersHorizontalIcon,
+  UploadIcon,
   UserIcon,
   Wand2Icon,
   XIcon,
@@ -36,7 +37,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createRun, fetchAdTypes, fetchPlainlyConfig } from "@/lib/api";
+import {
+  createRun,
+  fetchAdTypes,
+  fetchPlainlyConfig,
+  parseBrandFile,
+} from "@/lib/api";
 import { addRun } from "@/lib/run-history";
 import { cn } from "@/lib/utils";
 
@@ -445,6 +451,28 @@ function OptionsMenu({
   brandText: string;
   onBrandText: (v: string) => void;
 }) {
+  const brandFileRef = useRef<HTMLInputElement>(null);
+  const [parsingBrand, setParsingBrand] = useState(false);
+  const [brandError, setBrandError] = useState<string | null>(null);
+
+  async function handleBrandFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the user re-pick the same file
+    if (!file) return;
+    setBrandError(null);
+    setParsingBrand(true);
+    try {
+      const { brandText: brief } = await parseBrandFile(file);
+      onBrandText(brief);
+    } catch (err) {
+      setBrandError(
+        err instanceof Error ? err.message : "Couldn't read that file.",
+      );
+    } finally {
+      setParsingBrand(false);
+    }
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -473,18 +501,48 @@ function OptionsMenu({
             <ModeToggle value={mode} onChange={onMode} />
           </Field>
           <Field label="Brand guidelines">
-            <div className="relative">
-              <textarea
-                value={brandText}
-                onChange={(e) => onBrandText(e.target.value)}
-                rows={3}
-                maxLength={BRAND_MAX}
-                placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
-                className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 pb-5 text-xs outline-none"
-              />
-              <span className="text-muted-foreground/60 pointer-events-none absolute right-2 bottom-1.5 font-mono text-[10px] tabular-nums">
-                {brandText.length}/{BRAND_MAX}
-              </span>
+            <div className="flex flex-col gap-1.5">
+              <div className="relative">
+                <textarea
+                  value={brandText}
+                  onChange={(e) => onBrandText(e.target.value)}
+                  rows={3}
+                  maxLength={BRAND_MAX}
+                  placeholder="Optional — tone, colours, words to use/avoid, do/don'ts…"
+                  className="border-border/60 bg-background/40 text-foreground placeholder:text-muted-foreground/60 focus:border-brand/50 w-full resize-none rounded-xl border px-3 py-2 pb-5 text-xs outline-none"
+                />
+                <span className="text-muted-foreground/60 pointer-events-none absolute right-2 bottom-1.5 font-mono text-[10px] tabular-nums">
+                  {brandText.length}/{BRAND_MAX}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={brandFileRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  onChange={handleBrandFile}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={parsingBrand}
+                  onClick={() => brandFileRef.current?.click()}
+                  className="border-border/60 bg-background/40 text-muted-foreground hover:border-brand/40 hover:text-foreground inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60"
+                >
+                  {parsingBrand ? (
+                    <Loader2Icon className="size-3 animate-spin" />
+                  ) : (
+                    <UploadIcon className="size-3" />
+                  )}
+                  {parsingBrand ? "Reading…" : "Upload file"}
+                </button>
+                <span className="text-muted-foreground/50 text-[10px]">
+                  PDF, .txt, .md — summarized for you
+                </span>
+              </div>
+              {brandError && (
+                <p className="text-destructive text-[11px]">{brandError}</p>
+              )}
             </div>
           </Field>
         </div>

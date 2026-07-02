@@ -11,6 +11,7 @@ import {
   createPlainlyProvider,
   isPlainlyConfigured,
 } from "./providers/plainly/index.js";
+import { brand } from "./routes/brand.js";
 import { runs } from "./routes/runs.js";
 
 export function createApp() {
@@ -62,6 +63,7 @@ export function createApp() {
   );
 
   app.route("/runs", runs);
+  app.route("/brand", brand);
 
   app.notFound((c) => c.json({ error: "Not found" }, 404));
   app.onError(onError);

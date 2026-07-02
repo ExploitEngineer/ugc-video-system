@@ -30,6 +30,26 @@ export async function createRun(formData: FormData): Promise<RunDetail> {
 }
 
 /**
+ * Upload a brand-guidelines file (PDF/.txt/.md) and get back a condensed,
+ * prompt-ready brief. The composer drops the result into the (editable) brand
+ * field. Throws with the API's message on failure.
+ */
+export async function parseBrandFile(
+  file: File,
+): Promise<{ brandText: string }> {
+  const fd = new FormData();
+  fd.set("file", file);
+  const res = await fetch("/api/brand/parse", { method: "POST", body: fd });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Couldn't read that brand file.");
+  }
+  return res.json() as Promise<{ brandText: string }>;
+}
+
+/**
  * The ad-type menu for the create-form dropdown (Chunk J), via the Next proxy
  * (`/api/ad-types`). Registry-driven on the API, so it grows as new types land.
  * Returns `[]` on failure so the form falls back to Auto-detect only.
