@@ -7,13 +7,34 @@ import { createLogger } from "./lib/log.js";
 
 const log = createLogger("server");
 
-try {
-  await migrate();
-} catch (err) {
-  log.error("migrations failed, aborting startup", {
-    err: err instanceof Error ? err.message : String(err),
-  });
-  process.exit(1);
+if (env.DB_MIGRATE_ON_BOOT) {
+  try {
+    await migrate();
+  } catch (err) {
+    // drizzle wraps the failing statement as "Failed query: …" and hides the
+    // real Postgres error (permission denied / read-only / pooler can't DDL) on
+    // `err.cause`. Surface its fields so the deploy log is actually diagnosable.
+    const cause = (err as { cause?: Record<string, string | undefined> })
+      .cause;
+    log.error("migrations failed, aborting startup", {
+      err: err instanceof Error ? err.message : String(err),
+      ...(cause && typeof cause === "object"
+        ? {
+            pgMessage: cause.message,
+            pgCode: cause.code,
+            pgDetail: cause.detail,
+            pgHint: cause.hint,
+            pgSeverity: cause.severity,
+            pgRoutine: cause.routine,
+          }
+        : {}),
+    });
+    process.exit(1);
+  }
+} else {
+  log.warn(
+    "DB_MIGRATE_ON_BOOT=false — skipping startup migrations; apply them out-of-band (pnpm --filter api db:migrate via a direct/session connection)",
+  );
 }
 
 const app = createApp();
