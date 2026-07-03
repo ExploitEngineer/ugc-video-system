@@ -26,22 +26,16 @@ const ugc_authentic: LookStrategy = {
   // VERBATIM-MOVE: image/storyboard/prompt.ts `keyframeLook` (adType === "ugc").
   keyframeLook: (_ctx: FragmentCtx): string[] => [
     "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-    "  a glossy studio commercial: natural / available light from real windows",
-    "  or lamps, a real lived-in everyday setting with ordinary background",
-    "  detail, candid handheld-style framing, the person relaxed and real",
-    "  (talking to camera where it fits) with TRUE skin texture — visible pores,",
-    "  fine lines, natural hair flyaways, NOT smoothed, waxy, airbrushed or an",
-    "  uncanny AI face. Keep product/person IDENTITY faithful to the reference",
-    "  sheets — only lighting, setting and framing read as real UGC, never",
-    "  plastic, never over-polished, no glossy magazine retouch or HDR sheen.",
-    "  Neutral 5500-6000K white balance, true-to-life colour, NO warm / sepia /",
-    "  orange cast. Every panel must look indistinguishable from a real candid",
-    "  phone photo — never a 3D render, a glossy commercial or a polished AI portrait.",
+    "  a glossy studio commercial: natural / available light from real windows or",
+    "  lamps, a real lived-in everyday setting with ordinary background detail,",
+    "  candid handheld-style framing, the person relaxed and real (talking to",
+    "  camera where it fits). Keep product/person IDENTITY faithful to the",
+    "  reference sheets — only lighting, setting and framing read as real UGC.",
+    "  Neutral 5500-6000K white balance, true-to-life colour, no warm/sepia/orange cast.",
     "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
     "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
-    "  natural oil sheen on the high points, faint 35mm film grain — and NO beauty",
-    "  filter, NO AI glow, NO porcelain finish, NO over-smoothing, NO perfect",
-    "  symmetry, NO toothpaste-ad teeth.",
+    "  natural oil sheen on the high points, faint 35mm film grain — a real candid",
+    "  phone photo, NOT a smoothed/waxy/airbrushed uncanny AI face or 3D render.",
   ],
   // No legacy inline ternary for these seams → [] keeps the legacy path identical.
   shotDirection: (_ctx) => [],
@@ -59,15 +53,12 @@ const cinematic_polished: LookStrategy = {
     "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
     "  intentional lighting, rich colour and depth, shallow depth of field, a still",
     "  lifted straight from a high-end commercial. Keep skin and faces PHOTOGRAPHIC",
-    "  with real texture (visible pores, fine lines) — never waxy, plastic, smoothed",
-    "  or over-retouched, never an uncanny AI face. True-to-life colour and a",
-    "  neutral white balance — no heavy warm / sepia / orange cast. It must read as",
-    "  a real photographed frame, not a 3D render or a glossy AI portrait.",
+    "  with real texture. True-to-life colour and a neutral white balance — no",
+    "  heavy warm/sepia/orange cast.",
     "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
     "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
-    "  natural oil sheen on the high points, faint 35mm film grain — and NO beauty",
-    "  filter, NO AI glow, NO porcelain finish, NO over-smoothing, NO perfect",
-    "  symmetry, NO toothpaste-ad teeth.",
+    "  natural oil sheen on the high points, faint 35mm film grain — a real",
+    "  photographed frame, NOT a waxy/plastic/over-retouched AI portrait or 3D render.",
   ],
   shotDirection: (_ctx) => [
     "- Vary the framing across panels for cinematic rhythm — mix WIDE, MEDIUM,",
@@ -145,12 +136,15 @@ export function videoNegatives(family: LookFamily): string {
   // SHORT, positive-leaning tails (Seedance ignores long prompts and a 2×2 grid
   // named repeatedly only PRIMES it to render the grid). ONE "full-frame scene"
   // cue per look does the anti-grid work without re-describing the layout.
+  // Positive-rigidity LEAD (Seedance follows positive constraints more reliably
+  // than failure-naming) + a SHORT per-look failure tail (2–3 terms) for the
+  // failures actually seen in that look — per the seedance-2.0-prompting skill.
   switch (family) {
     case "demo_clean":
-      return "ONE product, fixed shape and markings every frame — no morph, duplicate or garbled label; smooth stable motion; one full-frame scene.";
+      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; one continuous full-frame scene. No morphing product, no garbled label, no jitter.";
     case "ugc_authentic":
-      return "ONE real person and ONE product, consistent every frame; natural stable motion, no warped or extra hands; one full-frame scene, no on-screen text.";
+      return "One real person and one product, identity constant every frame, with natural well-formed hands; stable handheld motion; one continuous full-frame scene. No music, no on-screen text, no warped hands.";
     case "cinematic_polished":
-      return "ONE consistent face and product, stable every frame; smooth motion, no identity drift or warping; one full-frame scene, no on-screen text.";
+      return "One consistent face and product, identity constant and stable every frame; smooth motion; one continuous full-frame scene. No identity drift, no on-screen text, no warped face.";
   }
 }

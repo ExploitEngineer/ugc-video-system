@@ -18,8 +18,11 @@ import { createLogger } from "../../lib/log.js";
 import {
   DEFAULT_CHAT_MAX_TOKENS,
   DEFAULT_IMAGE_SIZE,
+  IMAGE_SIZE_FALLBACK,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
+  OPENAI_IMAGE_OUTPUT_COMPRESSION,
+  OPENAI_IMAGE_OUTPUT_FORMAT,
   OPENROUTER_BASE_URL,
   OPENROUTER_CLAUDE_MODEL,
 } from "./constants.js";
@@ -44,6 +47,14 @@ export interface GenerateImageInput {
    * `"high"` — every sheet in this pipeline carries product markings or a face.
    */
   quality?: "low" | "medium" | "high" | "auto";
+  /**
+   * Output encoding. Defaults to WebP q100 — near-lossless but small enough that
+   * 4K sheets don't truncate the base64 response (4K-PNG did). gpt-image-2 has no
+   * `input_fidelity` knob (locked high), so this is the only output-side lever.
+   */
+  outputFormat?: "png" | "webp" | "jpeg";
+  /** WebP/JPEG quality 0–100 (ignored for PNG). Defaults to 100. */
+  outputCompression?: number;
 }
 
 export interface GenerateImageResult {
@@ -98,9 +109,9 @@ function getClient(): OpenAI {
       // Image generation is slow and returns multi-MB bodies; give it room and
       // let the SDK retry connection-level failures. (A post-200 truncated-body
       // parse error is NOT retried by the SDK — generateImage handles that.)
-      // 240s: a complex full-body person sheet can legitimately run >120s, so a
-      // tight timeout forced a wasteful regen instead of letting it finish.
-      timeout: 240_000,
+      // 300s: at 4K a complex full-body / storyboard sheet can run ~150–220s, so
+      // a tight timeout would force a wasteful regen instead of letting it finish.
+      timeout: 300_000,
       // The SDK auto-retries connection errors + 429/5xx on chat/image calls;
       // give it more headroom so the parallel 60s fan-outs survive provider
       // overload without surfacing a transient failure to the orchestrator.
@@ -137,6 +148,20 @@ const IMAGE_MAX_ATTEMPTS = 5;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Does an image-gen failure look attributable to the requested SIZE (base64
+ * truncation, a too-large / >2560×1440 "experimental" resolution) rather than a
+ * transient network/429? Size failures won't clear on retry at the same size, so
+ * `generateImage` steps DOWN the fallback ladder instead. Matched loosely — a
+ * false positive just yields a smaller-but-valid image. "Missing image data" is
+ * the truncation symptom (the SDK's response.json() dropped the base64 body).
+ */
+function isSizeAttributableImageError(msg: string): boolean {
+  return /missing image data|unterminated|json|too large|too_large|413|payload too|dimension|resolution|experimental|invalid.*size|size.*invalid/i.test(
+    msg,
+  );
+}
+
 // Formats both Anthropic vision (Claude via OpenRouter) and OpenAI images.edit
 // accept directly. AVIF/HEIC are NOT accepted by Anthropic → transcode to PNG.
 const API_SAFE_IMAGE_MIMES = new Set([
@@ -154,20 +179,44 @@ const API_SAFE_IMAGE_MIMES = new Set([
  * error" with the real cause hidden inside OpenRouter.
  */
 function sniffImageMime(b: Uint8Array, fallback: string): string {
-  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)
+  if (
+    b.length >= 4 &&
+    b[0] === 0x89 &&
+    b[1] === 0x50 &&
+    b[2] === 0x4e &&
+    b[3] === 0x47
+  )
     return "image/png";
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
     return "image/jpeg";
   if (
     b.length >= 12 &&
-    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && // "RIFF"
-    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 // "WEBP"
+    b[0] === 0x52 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x46 && // "RIFF"
+    b[8] === 0x57 &&
+    b[9] === 0x45 &&
+    b[10] === 0x42 &&
+    b[11] === 0x50 // "WEBP"
   )
     return "image/webp";
-  if (b.length >= 4 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38)
+  if (
+    b.length >= 4 &&
+    b[0] === 0x47 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x38
+  )
     return "image/gif";
   // ISO-BMFF `ftyp` box (AVIF / HEIC): bytes 4-7 = "ftyp", 8-11 = brand.
-  if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+  if (
+    b.length >= 12 &&
+    b[4] === 0x66 &&
+    b[5] === 0x74 &&
+    b[6] === 0x79 &&
+    b[7] === 0x70
+  ) {
     const brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
     if (brand === "avif" || brand === "avis") return "image/avif";
     if (brand.startsWith("hei") || brand === "mif1" || brand === "msf1")
@@ -200,9 +249,13 @@ async function normalizeImageBytes(
  */
 async function imageRefToDataUri(ref: ImageRef): Promise<string> {
   if (ref.source.startsWith("data:")) return ref.source;
-  const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
+  const res = await fetchWithRetry(ref.source, undefined, {
+    label: "ref-image",
+  });
   if (!res.ok) {
-    throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
+    throw internal(
+      `Failed to fetch reference image (${res.status}): ${ref.source}`,
+    );
   }
   const declared = ref.mime ?? res.headers.get("content-type") ?? "image/png";
   const { bytes, mime } = await normalizeImageBytes(
@@ -213,7 +266,9 @@ async function imageRefToDataUri(ref: ImageRef): Promise<string> {
 }
 
 /** Map our `ChatMessage` (+ optional images) to the SDK's message shape. */
-async function toChatMessage(m: ChatMessage): Promise<ChatCompletionMessageParam> {
+async function toChatMessage(
+  m: ChatMessage,
+): Promise<ChatCompletionMessageParam> {
   if (!m.images?.length) {
     return { role: m.role, content: m.content };
   }
@@ -234,9 +289,13 @@ async function toChatMessage(m: ChatMessage): Promise<ChatCompletionMessageParam
 
 /** Fetch an `ImageRef` (URL or data URI) into an Uploadable file for edits. */
 async function imageRefToFile(ref: ImageRef): Promise<File> {
-  const res = await fetchWithRetry(ref.source, undefined, { label: "ref-image" });
+  const res = await fetchWithRetry(ref.source, undefined, {
+    label: "ref-image",
+  });
   if (!res.ok) {
-    throw internal(`Failed to fetch reference image (${res.status}): ${ref.source}`);
+    throw internal(
+      `Failed to fetch reference image (${res.status}): ${ref.source}`,
+    );
   }
   const declared = ref.mime ?? res.headers.get("content-type") ?? "image/png";
   const { bytes, mime } = await normalizeImageBytes(
@@ -313,18 +372,26 @@ export function createOpenAIProvider(): OpenAIProvider {
     },
 
     async generateImage(input) {
-      const size = input.size ?? DEFAULT_IMAGE_SIZE;
+      let size = input.size ?? DEFAULT_IMAGE_SIZE;
       const quality = input.quality ?? "high";
+      const outputFormat = input.outputFormat ?? OPENAI_IMAGE_OUTPUT_FORMAT;
+      const outputCompression =
+        input.outputCompression ?? OPENAI_IMAGE_OUTPUT_COMPRESSION;
+      const outMime =
+        outputFormat === "jpeg" ? "image/jpeg" : `image/${outputFormat}`;
       const mode = input.refs?.length ? "edit" : "generate";
       // Pre-fetch the reference files ONCE (not per attempt).
       const refFiles = input.refs?.length
         ? await Promise.all(input.refs.map(imageRefToFile))
         : null;
 
-      // Retry transient failures: the model returns the PNG as a multi-MB base64
-      // body whose HTTP response occasionally truncates → the SDK's internal
+      // Retry transient failures: the model returns the image as a multi-MB
+      // base64 body whose HTTP response can truncate → the SDK's internal
       // response.json() throws "Unterminated string in JSON" (not auto-retried,
       // since the request reached 200). Also covers network drops / empty data.
+      // A SIZE-attributable failure (truncation / too-large / >2560×1440
+      // "experimental") steps DOWN the fallback ladder instead of retrying the
+      // same doomed size — so 4K degrades to 2560×1440 → 2K rather than failing.
       let lastErr: unknown;
       for (let attempt = 1; attempt <= IMAGE_MAX_ATTEMPTS; attempt++) {
         const t0 = Date.now();
@@ -334,35 +401,58 @@ export function createOpenAIProvider(): OpenAIProvider {
           refs: input.refs?.length ?? 0,
           size,
           quality,
+          outputFormat,
           attempt,
         });
         try {
+          // Shared params; `output_compression` is only valid for webp/jpeg.
+          const baseParams = {
+            model: OPENAI_IMAGE_MODEL,
+            prompt: input.prompt,
+            size,
+            quality,
+            output_format: outputFormat,
+            ...(outputFormat === "png"
+              ? {}
+              : { output_compression: outputCompression }),
+          };
           const result = refFiles
             ? await getClient().images.edit({
-                model: OPENAI_IMAGE_MODEL,
+                ...baseParams,
                 image: refFiles,
-                prompt: input.prompt,
-                size: size as never,
-                quality: quality as never,
-              })
-            : await getClient().images.generate({
-                model: OPENAI_IMAGE_MODEL,
-                prompt: input.prompt,
-                size: size as never,
-                quality: quality as never,
-              });
+              } as never)
+            : await getClient().images.generate(baseParams as never);
 
           const b64 = result.data?.[0]?.b64_json;
           if (!b64) throw internal("OpenAI image response missing image data.");
-          log.debug("image ✓", { ms: Date.now() - t0, mode, attempt });
+          log.debug("image ✓", { ms: Date.now() - t0, mode, attempt, size });
           return {
             bytes: new Uint8Array(Buffer.from(b64, "base64")),
-            mime: "image/png",
+            mime: outMime,
           };
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
-          log.warn("image retry", { attempt, mode, ms: Date.now() - t0, err: msg });
+          // Step down a resolution tier on a size-attributable failure (retrying
+          // the same 4K size would just truncate again); otherwise retry as-is.
+          const smaller = isSizeAttributableImageError(msg)
+            ? IMAGE_SIZE_FALLBACK[size]
+            : undefined;
+          if (smaller) {
+            log.warn("image size fallback", {
+              from: size,
+              to: smaller,
+              attempt,
+            });
+            size = smaller;
+          } else {
+            log.warn("image retry", {
+              attempt,
+              mode,
+              ms: Date.now() - t0,
+              err: msg,
+            });
+          }
           // Capped exponential backoff + jitter (~2s, 4s, 8s, 12s): give a
           // truncating proxy / flaky connection time to clear, and keep the
           // parallel product+person sheet retries from thundering in lockstep.

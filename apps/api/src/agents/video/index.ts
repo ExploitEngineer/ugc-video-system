@@ -76,6 +76,15 @@ export interface VideoBuilderInput {
 
 const DEFAULT_DURATION_SEC = 15;
 
+/**
+ * Hard ceiling for downloading the finished mp4 from the provider CDN. The
+ * clip is small (~a few MB at 1080p/15s), so 120s is generous — its job is to
+ * turn a SILENTLY-stalled connection (opens, then never sends bytes) into a
+ * clean abort→retry→error instead of an eternal spinner, since the fetch/body
+ * read otherwise has no timeout.
+ */
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
+
 type Video = typeof schema.videos.$inferSelect;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -96,15 +105,16 @@ function stableSeed(s: string): number {
 }
 
 /**
- * Make a person-reference URL safe for BytePlus `CreateAsset`, which rejects
- * aspect ratios outside 0.4–2.5. Generated sheets/strips (which skip the upload
- * normalizer) occasionally drift out of band → `AspectRatioTooSmall/Large` and
- * the whole run fails before it even starts rendering. Pad a PROVIDER-ONLY copy
- * when needed (the stored original — reused as an OpenAI reference + shown in the
- * UI — stays untouched); in-band images and any fetch/encode hiccup fall back to
- * the original URL unchanged.
+ * Make a Seedance-bound reference URL provider-safe: (1) transcode to JPEG — 4K
+ * sheets are now WebP, which BytePlus `CreateAsset` rejects; (2) pad aspect
+ * ratios outside 0.4–2.5 into band — generated sheets/strips (which skip the
+ * upload normalizer) occasionally drift out and fail the run with
+ * `AspectRatioTooSmall/Large`. Upload a PROVIDER-ONLY copy when either applies
+ * (the stored original — reused as an OpenAI reference + shown in the UI — stays
+ * untouched, small WebP); an already-JPEG in-band ref and any fetch/encode
+ * hiccup fall back to the original URL unchanged.
  */
-async function providerSafeFaceUrl(
+async function providerSafeRefUrl(
   url: string,
   runId: string,
   kind: AssetKind,
@@ -115,20 +125,22 @@ async function providerSafeFaceUrl(
     if (!res.ok) return url;
     const bytes = new Uint8Array(await res.arrayBuffer());
     const mime = res.headers.get("content-type") ?? "image/png";
-    const norm = await padToProviderAspect(bytes, mime);
+    // forceJpeg: WebP sheets must become JPEG for CreateAsset (+ some content
+    // image_url paths); padToProviderAspect also fixes any out-of-band aspect.
+    const norm = await padToProviderAspect(bytes, mime, { forceJpeg: true });
     if (!norm.adjusted) return url;
-    const { url: paddedUrl } = await uploadAsset({
+    const { url: safeUrl } = await uploadAsset({
       runId,
       kind,
       bytes: norm.bytes,
       contentType: norm.mime,
     });
-    log.info("padded face ref into provider aspect band", { kind });
-    return paddedUrl;
+    log.info("uploaded provider-safe (jpeg) ref copy", { kind });
+    return safeUrl;
   } catch (err) {
     // Never let a normalization hiccup mask the real generation — fall back to
     // the raw URL and let CreateAsset speak if it's genuinely out of band.
-    log.warn("face-ref aspect normalization skipped", {
+    log.warn("provider-safe ref normalization skipped", {
       kind,
       err: err instanceof Error ? err.message : String(err),
     });
@@ -271,30 +283,36 @@ export async function videoBuilder(
     // provider copy first so a stray generated dimension can't fail the run.
     // Order + count are preserved, so the @Image legend below stays correct.
     const lookFamily = getAdType(ctx.adType).lookFamily;
-    referenceImages = productUrl ? [productUrl] : [];
+    referenceImages = productUrl
+      ? [await providerSafeRefUrl(productUrl, ctx.runId, "product_sheet", log)]
+      : [];
     personReferences = [];
     personReferences.push(
-      await providerSafeFaceUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
+      await providerSafeRefUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
     );
     if (faceUrl) {
       personReferences.push(
-        await providerSafeFaceUrl(faceUrl, ctx.runId, "person_sheet", log),
+        await providerSafeRefUrl(faceUrl, ctx.runId, "person_sheet", log),
       );
     }
 
+    // Compact @Image legend prepended to the Seedance prompt (deterministic, so
+    // the numbers can never drift from the submit order). Kept terse — the
+    // anti-grid / one-continuous-scene rule lives ONCE in `renderDirective` below
+    // (it was previously restated here too), so beat content sits nearer the front.
     const boardNo = productUrl ? 2 : 1;
     const roles: string[] = [];
     if (productUrl) {
       roles.push(
-        "@Image1 (the product) locks the product's exact identity, shape, colour, finish and markings — keep the product visually identical to it in every beat",
+        "@Image1 (the product) — keep its exact identity, shape, colour, finish and markings in every beat",
       );
     }
     roles.push(
-      `@Image${boardNo} (the storyboard) is a STYLE and FRAMING reference only — match its look, identity and shot order, but render ONE continuous full-frame scene, never its panel layout`,
+      `@Image${boardNo} (the storyboard) — match its look, identity and shot order`,
     );
     if (faceUrl) {
       roles.push(
-        `@Image${boardNo + 1} (the on-screen face) is the presenter — keep this exact face and identity for the entire shot`,
+        `@Image${boardNo + 1} (the on-screen face) — keep this exact face and identity throughout`,
       );
     }
     // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
@@ -317,7 +335,7 @@ export async function videoBuilder(
       : videoNegatives(lookFamily);
     const renderDirective = isService
       ? "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene — each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels."
-      : "Render ONE continuous live-action take — a single scene that FILLS the whole frame the entire time; match the board's framing and identity, never its panel grid or labels.";
+      : "Render ONE continuous live-action take that fills the whole frame the entire time — match the board's framing and identity, never its panel grid, badges or labels.";
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
     prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
 
@@ -410,29 +428,47 @@ export async function videoBuilder(
 
     // 4. Download the mp4. Pass any auth headers the provider supplied
     // (Seedance's video_url is directly fetchable, so this is usually empty).
-    // Retry transient network blips so a flaky download doesn't waste the
-    // already-generated (paid) clip.
-    let res: Response | undefined;
+    // A single AbortController per attempt bounds BOTH the fetch AND the body
+    // read (arrayBuffer) — otherwise a connection that opens then never sends
+    // hangs the run forever with no error (the retry only caught THROWN errors,
+    // not a silent stall). Retry transient blips so a flaky download doesn't
+    // waste the already-generated (paid) clip.
+    log.info("downloading video", { taskId: task.taskId });
+    let bytes: Uint8Array | undefined;
     let lastErr = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
       try {
-        res = await fetch(result.videoUrl, { headers: result.downloadHeaders });
+        const res = await fetch(result.videoUrl, {
+          headers: result.downloadHeaders,
+          signal: ac.signal,
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        bytes = new Uint8Array(await res.arrayBuffer());
         break;
       } catch (err) {
         const cause = (err as { cause?: { code?: string; message?: string } })
           .cause;
-        lastErr = cause?.code ?? cause?.message ?? (err as Error).message;
+        lastErr =
+          (err as Error)?.name === "AbortError"
+            ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
+            : (cause?.code ?? cause?.message ?? (err as Error).message);
+        log.warn("video download retry", { attempt, err: lastErr });
         if (attempt < 3) await sleep(800 * attempt);
+      } finally {
+        clearTimeout(timer);
       }
     }
-    if (!res) throw new Error(`failed to download video: ${lastErr}`);
-    if (!res.ok) {
-      throw new Error(`failed to download video: ${res.status}`);
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
+    log.info("✓ video downloaded", {
+      taskId: task.taskId,
+      bytes: bytes.length,
+    });
     const hasAudio = result.hasAudio ?? true;
 
     // 5. Persist: Storage → assets (final_video) → videos row, in one tx.
+    log.info("uploading video to storage", { bytes: bytes.length });
     const persisted = await persistSheet<Video>({
       runId: ctx.runId,
       kind: assetKind,

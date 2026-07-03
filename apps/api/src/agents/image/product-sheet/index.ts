@@ -75,7 +75,7 @@ export async function productSheetBuilder(
   // and video defer to it for exact hues). gpt-image-2's warm/orange cast would
   // otherwise bake a false tint into that authority, so neutralize it here too —
   // the SAME capped ±8% gray-world correction the storyboard sheet already gets.
-  // PNG-preserving and best-effort (returns input unchanged on any failure), so
+  // WebP-preserving and best-effort (returns input unchanged on any failure), so
   // it never blocks the run; the white studio sweep makes gray-world ideal here.
   const bytes = await neutralizeCast(rawBytes);
   log.debug("✓ image generated", { bytes: bytes.length, mime });

@@ -7,9 +7,10 @@
 // a legitimately colourful or warm-lit scene (or a coloured product) can't be
 // wrecked; it only pulls out an egregious global cast.
 //
-// Pure bytes-in / bytes-out (sharp), re-encoded as PNG to keep the pipeline's
-// image format (BytePlus CreateAsset, which the storyboard now rides for the
-// video step, rejects WebP). Best-effort: any failure returns the input
+// Pure bytes-in / bytes-out (sharp), re-encoded WebP q100 to match the pipeline's
+// 4K image format. (Seedance/CreateAsset reject WebP, but that is handled at the
+// provider boundary — every Seedance-bound ref is transcoded to JPEG there, so
+// the stored sheet stays small WebP.) Best-effort: any failure returns the input
 // unchanged — colour correction never blocks a run.
 
 import sharp from "sharp";
@@ -24,7 +25,7 @@ const clampGain = (g: number) => Math.min(MAX_GAIN, Math.max(MIN_GAIN, g));
 
 /**
  * Mildly neutralize a global colour cast (chiefly the gpt-image warm bias) on a
- * generated sheet. Returns corrected PNG bytes, or the input unchanged when the
+ * generated sheet. Returns corrected WebP bytes, or the input unchanged when the
  * correction is negligible or anything fails.
  */
 export async function neutralizeCast(bytes: Uint8Array): Promise<Uint8Array> {
@@ -45,7 +46,7 @@ export async function neutralizeCast(bytes: Uint8Array): Promise<Uint8Array> {
     const out = await sharp(Buffer.from(bytes))
       .removeAlpha() // sheets are opaque; guarantees 3 channels for .linear
       .linear(gains, [0, 0, 0])
-      .png()
+      .webp({ quality: 100 })
       .toBuffer();
     log.debug("✓ neutralized cast", {
       gains: gains.map((x) => x.toFixed(3)).join(","),
