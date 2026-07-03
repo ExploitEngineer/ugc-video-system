@@ -136,12 +136,15 @@ export function videoNegatives(family: LookFamily): string {
   // SHORT, positive-leaning tails (Seedance ignores long prompts and a 2×2 grid
   // named repeatedly only PRIMES it to render the grid). ONE "full-frame scene"
   // cue per look does the anti-grid work without re-describing the layout.
+  // Positive-rigidity LEAD (Seedance follows positive constraints more reliably
+  // than failure-naming) + a SHORT per-look failure tail (2–3 terms) for the
+  // failures actually seen in that look — per the seedance-2.0-prompting skill.
   switch (family) {
     case "demo_clean":
-      return "ONE product, fixed shape and markings every frame — no morph, duplicate or garbled label; smooth stable motion; one full-frame scene.";
+      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; one continuous full-frame scene. No morphing product, no garbled label, no jitter.";
     case "ugc_authentic":
-      return "ONE real person and ONE product, consistent every frame; natural stable motion, no warped or extra hands; one full-frame scene, no on-screen text.";
+      return "One real person and one product, identity constant every frame, with natural well-formed hands; stable handheld motion; one continuous full-frame scene. No music, no on-screen text, no warped hands.";
     case "cinematic_polished":
-      return "ONE consistent face and product, stable every frame; smooth motion, no identity drift or warping; one full-frame scene, no on-screen text.";
+      return "One consistent face and product, identity constant and stable every frame; smooth motion; one continuous full-frame scene. No identity drift, no on-screen text, no warped face.";
   }
 }
