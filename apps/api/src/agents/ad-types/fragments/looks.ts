@@ -141,10 +141,10 @@ export function videoNegatives(family: LookFamily): string {
   // failures actually seen in that look — per the seedance-2.0-prompting skill.
   switch (family) {
     case "demo_clean":
-      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; one continuous full-frame scene. No morphing product, no garbled label, no jitter.";
+      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; each frame is one full-frame scene. No morphing product, no garbled label, no jitter.";
     case "ugc_authentic":
       return "One real person and one product, identity constant every frame, with natural well-formed hands; stable handheld motion; one continuous full-frame scene. No music, no on-screen text, no warped hands.";
     case "cinematic_polished":
-      return "One consistent face and product, identity constant and stable every frame; smooth motion; one continuous full-frame scene. No identity drift, no on-screen text, no warped face.";
+      return "One consistent face and product, identity constant and stable every frame; smooth motion; each frame is one full-frame scene. No identity drift, no on-screen text, no warped face.";
   }
 }

@@ -11,7 +11,11 @@ import { type Logger, createLogger } from "../../lib/log.js";
 import { padToProviderAspect } from "../../lib/image/normalize.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
-import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
+import {
+  buildDeterministicVideoPrompt,
+  buildVideoPrompt,
+  videoRenderDirective,
+} from "./prompt.js";
 import { getAdType } from "../ad-types/registry.js";
 import { videoNegatives } from "../ad-types/fragments/looks.js";
 
@@ -333,9 +337,12 @@ export async function videoBuilder(
     const negatives = isService
       ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people); never render the sheet's badges, grid lines or caption bars."
       : videoNegatives(lookFamily);
-    const renderDirective = isService
-      ? "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene — each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels."
-      : "Render ONE continuous live-action take that fills the whole frame the entire time — match the board's framing and identity, never its panel grid, badges or labels.";
+    // Per-look render directive (single source of truth in ./prompt.js): service
+    // = skit cuts; cinematic_polished + demo_clean = clean cuts between beats
+    // (demo pins the product rigid); ugc_authentic = one continuous take. Kept in
+    // lockstep with buildVideoPrompt / buildDeterministicVideoPrompt so the
+    // composed prompt can never carry a cut-vs-continuous contradiction.
+    const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
     prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
 
