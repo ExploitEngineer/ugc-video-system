@@ -25,13 +25,14 @@ export const productDemo: AdTypeDef = {
       "The product is the subject and must be shown working; hands or a presenter may operate it but are not required.",
   },
   lookFamily: "demo_clean",
-  defaultHooks: ["problem-solution", "before-after"],
+  defaultHooks: ["before-after", "problem-solution"],
   allowedHooks: [
-    "problem-solution",
     "before-after",
+    "problem-solution",
     "striking-visual",
-    "pattern-interrupt",
     "curiosity-gap",
+    "question",
+    "pattern-interrupt",
   ],
   // The product is the hero; no on-screen character by default (the user can
   // turn one On to add a presenter).

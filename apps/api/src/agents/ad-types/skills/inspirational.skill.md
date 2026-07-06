@@ -37,9 +37,9 @@ founder telling their origin story → `founder-pov`.
 
 ## Favored hooks
 
-- **defaultHooks:** `curiosity-gap`, `pattern-interrupt`
-- **allowedHooks:** `curiosity-gap`, `pattern-interrupt`, `question`,
-  `relatable-scenario`, `bold-claim`
+- **defaultHooks:** `striking-visual`, `pattern-interrupt`
+- **allowedHooks:** `striking-visual`, `pattern-interrupt`, `curiosity-gap`,
+  `relatable-scenario`
 
 ## Look & treatment
 

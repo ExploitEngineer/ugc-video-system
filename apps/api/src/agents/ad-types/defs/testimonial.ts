@@ -24,14 +24,14 @@ export const testimonial: AdTypeDef = {
       "UGC reviews a real product: the person holds, shows or uses THIS product on camera, so a product image is mandatory; the credible human voice is mandatory too.",
   },
   lookFamily: "ugc_authentic",
-  defaultHooks: ["confession", "problem-solution"],
+  defaultHooks: ["confession", "relatable-scenario"],
   allowedHooks: [
     "confession",
-    "problem-solution",
     "relatable-scenario",
+    "problem-solution",
     "before-after",
+    "question",
     "curiosity-gap",
-    "striking-visual",
   ],
   // A UGC review is a person speaking to camera — a character leads by default.
   characterDefault: true,

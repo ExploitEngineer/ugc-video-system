@@ -71,6 +71,11 @@ export function resolveHooks(
   const canon = uniq(detected.flatMap(canonicalizeHookId));
   let ids = canon.filter((id) => hasHook(id) && allowed.has(id));
 
+  // a2. clash exclusion — a hook whose `fitsAdTypes.clashes` names THIS ad type
+  // can NEVER be selected (e.g. confession on a product-demo). Hard filter, not a
+  // score penalty, so a clashing hook is impossible, not merely unlikely.
+  ids = ids.filter((id) => !getHook(id).fitsAdTypes.clashes.includes(def.id));
+
   // b. asset guardrail
   ids = ids.filter((id) => {
     const h = getHook(id);
@@ -79,11 +84,17 @@ export function resolveHooks(
     return true;
   });
 
-  // precedence comparator (higher = better)
+  // precedence comparator (higher = better). The FIT signal (does this hook
+  // actually suit this ad type?) leads; the type default is only a small nudge
+  // (was +100, which drowned out everything) so the detector's per-prompt choice
+  // wins. `confidence` is a dormant seam — the detector emits no per-hook weight
+  // today, so `conf` is always {} in production.
   const score = (id: string): number => {
+    const fits = getHook(id).fitsAdTypes.good.includes(def.id);
     let s = 0;
-    if (isDefault.has(id)) s += 100; // prefer a default
-    s += (conf[id] ?? 0) * 10; // then confidence
+    if (fits) s += 40; // hook genuinely fits this ad type — the key signal
+    if (isDefault.has(id)) s += 20; // small nudge for the type's default
+    s += (conf[id] ?? 0) * 15; // per-hook detector confidence (dormant)
     if (hookDefaultRole(id) === "visual_lead") s += 1; // tie-break: visual-lead
     return s;
   };
