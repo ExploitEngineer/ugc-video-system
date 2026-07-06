@@ -9,6 +9,7 @@ import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { type Logger, createLogger } from "../../lib/log.js";
 import { padToProviderAspect } from "../../lib/image/normalize.js";
+import { cleanSheet2x2 } from "../../lib/image/crop.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import {
@@ -21,12 +22,13 @@ import { videoNegatives } from "../ad-types/fragments/looks.js";
 
 export interface VideoBuilderInput {
   /**
-   * The LABELLED storyboard sheet — four numbered keyframe panels (01–04), each
-   * with a caption. Sent to the video provider as the ordered shot-sequence /
-   * framing guide (alongside the product sheet and, when present, the person
-   * face). Shot order + framing reach the model through these numbered keyframes
-   * plus the `scenes` text and `transcript`s. The badges/captions are direction
-   * only and must not be rendered into the final clip (enforced via the prompt).
+   * The LABELLED storyboard sheet — four keyframe panels in a 2×2, each with a
+   * scene badge + caption bar. Used as the ordered shot-sequence / framing guide
+   * (alongside the product sheet and, when present, the person face). Shot order
+   * + framing reach the model through the panels plus the `scenes` text and
+   * `transcript`s. The badges/captions are direction only — the sheet is CROPPED
+   * clean of them (`cleanStoryboardRefUrl`) before it is sent, so nothing leaks
+   * into the final clip; this stored labelled copy stays the UI/review artifact.
    */
   storyboardSheetRef: ImageRef;
   /**
@@ -153,13 +155,50 @@ async function providerSafeRefUrl(
 }
 
 /**
+ * Build the provider-facing storyboard reference: crop the LABELLED 2×2 sheet
+ * into a CLEAN 2×2 (no scene badges / caption bars / gridlines) so those baked
+ * annotations can't leak into the rendered clip, then normalize + upload a
+ * provider-only copy. The stored labelled sheet (the UI/review artifact) is
+ * untouched. Any fetch/crop/encode hiccup falls back to the labelled sheet via
+ * `providerSafeRefUrl`, so a crop failure never fails the run.
+ */
+async function cleanStoryboardRefUrl(
+  url: string,
+  runId: string,
+  log: Logger,
+): Promise<string> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const raw = new Uint8Array(await res.arrayBuffer());
+    const cleaned = await cleanSheet2x2(raw);
+    const norm = await padToProviderAspect(cleaned, "image/png", {
+      forceJpeg: true,
+    });
+    const { url: safeUrl } = await uploadAsset({
+      runId,
+      kind: "storyboard_sheet",
+      bytes: norm.bytes,
+      contentType: norm.mime,
+    });
+    log.info("uploaded cleaned storyboard ref copy (badges/captions cropped)");
+    return safeUrl;
+  } catch (err) {
+    log.warn("storyboard clean-crop skipped — using labelled sheet", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return providerSafeRefUrl(url, runId, "storyboard_sheet", log);
+  }
+}
+
+/**
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
- * injected video provider) together with the LABELLED storyboard sheet as the
- * ordered shot-sequence guide. The sheet's four numbered panels (01–04) are the
- * shot sequence — the model follows them in order while rendering ONE clean
- * continuous clip; the badges/captions are direction only and (per the prompt)
- * must not appear in the output. The product sheet (plain ref) and, when there
+ * injected video provider) together with the storyboard sheet as the ordered
+ * shot-sequence guide. The sheet's four panels are the shot sequence — the model
+ * follows them in order; the sheet is CROPPED clean of its badges/captions
+ * before submit (`cleanStoryboardRefUrl`), so no annotations leak into the
+ * output. The product sheet (plain ref) and, when there
  * is a person, the face (asset ref) are sent alongside it to lock identity.
  * Poll until ready, download, and persist `assets` (final_video) + `videos`.
  * Final output of the pipeline; no merge step.
@@ -256,8 +295,9 @@ export async function videoBuilder(
 
     // 2. Submit to the video provider. The detailed scene descriptions +
     // transcripts ride in the text prompt; the reference images carry identity,
-    // framing and shot order. The prompt tells the model to follow panels 01→04
-    // in order yet keep the badges/captions/grid out of the rendered frame.
+    // framing and shot order. The storyboard ref is cropped clean of its
+    // badges/captions/grid before submit, so the model just follows the panels
+    // in order and renders one full-frame scene.
     const storyboardUrl = input.storyboardSheetRef.source;
     const productUrl = input.productSheetRef?.source;
 
@@ -283,16 +323,18 @@ export async function videoBuilder(
     // human image_url trips Seedance's input privacy filter
     // (InputImageSensitiveContentDetected.PrivacyInformation → the run failed
     // PROVIDER_CONTENT_BLOCKED). So route the sheet through the CreateAsset
-    // (asset://) path, which clears moderation and accepts aspect 0.4–2.5. Pad a
-    // provider copy first so a stray generated dimension can't fail the run.
-    // Order + count are preserved, so the @Image legend below stays correct.
+    // (asset://) path, which clears moderation and accepts aspect 0.4–2.5. The
+    // storyboard ref is first CROPPED clean of its badges/caption bars/gridlines
+    // (cleanStoryboardRefUrl) so those baked annotations can't leak into the clip
+    // — that also pads a provider copy so a stray generated dimension can't fail
+    // the run. Order + count are preserved, so the @Image legend below stays correct.
     const lookFamily = getAdType(ctx.adType).lookFamily;
     referenceImages = productUrl
       ? [await providerSafeRefUrl(productUrl, ctx.runId, "product_sheet", log)]
       : [];
     personReferences = [];
     personReferences.push(
-      await providerSafeRefUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
+      await cleanStoryboardRefUrl(storyboardUrl, ctx.runId, log),
     );
     if (faceUrl) {
       personReferences.push(
@@ -335,7 +377,7 @@ export async function videoBuilder(
     // gets its own directive + negatives.
     const isService = ctx.adType === "service";
     const negatives = isService
-      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people); never render the sheet's badges, grid lines or caption bars."
+      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people)."
       : videoNegatives(lookFamily);
     // Per-look render directive (single source of truth in ./prompt.js): service
     // = skit cuts; cinematic_polished + demo_clean = clean cuts between beats

@@ -60,10 +60,10 @@ export function usesCleanCuts(adType: string): boolean {
 export function videoRenderDirective(adType: string): string {
   const def = getAdType(adType);
   if (def.id === "service")
-    return "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene - each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels.";
+    return "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene - each output frame is ONE full-frame scene; match the board's identity and look, never a split-screen or collage.";
   if (usesCleanCuts(adType))
-    return `Render the storyboard's four beats in order as distinct shots with a clean CUT between each - each beat is ONE stable, full-frame shot (one camera move or a hold, one action), matching the board's framing and identity, never its panel grid, badges or labels.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`;
-  return "Render ONE continuous live-action take that fills the whole frame the entire time - match the board's framing and identity, never its panel grid, badges or labels.";
+    return `Render the storyboard's four beats in order as distinct shots with a clean CUT between each - each beat is ONE stable, full-frame shot (one camera move or a hold, one action), matching the board's framing and identity, never a split-screen or collage.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`;
+  return "Render ONE continuous live-action take that fills the whole frame the entire time - match the board's framing and identity, never a split-screen or collage.";
 }
 
 /**
@@ -73,10 +73,10 @@ export function videoRenderDirective(adType: string): string {
  * form — kept deliberately short (Seedance degrades on long prompts; realism is
  * carried by the still, not the prose).
  *
- *   • A film-storyboard guide is attached as `@Image N` — a 2×2 grid of FOUR
- *     keyframe panels (top-left=1 … bottom-right=4). Panel N is the keyframe for
- *     time slice N; follow them in order. The OUTPUT is ONE clean continuous
- *     live-action shot that never shows the grid/badges/captions.
+ *   • A film-storyboard guide is attached as `@Image N` — a clean 2×2 of FOUR
+ *     keyframe panels (top-left=1 … bottom-right=4), already cropped free of
+ *     badges/caption bars/gridlines. Panel N is the keyframe for time slice N;
+ *     follow them in order. The OUTPUT is ONE full-frame scene, not a collage.
  *   • ONE plain sentence per time slice (subject + action + one camera move).
  *   • ONE short audio line — UGC: the on-screen person lip-syncs each transcript;
  *     inspirational: a voiceover narrates them.
@@ -243,8 +243,8 @@ export function buildVideoPrompt(input: {
     "You are a prompt writer for Seedance 2.0, a multi-shot AI video model.",
     `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
     isService
-      ? `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (01→04), ONE per scene. Use it as the LOOK + identity reference. Render the FOUR scenes in order as a short live-action SKIT with a clean CUT between each — they are DISTINCT settings/moments (the world and lighting may change between scenes), NOT one continuous take. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage. The sheet's panel-number badges, grid lines, labels and caption bars are PRODUCTION ANNOTATIONS — NEVER render any of them.`
-      : `A film storyboard is attached as ${boardImg}: a 2×2 grid of FOUR keyframe panels in reading order (01→04). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. ${renderModeLine} Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid itself, never split the frame into panels or a side-by-side/collage. The sheet's panel-number badges, grid lines, split-screen dividers, before/after labels and bottom caption bars are PRODUCTION ANNOTATIONS — NEVER render any of them in the frame.`,
+      ? `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first), ONE per scene. Use it as the LOOK + identity reference. Render the FOUR scenes in order as a short live-action SKIT with a clean CUT between each — they are DISTINCT settings/moments (the world and lighting may change between scenes), NOT one continuous take. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`
+      : `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. ${renderModeLine} Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`,
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
       ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
@@ -265,7 +265,7 @@ export function buildVideoPrompt(input: {
     hookDirective,
     pacingLine,
     formatBrand(input.brandText),
-    `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most ~90 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (ONE camera move or hold + ONE action + the quoted line), all motion slow and smooth, never fast; NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, captions, badges or grid.`,
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most ~90 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (ONE camera move or hold + ONE action + the quoted line), all motion slow and smooth, never fast; NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, one full-frame scene (no split or collage).`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
@@ -407,10 +407,10 @@ export function buildDeterministicVideoPrompt(input: {
   // scenes (no continuous take, no product-object constraint).
   if (isService) {
     return (
-      `Generate a short live-action SKIT from the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04), ONE per scene, used as the LOOK + identity reference. Render the four scenes IN ORDER with a clean CUT between each (DISTINCT settings/moments; the lighting may shift) in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage. ${presenterPin}` +
+      `Generate a short live-action SKIT from the uploaded film storyboard ${boardRef} — a clean 2×2 of four keyframe panels (top-left first), ONE per scene, used as the LOOK + identity reference. Render the four scenes IN ORDER with a clean CUT between each (DISTINCT settings/moments; the lighting may shift) in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage. ${presenterPin}` +
       `${shots}. ` +
       `Each character's face, hair and wardrobe stay consistent across the scenes they appear in; ONE speaker per shot; motion natural and stable, ONE camera move per shot. ${audio}${brandTail} ` +
-      `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep any in-scene on-screen text from the keyframes (a stat, a price, the end-card line) legible, but NEVER render the sheet's panel-number badges, grid lines, dividers or bottom caption bars. ONE full-frame scene per shot with clean cuts between scenes, never a split-screen or panel grid.`
+      `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep any in-scene on-screen text from the keyframes (a stat, a price, the end-card line) legible. ONE full-frame scene per shot with clean cuts between scenes, never a split-screen or panel grid.`
     );
   }
 
@@ -418,12 +418,12 @@ export function buildDeterministicVideoPrompt(input: {
   // ugc_authentic is ONE continuous photoreal take. Same per-look decision as the
   // LLM prompt + video/index.ts so the composed prompt never contradicts itself.
   const openLine = cuts
-    ? `Generate a scene from the uploaded film storyboard ${boardRef} - a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render the four beats in order as distinct shots with a clean CUT between each in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME - never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations - NEVER render any of them.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`
-    : `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a 2×2 grid of four keyframe panels (01→04) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 grid, never split the frame into panels or a side-by-side/collage; the sheet's panel-number badges, grid lines and bottom caption bars are production annotations — NEVER render any of them.`;
+    ? `Generate a scene from the uploaded film storyboard ${boardRef} - a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render the four beats in order as distinct shots with a clean CUT between each in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME - never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`
+    : `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`;
   return (
     `${openLine} ${productPin}${presenterPin}${supportClause}` +
     `${shots}. ` +
     `The camera makes at most ONE slow move per beat (or holds steady) and ONE action per beat; all motion stays slow, smooth, steady and gentle, never fast; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio}${brandTail} ` +
-    `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. ONE full-frame scene per shot, never a split-screen or panel grid. No on-screen text, captions, badges, panel grid or watermark${ugc ? "; no background music" : ""}.`
+    `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. ONE full-frame scene per shot, never a split-screen or panel grid. No on-screen text, panel grid, split-screen or watermark${ugc ? "; no background music" : ""}.`
   );
 }

@@ -39,6 +39,16 @@ const PANEL_INSET_FRACTION = 0.02;
  */
 const MIN_OUTPUT_HEIGHT = 512;
 
+/**
+ * Directional trims for `cleanSheet2x2` — how much of each panel to shave off
+ * before re-tiling, to remove the burned-in storyboard annotations. The scene
+ * badge sits in a TOP corner and the caption bar is a thin strip along the
+ * BOTTOM of every panel, so trimming those strips drops both. Kept modest so a
+ * head/product near the panel edge is not clipped — TUNABLE after a visual pass.
+ */
+const TOP_TRIM_FRACTION = 0.14; // removes the top-corner scene-number badge
+const BOTTOM_TRIM_FRACTION = 0.14; // removes the bottom caption bar
+
 /** Read + validate the master's pixel dimensions. */
 async function masterDims(
   bytes: Uint8Array,
@@ -135,4 +145,78 @@ export async function cropRowsAs2x2(
     block: `${out.length ? "~" : ""}${Math.floor(width / cols) * 2}x${Math.floor(height / rowCount) * 2}`,
   });
   return out;
+}
+
+/**
+ * Extract one cell `(row, col)` of a 2×2 sheet with a DIRECTIONAL trim: shave the
+ * top strip (badge), the bottom strip (caption bar) and a small side inset
+ * (gutter). Leaves the panel's photographic core.
+ */
+async function extractPanelClean(
+  bytes: Uint8Array,
+  row: number,
+  col: number,
+  width: number,
+  height: number,
+): Promise<{ buf: Buffer; w: number; h: number }> {
+  const cellW = Math.floor(width / 2);
+  const cellH = Math.floor(height / 2);
+  const insetX = Math.round(cellW * PANEL_INSET_FRACTION);
+  const trimTop = Math.round(cellH * TOP_TRIM_FRACTION);
+  const trimBottom = Math.round(cellH * BOTTOM_TRIM_FRACTION);
+  const left = col * cellW + insetX;
+  const top = row * cellH + trimTop;
+  const w = Math.max(1, cellW - 2 * insetX);
+  const h = Math.max(1, cellH - trimTop - trimBottom);
+  const buf = await sharp(Buffer.from(bytes))
+    .extract({ left, top, width: w, height: h })
+    .toBuffer();
+  return { buf, w, h };
+}
+
+/**
+ * Turn ONE labelled 2×2 storyboard sheet into a CLEAN 2×2 for the video model:
+ * each of the four panels is trimmed of its top-corner scene badge and bottom
+ * caption bar, then the four are re-tiled edge-to-edge (TL=1, TR=2, BL=3, BR=4)
+ * so no gridlines/badges/caption text remain to leak into the rendered clip. The
+ * labelled sheet is unchanged; this is a provider-only copy. Pure bytes-in /
+ * bytes-out (the caller owns storage). Reading order is preserved.
+ */
+export async function cleanSheet2x2(bytes: Uint8Array): Promise<Uint8Array> {
+  const { width, height } = await masterDims(bytes);
+  const panels = [
+    await extractPanelClean(bytes, 0, 0, width, height),
+    await extractPanelClean(bytes, 0, 1, width, height),
+    await extractPanelClean(bytes, 1, 0, width, height),
+    await extractPanelClean(bytes, 1, 1, width, height),
+  ];
+  const pw = panels[0].w;
+  const ph = panels[0].h;
+  const block = await sharp({
+    create: {
+      width: pw * 2,
+      height: ph * 2,
+      channels: 3,
+      background: { r: 0, g: 0, b: 0 },
+    },
+  })
+    .composite([
+      { input: panels[0].buf, left: 0, top: 0 },
+      { input: panels[1].buf, left: pw, top: 0 },
+      { input: panels[2].buf, left: 0, top: ph },
+      { input: panels[3].buf, left: pw, top: ph },
+    ])
+    .png()
+    .toBuffer();
+
+  let pipeline = sharp(block);
+  if (ph * 2 < MIN_OUTPUT_HEIGHT) {
+    pipeline = pipeline.resize({ height: MIN_OUTPUT_HEIGHT });
+  }
+  const cleaned = new Uint8Array(await pipeline.png().toBuffer());
+  log.debug("✓ cleaned labelled 2×2 sheet for the video model", {
+    source: `${width}x${height}`,
+    panel: `${pw}x${ph}`,
+  });
+  return cleaned;
 }
