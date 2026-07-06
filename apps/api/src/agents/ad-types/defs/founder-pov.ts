@@ -28,8 +28,8 @@ export const founderPov: AdTypeDef = {
     "confession",
     "problem-solution",
     "relatable-scenario",
+    "question",
     "curiosity-gap",
-    "striking-visual",
   ],
 
   // The founder is the storyteller — a character always leads.

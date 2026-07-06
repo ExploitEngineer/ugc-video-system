@@ -40,10 +40,9 @@ quotes with no single presenter → `social-proof`.
 
 ## Favored hooks
 
-- **defaultHooks:** `testimonial`, `problem-solution`
-- **allowedHooks:** `testimonial`, `problem-solution`, `confession`,
-  `direct-callout`, `before-after`, `question`, `relatable-scenario`,
-  `social-proof`, `curiosity-gap`
+- **defaultHooks:** `confession`, `relatable-scenario`
+- **allowedHooks:** `confession`, `relatable-scenario`, `problem-solution`,
+  `before-after`, `question`, `curiosity-gap`
 
 ## Look & treatment
 

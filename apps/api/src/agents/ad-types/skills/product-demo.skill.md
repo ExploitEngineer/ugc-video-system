@@ -56,10 +56,9 @@ Disambiguation (neighbours):
 
 ## Favored hooks
 
-- **defaultHooks:** `demonstration`, `problem-solution`
-- **allowedHooks:** `demonstration`, `problem-solution`, `before-after`,
-  `curiosity-gap`, `question`, `pattern-interrupt`, `stat-shock`,
-  `relatable-scenario`
+- **defaultHooks:** `before-after`, `problem-solution`
+- **allowedHooks:** `before-after`, `problem-solution`, `striking-visual`,
+  `curiosity-gap`, `question`, `pattern-interrupt`
 
 ## Look & treatment
 

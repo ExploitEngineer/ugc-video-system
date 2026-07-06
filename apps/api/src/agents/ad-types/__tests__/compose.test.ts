@@ -135,6 +135,32 @@ describe("resolveHooks", () => {
     expect(testimonial.defaultHooks).toContain(sel.visualLead.id);
     expect(sel.visualLead.role).toBe("visual_lead");
   });
+
+  it("fit-bonus: a hook that fits the ad type beats a non-fitting one", () => {
+    // Both are in testimonial.allowedHooks and neither is a default. `question`
+    // does NOT fit testimonial (fitsAdTypes.good = [service, product-demo]);
+    // `before-after` DOES (good includes testimonial) → the +40 fit bonus wins.
+    const sel = resolveHooks(testimonial, ["question", "before-after"], {
+      hasProduct: true,
+      hasPerson: true,
+    });
+    expect(sel.visualLead.id).toBe("before-after");
+  });
+
+  it("clash-exclusion: a hook that clashes with the ad type can never win", () => {
+    // confession.fitsAdTypes.clashes includes "product-demo". A PERSON is present,
+    // so confession is dropped by the CLASH filter, not the asset guardrail.
+    const demoDef = {
+      id: "product-demo",
+      defaultHooks: ["before-after"],
+      allowedHooks: ["confession", "before-after"],
+    } as unknown as AdTypeDef;
+    const sel = resolveHooks(demoDef, ["confession", "before-after"], {
+      hasProduct: true,
+      hasPerson: true,
+    });
+    expect(sel.visualLead.id).toBe("before-after");
+  });
 });
 
 describe("hookOpening", () => {
