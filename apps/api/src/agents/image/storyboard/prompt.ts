@@ -829,7 +829,7 @@ export function buildStoryboardPrompt({
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",
     ...gridLayout,
-    `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
+    `- Output/canvas resolution: ${resolutionLabel}; render clean and sharp at natural detail.`,
     "- Each panel is a clean, photorealistic KEYFRAME for its scene — a still",
     "  frame lifted straight from the finished ad.",
     ...antiRepetition,
