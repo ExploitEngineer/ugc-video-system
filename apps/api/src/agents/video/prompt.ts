@@ -265,7 +265,7 @@ export function buildVideoPrompt(input: {
     hookDirective,
     pacingLine,
     formatBrand(input.brandText),
-    `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most ~90 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (ONE camera move or hold + ONE action + the quoted line), all motion slow and smooth, never fast; NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, one full-frame scene (no split or collage).`,
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most 80 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (ONE camera move or hold + ONE action + the quoted line), all motion slow and smooth, never fast; NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, one full-frame scene (no split or collage).`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
