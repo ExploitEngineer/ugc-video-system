@@ -7,6 +7,7 @@ import {
   genStepForRevise,
   hasAnyReference,
   nextStep,
+  resumeStepForVideoRegen,
   willGeneratePerson,
   willGenerateProduct,
 } from "../plan.js";
@@ -86,5 +87,22 @@ describe("nextStep unchanged for the post-reference sequence", () => {
   });
   it("storyboard → video (critic off)", () => {
     expect(nextStep("storyboard", false, false, "15s")).toBe("video");
+  });
+});
+
+describe("resumeStepForVideoRegen — lands directly on the video step", () => {
+  it("15s → storyboard_inspection, whose nextStep is video (critic on OR off)", () => {
+    expect(resumeStepForVideoRegen("15s")).toBe("storyboard_inspection");
+    // storyboard_inspection → video regardless of criticEnabled, so a video
+    // regen never re-runs the storyboard/critic or re-pauses at a gate.
+    expect(nextStep("storyboard_inspection", false, false, "15s")).toBe("video");
+    expect(nextStep("storyboard_inspection", false, true, "15s")).toBe("video");
+  });
+  it("multi → segment_storyboard, whose nextStep is segment_video → merge", () => {
+    expect(resumeStepForVideoRegen("60s")).toBe("segment_storyboard");
+    expect(nextStep("segment_storyboard", false, false, "60s")).toBe(
+      "segment_video",
+    );
+    expect(nextStep("segment_video", false, false, "60s")).toBe("merge");
   });
 });

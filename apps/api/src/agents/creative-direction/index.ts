@@ -26,5 +26,6 @@ export {
   gateForNext,
   gateForCurrentStep,
   genStepForRevise,
+  resumeStepForVideoRegen,
   type Gate,
 } from "./plan.js";

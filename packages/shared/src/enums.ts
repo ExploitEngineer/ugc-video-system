@@ -4,12 +4,22 @@
 
 import { z } from "zod";
 
-/** Lifecycle of a generation job (`runs.status`). */
+/**
+ * Lifecycle of a generation job (`runs.status`).
+ *
+ * `awaiting_regen` is a SOFT-FAIL gate: a recoverable video failure (a transient
+ * provider hiccup that exhausted the in-clip retry ladder, or a content-safety
+ * block) parks the run here instead of dead `failed`, so the user can retry or
+ * tweak the clip via `POST /runs/:id/regenerate-video`. `failed` is reserved for
+ * truly unrecoverable errors. Like `awaiting_confirmation`, it is terminal for
+ * the worker (not in CLAIMABLE); the regenerate route flips it back to `running`.
+ */
 export const runStatusSchema = z.enum([
   "queued",
   "running",
   "awaiting_confirmation",
   "regenerating",
+  "awaiting_regen",
   "completed",
   "failed",
 ]);

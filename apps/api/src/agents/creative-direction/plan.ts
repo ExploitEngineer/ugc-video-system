@@ -171,6 +171,26 @@ export function gateForCurrentStep(step: Step): Gate | null {
 }
 
 /**
+ * The `currentStep` to set when regenerating ONLY the video clip(s) of a
+ * finished/parked run (the regenerate-on-failure path), so the driver's next
+ * `nextStep(currentStep)` lands directly on the video work WITHOUT re-running
+ * the storyboard, the Critic, or pausing at a confirm gate:
+ *   - 15s   → `storyboard_inspection` (its `nextStep` is unconditionally `video`,
+ *             independent of `criticEnabled`; the storyboard gate is already
+ *             passed so no gate re-fires and the video-completion path returns
+ *             before any gate check).
+ *   - multi → `segment_storyboard` (`nextStep` → `segment_video` → `merge`; the
+ *             re-entrant fan-out regenerates only the deleted segment(s), then
+ *             re-merges).
+ * The caller must first DELETE the target clip's `videos` row(s) so the video
+ * step's idempotency guards (`persistedFinalVideo` / the segment `done` set) no
+ * longer short-circuit it.
+ */
+export function resumeStepForVideoRegen(duration: Duration = "15s"): Step {
+  return isMultiSegment(duration) ? "segment_storyboard" : "storyboard_inspection";
+}
+
+/**
  * The generation step to re-run when the user revises a gated artifact
  * (status `regenerating`). The reference gate always re-runs `person_sheet`
  * (the product sheet is hidden from the user, so `target` "product" is ignored).
