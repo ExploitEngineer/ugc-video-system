@@ -11,9 +11,11 @@ import {
   detectPlaceholders,
   feedbackInputSchema,
   isMultiSegment,
+  regenerateVideoInputSchema,
+  segmentCountFor,
 } from "@ugc/shared";
 import type { Run, RunDetail } from "@ugc/shared";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -23,6 +25,7 @@ import {
   gateForCurrentStep,
   getOpenAI,
   interpretFeedback,
+  resumeStepForVideoRegen,
 } from "../agents/creative-direction/index.js";
 import { getAdType } from "../agents/ad-types/registry.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
@@ -745,6 +748,98 @@ runs.post("/:id/feedback", async (c) => {
   // the new status to any open run stream explicitly.
   notifyRunChanged(id);
 
+  return c.json(await loadRunDetail(id));
+});
+
+// ── POST /runs/:id/regenerate-video — re-render the clip(s) of a finished or
+// soft-failed run, reusing the existing storyboard + reference sheets (no image
+// re-gen). Deletes the target `videos` row(s) (their `assets` rows cascade) so
+// the video step's idempotency guards no longer short-circuit, then flips the
+// run back to `running` at the pre-video checkpoint; the worker re-picks it,
+// the re-entrant fan-out regenerates only the deleted clip(s), and merge re-runs.
+runs.post("/:id/regenerate-video", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  assertStatus(
+    run,
+    ["completed", "awaiting_regen"],
+    "Run is not ready to regenerate.",
+  );
+
+  const parsed = regenerateVideoInputSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    throw badRequest(
+      parsed.error.issues[0]?.message ?? "Invalid regenerate request",
+      parsed.error.issues,
+    );
+  }
+  const { segmentIndex } = parsed.data;
+  const note = parsed.data.note?.trim() || null;
+  const multi = isMultiSegment(run.duration);
+
+  if (segmentIndex != null) {
+    if (!multi) {
+      throw badRequest("This run has no segments to regenerate individually.");
+    }
+    if (segmentIndex >= segmentCountFor(run.duration)) {
+      throw badRequest(`segmentIndex ${segmentIndex} is out of range.`);
+    }
+  }
+
+  // Which `videos` rows to drop:
+  //  - a segment target → that segment clip + the merged final (so merge re-runs)
+  //  - a 15s run        → the single final clip
+  //  - a whole multi run → every clip (all segments + the merged final)
+  const targetWhere =
+    segmentIndex != null
+      ? and(
+          eq(schema.videos.runId, id),
+          or(
+            eq(schema.videos.segmentIndex, segmentIndex),
+            isNull(schema.videos.segmentIndex),
+          ),
+        )
+      : multi
+        ? eq(schema.videos.runId, id)
+        : and(eq(schema.videos.runId, id), isNull(schema.videos.segmentIndex));
+
+  const targets = await db
+    .select({ assetId: schema.videos.assetId })
+    .from(schema.videos)
+    .where(targetWhere);
+  const assetIds = targets.map((t) => t.assetId);
+
+  log.info("regenerate-video", {
+    run: id,
+    segmentIndex: segmentIndex ?? null,
+    multi,
+    clips: assetIds.length,
+    note: note?.slice(0, 60),
+  });
+
+  await db.transaction(async (tx) => {
+    // Deleting the `assets` rows cascades their `videos` rows (FK onDelete).
+    if (assetIds.length) {
+      await tx.delete(schema.assets).where(inArray(schema.assets.id, assetIds));
+    }
+    await tx
+      .update(schema.runs)
+      .set({
+        status: "running",
+        currentStep: resumeStepForVideoRegen(run.duration),
+        feedback: note,
+        error: null,
+        errorCode: null,
+        lockedAt: null,
+        lockedBy: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.runs.id, id));
+  });
+
+  notifyRunChanged(id);
   return c.json(await loadRunDetail(id));
 });
 

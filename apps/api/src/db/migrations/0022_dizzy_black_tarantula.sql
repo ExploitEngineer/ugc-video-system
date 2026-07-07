@@ -1,0 +1,1 @@
+ALTER TYPE "public"."run_status" ADD VALUE 'awaiting_regen' BEFORE 'completed';
