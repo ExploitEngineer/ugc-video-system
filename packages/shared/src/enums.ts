@@ -163,6 +163,11 @@ export const runErrorCodeSchema = z.enum([
   // The provider expired the task on its own side before it finished.
   "VIDEO_GENERATION_EXPIRED",
   "VIDEO_MERGE_FAILED",
+  // Seedance's OUTPUT-AUDIO moderation flagged the generated voiceover as
+  // sensitive ("output audio may contain sensitive information"). Distinct from
+  // the generic content block so the video ladder can retry it with neutralized,
+  // brand-safe spoken lines before parking the run.
+  "PROVIDER_AUDIO_BLOCKED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_CONTENT_BLOCKED",
   "RUN_CANCELLED",

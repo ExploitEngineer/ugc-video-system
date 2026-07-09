@@ -33,9 +33,17 @@ const TRANSIENT_VIDEO_CODES: ReadonlySet<RunErrorCode> = new Set([
   "PROVIDER_RATE_LIMITED",
 ]);
 
-/** Recoverable-but-not-auto-retryable video codes → park for the user. */
+/**
+ * Recoverable-but-not-auto-retryable video codes → park at `awaiting_regen`.
+ * `PROVIDER_AUDIO_BLOCKED` is here as the ESCAPE-HATCH disposition only: the
+ * video ladder itself intercepts it first and re-tries once with neutralized,
+ * brand-safe speech (`audioMode: "safe"` in agents/video/index.ts). If that
+ * retry ALSO blocks, it falls through to this disposition and parks for a
+ * manual regenerate — audio is never silently dropped.
+ */
 const SOFT_FAIL_VIDEO_CODES: ReadonlySet<RunErrorCode> = new Set([
   "PROVIDER_CONTENT_BLOCKED",
+  "PROVIDER_AUDIO_BLOCKED",
   "PERSON_IMAGE_INVALID",
 ]);
 

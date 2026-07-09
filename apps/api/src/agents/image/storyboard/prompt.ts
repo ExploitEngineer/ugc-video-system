@@ -486,6 +486,17 @@ export function buildStoryboardPrompt({
     '  "thank me later"). Replace each with a concrete, product-specific detail.',
     "- The lines must match what the matching panel actually shows (same action /",
     "  setting), so the spoken script and the keyframes stay in sync.",
+    // These lines are SPOKEN aloud in the final video; the video provider's
+    // audio moderation rejects the whole clip if the generated voiceover reads
+    // as sensitive. Keep the copy brand-safe so it renders cleanly.
+    "- BRAND-SAFE SPEECH (these lines are spoken aloud, then audio-moderated by",
+    "  the video model): keep them plain, conversational product talk. NEVER put",
+    "  a phone number, email address, website/URL/domain, a spoken price or a",
+    "  percentage-as-claim, a medical / health cure-or-treatment claim, a",
+    "  financial or earnings guarantee, or absolute wording (\"guaranteed\",",
+    "  \"cure\", \"permanent\", \"miracle\", \"100%\") in a transcript line. Nothing",
+    "  political, violent, or adult. Describe the benefit in ordinary, honest",
+    "  words instead.",
   ];
 
   // How the hero product must appear — shared across ad types. Kills the
