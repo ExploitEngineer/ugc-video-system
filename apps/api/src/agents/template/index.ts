@@ -32,6 +32,7 @@ import { writeStepEvent } from "../events.js";
 import { persistAsset, persistSheet } from "../persist.js";
 import type { SkillContext } from "../types.js";
 import { fillTemplateText } from "./fill-text/index.js";
+import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
 
 type Video = typeof schema.videos.$inferSelect;
@@ -263,4 +264,5 @@ export const templateAgent = {
   planTemplate,
   applyTemplate,
   fillTemplateText,
+  generateTemplateImages,
 };

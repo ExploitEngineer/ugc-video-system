@@ -95,3 +95,62 @@ export const OPENAI_IMAGE_OUTPUT_COMPRESSION = 100;
 
 /** Fallback size when a caller omits one (landscape — the default ratio). */
 export const DEFAULT_IMAGE_SIZE = IMAGE_SIZE_BY_RATIO["16:9"];
+
+/** gpt-image-2 rejects any dimension not divisible by 16. */
+export const GPT_IMAGE_DIM_STEP = 16;
+
+/** Stated by the API: `The longest edge must be less than or equal to 3840`. */
+export const GPT_IMAGE_MAX_EDGE = 3840;
+
+/**
+ * gpt-image-2 also enforces a MINIMUM pixel budget, which is not documented
+ * anywhere and is not mentioned in the size list. Probed directly against the
+ * live API:
+ *
+ *   800x800  =  640,000 px → 400 "Requested resolution is below the current
+ *                                 minimum pixel budget"
+ *   832x832  =  692,224 px → accepted
+ *   896x896  =  802,816 px → accepted
+ *
+ * So the real floor sits between 640,000 and 692,224. The error says "CURRENT
+ * minimum", so it can move; this constant keeps a deliberate ~14% margin above
+ * the highest known-rejected value. Any smaller request is scaled UP to it.
+ *
+ * This matters because the template pipeline sizes each still to its slot, and
+ * plenty of real slots (an 800x800 product inset) fall under the floor.
+ */
+export const GPT_IMAGE_MIN_TOTAL_PX = 786_432; // 1024 × 768
+
+/**
+ * The next size to try after a size-attributable failure, or `undefined` when
+ * the ladder is exhausted.
+ *
+ * `IMAGE_SIZE_FALLBACK` above is a LOOKUP keyed by the four sheet sizes this
+ * pipeline used to be the only caller of. The template pipeline generates one
+ * image per slot at that slot's own geometry, so its sizes are arbitrary and
+ * have no entry — without this, a size-attributable failure on `640x368` would
+ * simply throw instead of stepping down.
+ *
+ * A uniform 70% shrink preserves the aspect ratio (which the slot needs) and
+ * cuts the pixel count by half, which is what actually resolves a truncated
+ * base64 body or an "experimental resolution" rejection.
+ */
+export function nextImageSize(size: string): string | undefined {
+  const mapped = IMAGE_SIZE_FALLBACK[size];
+  if (mapped) return mapped;
+
+  const [w, h] = size.split("x").map(Number);
+  if (!w || !h || !Number.isFinite(w) || !Number.isFinite(h)) return undefined;
+
+  const round16 = (n: number) =>
+    Math.round(n / GPT_IMAGE_DIM_STEP) * GPT_IMAGE_DIM_STEP;
+  const nw = round16(w * 0.7);
+  const nh = round16(h * 0.7);
+
+  if (nw >= w && nh >= h) return undefined; // cannot shrink further
+  // Stepping below the API's minimum pixel budget guarantees a 400. When the
+  // floor is reached the ladder is exhausted: the caller falls back rather than
+  // burning attempts on a size the provider will always refuse.
+  if (nw * nh < GPT_IMAGE_MIN_TOTAL_PX) return undefined;
+  return `${nw}x${nh}`;
+}

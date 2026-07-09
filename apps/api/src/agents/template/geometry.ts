@@ -7,6 +7,12 @@
 
 import type { AspectRatio, ImageSlotClass } from "@ugc/shared";
 
+import {
+  GPT_IMAGE_DIM_STEP,
+  GPT_IMAGE_MAX_EDGE,
+  GPT_IMAGE_MIN_TOTAL_PX,
+} from "../../providers/openai/constants.js";
+
 // ── Clip duration ────────────────────────────────────────────────────────────
 
 /**
@@ -67,8 +73,6 @@ export function compNeedsTrim(durationSec: number | null | undefined): boolean {
 
 // ── gpt-image-2 sizing ───────────────────────────────────────────────────────
 
-/** gpt-image-2 rejects any dimension not divisible by 16. */
-const DIM_STEP = 16;
 /** Hard ceiling enforced by gpt-image-2 (3840×2160 sits exactly on it). */
 const MAX_TOTAL_PX = 8_294_400;
 /**
@@ -77,11 +81,26 @@ const MAX_TOTAL_PX = 8_294_400;
  * pixels and upscaled by After Effects if the layer is genuinely larger.
  */
 const TARGET_TOTAL_PX = 2560 * 1440; // 3,686,400
-/** Below this, gpt-image-2 output quality collapses. */
-const MIN_DIM = 256;
+
+/**
+ * Widest shape gpt-image-2 will accept. Probed against the live API, which is
+ * the only place this is stated:
+ *
+ *   1920x480 (4:1) → 400 "The maximum supported aspect ratio is 3:1."
+ *
+ * (Independently, beyond roughly 18:1 the minimum-pixel-budget and the 3840px
+ * maximum-edge constraints become mutually unsatisfiable anyway.)
+ *
+ * A more extreme LAYER still renders correctly: the still is cropped into it by
+ * `nx:layer-autoscale fill`, so a clamped source loses edges, not content.
+ */
+const MAX_SLOT_ASPECT = 3;
 
 const round16 = (n: number): number =>
-  Math.max(DIM_STEP, Math.round(n / DIM_STEP) * DIM_STEP);
+  Math.max(
+    GPT_IMAGE_DIM_STEP,
+    Math.round(n / GPT_IMAGE_DIM_STEP) * GPT_IMAGE_DIM_STEP,
+  );
 
 /** Fallback when a slot reports no usable geometry — a square, legal size. */
 export const DEFAULT_SLOT_SIZE = "1024x1024";
@@ -90,6 +109,14 @@ export const DEFAULT_SLOT_SIZE = "1024x1024";
  * A legal gpt-image-2 `size` string for an image slot of `width`×`height`
  * pixels, preserving the slot's aspect ratio as closely as the divisible-by-16
  * rule allows.
+ *
+ * Four constraints, ALL discovered by probing the live API — none of them are in
+ * the documentation, and three would have failed at runtime:
+ *   - both dimensions divisible by 16
+ *   - the longest edge at most 3840
+ *   - a MINIMUM pixel budget: `800x800` (640,000px) is refused outright, so a
+ *     small slot is scaled UP rather than requested at its native size
+ *   - an aspect ratio no wider than 3:1
  *
  * The residual aspect drift (at most 8px per axis) is absorbed downstream by
  * `nx:layer-autoscale` with `fill`, which crops rather than stretches.
@@ -109,28 +136,54 @@ export function gptImageSizeForSlot(
     return DEFAULT_SLOT_SIZE;
   }
 
-  // Never render MORE pixels than the soft ceiling; never render fewer than the
-  // slot needs (upscaling a small render into a big layer looks soft).
-  let scale = 1;
-  const area = width * height;
-  if (area > TARGET_TOTAL_PX) scale = Math.sqrt(TARGET_TOTAL_PX / area);
+  // An extreme aspect cannot satisfy BOTH constraints: a 24:1 banner needs a
+  // 4344px edge to clear the pixel floor, but the longest edge caps at 3840. So
+  // clamp the shape first. `nx:layer-autoscale fill` crops the still into the
+  // layer anyway, so a less extreme source loses edges, not content — whereas an
+  // unsatisfiable size loses the whole image.
+  let aw = width;
+  let ah = height;
+  const ratio = aw / ah;
+  if (ratio > MAX_SLOT_ASPECT) ah = aw / MAX_SLOT_ASPECT;
+  else if (ratio < 1 / MAX_SLOT_ASPECT) aw = ah / MAX_SLOT_ASPECT;
 
-  let w = round16(width * scale);
-  let h = round16(height * scale);
+  // Aim for the slot's own pixel count, clamped into the band the API accepts:
+  // never above the soft ceiling (unstable), never below the minimum budget
+  // (a hard 400). Scaling preserves the aspect ratio, which is what the slot
+  // actually needs — the exact pixel count is negotiable, the shape is not.
+  const area = aw * ah;
+  const target = Math.min(
+    Math.max(area, GPT_IMAGE_MIN_TOTAL_PX),
+    TARGET_TOTAL_PX,
+  );
 
-  // Extreme aspect (a 1920×80 banner) can round one axis below the usable
-  // floor. Scale BOTH up together so the aspect survives.
-  const smallest = Math.min(w, h);
-  if (smallest < MIN_DIM) {
-    const up = MIN_DIM / smallest;
-    w = round16(w * up);
-    h = round16(h * up);
+  let scale = Math.sqrt(target / area);
+  let w = round16(aw * scale);
+  let h = round16(ah * scale);
+
+  // Rounding DOWN to a multiple of 16 can dip back under the floor (800x800
+  // scales to 880x880 = 774,400 < 786,432). Nudge the scale up, preserving the
+  // ratio, until it clears — bounded, so a pathological input cannot spin.
+  for (
+    let i = 0;
+    i < 16 &&
+    w * h < GPT_IMAGE_MIN_TOTAL_PX &&
+    Math.max(w, h) < GPT_IMAGE_MAX_EDGE;
+    i++
+  ) {
+    scale *= 1.03;
+    w = round16(aw * scale);
+    h = round16(ah * scale);
   }
 
-  // Belt and braces: the hard ceiling wins over everything above.
-  while (w * h > MAX_TOTAL_PX && w > DIM_STEP && h > DIM_STEP) {
-    w = round16(w * 0.9);
-    h = round16(h * 0.9);
+  // The ceilings win over everything above: an edge over 3840 is a hard 400.
+  while (
+    (Math.max(w, h) > GPT_IMAGE_MAX_EDGE || w * h > MAX_TOTAL_PX) &&
+    w > GPT_IMAGE_DIM_STEP &&
+    h > GPT_IMAGE_DIM_STEP
+  ) {
+    w = round16(w * 0.95);
+    h = round16(h * 0.95);
   }
 
   return `${w}x${h}`;

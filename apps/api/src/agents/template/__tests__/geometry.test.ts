@@ -14,6 +14,10 @@ import {
   slotAspectRatio,
   snapUp,
 } from "../geometry.js";
+import {
+  GPT_IMAGE_MAX_EDGE,
+  GPT_IMAGE_MIN_TOTAL_PX,
+} from "../../../providers/openai/constants.js";
 
 // ── snapUp ───────────────────────────────────────────────────────────────────
 
@@ -114,9 +118,11 @@ const parse = (s: string): [number, number] => {
 };
 
 describe("gptImageSizeForSlot — every output must be legal for gpt-image-2", () => {
+  // Every constraint below was probed against the LIVE API, not read from docs.
   const CASES: Array<[number, number]> = [
     [1920, 1080], [1080, 1920], [800, 800], [640, 360],
     [3840, 2160], [180, 60], [1920, 80], [64, 64], [4000, 4000],
+    [640, 368], [1200, 120], [500, 1000],
   ];
 
   it("always returns dimensions divisible by 16", () => {
@@ -127,16 +133,40 @@ describe("gptImageSizeForSlot — every output must be legal for gpt-image-2", (
     }
   });
 
-  it("never exceeds the 8,294,400px hard ceiling", () => {
+  it("never exceeds the 8,294,400px ceiling, nor a 3840px longest edge", () => {
+    // API: "The longest edge must be less than or equal to 3840."
     for (const [w, h] of CASES) {
       const [ow, oh] = parse(gptImageSizeForSlot(w, h));
       expect(ow * oh, `${w}x${h}`).toBeLessThanOrEqual(8_294_400);
+      expect(Math.max(ow, oh), `${w}x${h}`).toBeLessThanOrEqual(GPT_IMAGE_MAX_EDGE);
     }
   });
 
-  it("keeps a slot that already fits, at its native size when that is legal", () => {
-    expect(gptImageSizeForSlot(800, 800)).toBe("800x800");
-    expect(gptImageSizeForSlot(1280, 720)).toBe("1280x720");
+  it("NEVER falls under the minimum pixel budget", () => {
+    // API: "Requested resolution is below the current minimum pixel budget."
+    // Probed live: 800x800 (640,000px) is REFUSED; 832x832 (692,224px) passes.
+    // Requesting a slot at its native size would 400 for most real slots.
+    for (const [w, h] of CASES) {
+      const [ow, oh] = parse(gptImageSizeForSlot(w, h));
+      expect(ow * oh, `${w}x${h} → ${ow}x${oh}`).toBeGreaterThanOrEqual(
+        GPT_IMAGE_MIN_TOTAL_PX,
+      );
+    }
+  });
+
+  it("scales a small slot UP rather than requesting a size the API refuses", () => {
+    // 800x800 = 640,000px → a hard 400. Must come back larger, still square.
+    const [w, h] = parse(gptImageSizeForSlot(800, 800));
+    expect(w * h).toBeGreaterThanOrEqual(GPT_IMAGE_MIN_TOTAL_PX);
+    expect(w).toBe(h);
+    // 640x368 is even smaller; it must also be lifted, keeping ~16:9.
+    const [bw, bh] = parse(gptImageSizeForSlot(640, 368));
+    expect(bw * bh).toBeGreaterThanOrEqual(GPT_IMAGE_MIN_TOTAL_PX);
+    expect(bw / bh).toBeCloseTo(640 / 368, 1);
+  });
+
+  it("keeps a slot that already sits in the legal band", () => {
+    expect(gptImageSizeForSlot(1280, 720)).toBe("1280x720"); // 921,600px
   });
 
   it("nudges 1080 to 1088, because 1080 is NOT divisible by 16", () => {
@@ -153,10 +183,29 @@ describe("gptImageSizeForSlot — every output must be legal for gpt-image-2", (
     expect(w / h).toBeCloseTo(16 / 9, 1); // aspect survives
   });
 
-  it("lifts an extreme banner off the quality floor without inverting it", () => {
-    const [w, h] = parse(gptImageSizeForSlot(1920, 80));
-    expect(h).toBeGreaterThanOrEqual(256);
+  it("never asks for an aspect wider than 3:1", () => {
+    // API: "The maximum supported aspect ratio is 3:1." A 4:1 request is a hard
+    // 400, so an extreme layer's aspect must be clamped — `nx:layer-autoscale
+    // fill` crops the still into the layer, so a clamped source loses edges,
+    // not content.
+    for (const [w, h] of CASES) {
+      const [ow, oh] = parse(gptImageSizeForSlot(w, h));
+      const ar = Math.max(ow / oh, oh / ow);
+      expect(ar, `${w}x${h} → ${ow}x${oh}`).toBeLessThanOrEqual(3.0001);
+    }
+  });
+
+  it("clamps an extreme banner without inverting it", () => {
+    const [w, h] = parse(gptImageSizeForSlot(1920, 80)); // 24:1
+    expect(w * h).toBeGreaterThanOrEqual(GPT_IMAGE_MIN_TOTAL_PX);
     expect(w).toBeGreaterThan(h); // still landscape
+    expect(w / h).toBeCloseTo(3, 2);
+  });
+
+  it("clamps an extreme vertical rail the same way", () => {
+    const [w, h] = parse(gptImageSizeForSlot(80, 1920)); // 1:24
+    expect(h).toBeGreaterThan(w); // still portrait
+    expect(h / w).toBeCloseTo(3, 2);
   });
 
   it("falls back to a legal square when geometry is missing", () => {
@@ -166,6 +215,7 @@ describe("gptImageSizeForSlot — every output must be legal for gpt-image-2", (
     const [w, h] = parse(DEFAULT_SLOT_SIZE);
     expect(w % 16).toBe(0);
     expect(h % 16).toBe(0);
+    expect(w * h).toBeGreaterThanOrEqual(GPT_IMAGE_MIN_TOTAL_PX);
   });
 });
 

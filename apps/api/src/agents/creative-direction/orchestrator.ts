@@ -665,17 +665,13 @@ async function executeStep(
       return {};
     }
 
-    // Lands in build step 7 with the agent it calls. UNREACHABLE today:
-    // `TEMPLATE_STEP_ENABLED` defaults false and `POST /runs` rejects
-    // `pipeline: "template"`, so no run can be sequenced into it. Fail loudly
-    // rather than silently no-op, so a premature flag flip surfaces as a clear
-    // error instead of a run that quietly skips work.
     case "template_images": {
-      throw new RunFailure(
-        "INTERNAL",
-        RUN_ERROR_MESSAGES.INTERNAL,
-        `${step} is not implemented yet (template pipeline v2, build step 7)`,
-      );
+      // pipeline:"template" only. One gpt-image-2 still per fillable IMAGE slot,
+      // sized to the slot and conditioned on the plan's subject + the product
+      // sheet. Writes its own events, and NEVER hard-fails: a slot that cannot
+      // be generated keeps the template's own artwork.
+      await templateAgent.generateTemplateImages(ctx);
+      return {};
     }
 
     case "template_fill": {

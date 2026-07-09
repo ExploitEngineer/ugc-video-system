@@ -18,7 +18,7 @@ import { createLogger } from "../../lib/log.js";
 import {
   DEFAULT_CHAT_MAX_TOKENS,
   DEFAULT_IMAGE_SIZE,
-  IMAGE_SIZE_FALLBACK,
+  nextImageSize,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
   OPENAI_IMAGE_OUTPUT_COMPRESSION,
@@ -466,8 +466,10 @@ export function createOpenAIProvider(): OpenAIProvider {
           const msg = err instanceof Error ? err.message : String(err);
           // Step down a resolution tier on a size-attributable failure (retrying
           // the same 4K size would just truncate again); otherwise retry as-is.
+          // `nextImageSize` handles the arbitrary per-slot sizes the template
+          // pipeline asks for, which have no entry in the fixed ladder.
           const smaller = isSizeAttributableImageError(msg)
-            ? IMAGE_SIZE_FALLBACK[size]
+            ? nextImageSize(size)
             : undefined;
           if (smaller) {
             log.warn("image size fallback", {
