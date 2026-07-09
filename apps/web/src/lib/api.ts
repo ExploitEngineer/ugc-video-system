@@ -4,7 +4,12 @@
 // optional, and the localhost:3001 fallback is correct for the co-located API
 // in the single-image deploy. (Override it only if the API is a separate host.)
 
-import type { AdTypeMenuItem, Run, RunDetail } from "@ugc/shared";
+import type {
+  AdTypeMenuItem,
+  Run,
+  RunDetail,
+  TemplateSummary,
+} from "@ugc/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -96,9 +101,71 @@ export async function uploadEditedVideo(
   return res.json() as Promise<RunDetail>;
 }
 
-// Template-library helpers land with the picker in the next build step. The v1
-// `registerTemplate` / `fetchTemplateStructure` pair is gone: end users no
-// longer upload templates, an admin curates the library and users pick from it.
+// ── Template library ────────────────────────────────────────────────────────
+// End users no longer upload templates: an admin curates the library and users
+// pick from it. The admin routes are gated by an `x-admin-key` header, which the
+// browser holds in localStorage and the proxies below forward verbatim.
+
+/** The header the API's admin middleware checks. */
+export const ADMIN_KEY_HEADER = "x-admin-key";
+
+/**
+ * Forward a request to an `/admin/*` API route, carrying the admin key through.
+ *
+ * Unlike `proxyJson`, this preserves an empty body: `DELETE` answers 204, and
+ * `Response.json(…, { status: 204 })` is invalid — a 204 may not carry one.
+ */
+export async function proxyAdmin(
+  path: string,
+  req: Request,
+  opts: { body?: BodyInit | null; stream?: boolean } = {},
+): Promise<Response> {
+  const key = req.headers.get(ADMIN_KEY_HEADER) ?? "";
+  const contentType = req.headers.get("content-type");
+  try {
+    const res = await fetch(apiUrl(path), {
+      method: req.method,
+      headers: {
+        [ADMIN_KEY_HEADER]: key,
+        ...(contentType ? { "content-type": contentType } : {}),
+      },
+      ...(opts.stream
+        ? { body: req.body, duplex: "half" }
+        : opts.body !== undefined
+          ? { body: opts.body }
+          : {}),
+      cache: "no-store",
+    } as RequestInit);
+
+    if (res.status === 204) return new Response(null, { status: 204 });
+    const body = await res
+      .json()
+      .catch(() => ({ error: "Bad response from API" }));
+    return Response.json(body, { status: res.status });
+  } catch {
+    return Response.json({ error: "API unreachable" }, { status: 502 });
+  }
+}
+
+/** Browser-side: hit an admin route through the same-origin proxy. */
+export async function adminFetch(
+  path: string,
+  key: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  return fetch(`/api/admin${path}`, {
+    ...init,
+    headers: { ...(init.headers ?? {}), [ADMIN_KEY_HEADER]: key },
+    cache: "no-store",
+  });
+}
+
+/** Browser-side: the public picker list. */
+export async function fetchTemplates(): Promise<TemplateSummary[]> {
+  const res = await fetch("/api/templates", { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load templates.");
+  return res.json() as Promise<TemplateSummary[]>;
+}
 
 /**
  * Ensure the run's audio track exists as a standalone file and return its URL.

@@ -277,7 +277,8 @@ function SidebarInner({
           )}
         >
           <Link
-            href="/studio"
+            // A template ad starts by PICKING a template, not by writing a brief.
+            href={tab === "template" ? "/studio/templates" : "/studio"}
             aria-label={tab === "template" ? "New template ad" : "New chat"}
             title={tab === "template" ? "New template ad" : "New chat"}
           >
