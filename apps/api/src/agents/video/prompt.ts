@@ -336,8 +336,18 @@ export function buildDeterministicVideoPrompt(input: {
   brandText?: string;
   /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
   supportingCast?: SupportingRole[];
+}, opts?: {
+  /**
+   * Audio-safe retry mode (the video ladder's `audioMode: "safe"`): the run's
+   * previous attempt tripped Seedance's OUTPUT-AUDIO moderation on the verbatim
+   * scripted lines. Drop the exact quoted transcript from every shot and tell
+   * the model to speak GENERIC brand-safe lines instead, so the re-roll keeps
+   * audio without repeating the flagged copy. Visuals/motion are unchanged.
+   */
+  audioSafe?: boolean;
 }): string {
   const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
+  const audioSafe = opts?.audioSafe ?? false;
   const def = getAdType(adType);
   const ugc = def.lookFamily === "ugc_authentic";
   // Service ads are a multi-scene skit (clean cuts, synthesized characters
@@ -391,17 +401,35 @@ export function buildDeterministicVideoPrompt(input: {
         s.sceneDescription?.trim() ||
         s.actionMovement?.trim() ||
         "continue the scene naturally";
-      const said = s.transcript?.trim()
-        ? `, ${speak}: "${s.transcript.trim()}"`
-        : "";
+      // Audio-safe retry: omit the verbatim scripted line (it tripped the
+      // provider's audio moderation). The generic audio directive below tells
+      // the model what to say instead; the visuals/action are untouched.
+      const said =
+        audioSafe || !s.transcript?.trim()
+          ? ""
+          : `, ${speak}: "${s.transcript.trim()}"`;
       return `${slice}: ${action} (${cam})${said}`;
     })
     .join("; ");
-  const audio = isService
-    ? "Audio: each character speaks their line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; light location ambience and a fitting score."
-    : ugc
-      ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.`
-      : `Audio: ${voice} narrates each line as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.`;
+  // In audio-safe mode the model IMPROVISES short, brand-safe spoken lines (no
+  // scripted copy is fed) — the earlier attempt's exact lines were flagged.
+  // Full mode is byte-identical to the pre-audioSafe strings (regression-locked).
+  const safeAudioTail =
+    " Keep the spoken lines short, natural and brand-safe — plain conversational talk about the product; do NOT say any specific numbers, prices, percentages, phone numbers, email addresses, URLs, brand or personal names, or any health, medical, or financial claim.";
+  let audio: string;
+  if (audioSafe) {
+    audio = isService
+      ? `Audio: each character speaks a short improvised, brand-safe line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; light location ambience and a fitting score.${safeAudioTail}`
+      : ugc
+        ? `Audio: the on-screen person speaks a short improvised line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.${safeAudioTail}`
+        : `Audio: ${voice} narrates short improvised lines as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.${safeAudioTail}`;
+  } else {
+    audio = isService
+      ? "Audio: each character speaks their line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; light location ambience and a fitting score."
+      : ugc
+        ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.`
+        : `Audio: ${voice} narrates each line as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.`;
+  }
 
   // Service ads: a multi-scene skit rendered with clean CUTS between distinct
   // scenes (no continuous take, no product-object constraint).

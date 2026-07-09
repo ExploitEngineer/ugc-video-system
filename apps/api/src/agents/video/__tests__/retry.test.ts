@@ -27,6 +27,12 @@ describe("videoFailureDisposition", () => {
     expect(videoFailureDisposition("PERSON_IMAGE_INVALID", "segment_video")).toBe(
       "soft_fail",
     );
+    // The ladder intercepts PROVIDER_AUDIO_BLOCKED and retries with brand-safe
+    // speech first; its ESCAPE-HATCH disposition (if that retry also blocks) is
+    // soft_fail → park at awaiting_regen (audio is never silently dropped).
+    expect(videoFailureDisposition("PROVIDER_AUDIO_BLOCKED", "video")).toBe(
+      "soft_fail",
+    );
   });
 
   it("unrelated codes → hard_fail", () => {

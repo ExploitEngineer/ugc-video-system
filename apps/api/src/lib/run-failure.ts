@@ -39,6 +39,8 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
     "One of the reference images has a shape the video service can't use. If you uploaded a person photo, try one closer to a standard portrait or square format.",
   PROVIDER_CONTENT_BLOCKED:
     "Part of this generation was blocked by the provider's safety filters. Try a different photo or adjust your prompt.",
+  PROVIDER_AUDIO_BLOCKED:
+    "The generated voiceover was flagged by the provider's audio safety filter. Regenerate to try again.",
   PROVIDER_RATE_LIMITED:
     "The generation service is busy right now. Please try again in a few minutes.",
   VIDEO_MERGE_FAILED:
@@ -61,6 +63,14 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
   {
     pattern: /aspectratiotoo(small|large)|aspect ratio must be between/i,
     code: "PERSON_IMAGE_INVALID",
+  },
+  // Output-AUDIO moderation, BEFORE the generic content-block row (first match
+  // wins): the video ladder retries this specific code with brand-safe speech.
+  // The generic row below would otherwise swallow it via "sensitive information".
+  {
+    pattern:
+      /output\s*audio.*(sensitive|moderation|blocked)|audio may contain sensitive/i,
+    code: "PROVIDER_AUDIO_BLOCKED",
   },
   {
     pattern:

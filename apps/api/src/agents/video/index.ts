@@ -284,11 +284,15 @@ export async function videoBuilder(
     }
     // The simpler, camerafixed deterministic prompt — the retry ladder's final
     // tier (and the fallback when the LLM returned nothing). Built lazily so a
-    // healthy first attempt never pays for it.
-    let detVideoPromptCache: string | undefined;
-    const detVideoPrompt = (): string => {
-      if (detVideoPromptCache === undefined) {
-        detVideoPromptCache = buildDeterministicVideoPrompt({
+    // healthy first attempt never pays for it. `audioSafe` swaps the verbatim
+    // scripted lines for a generic brand-safe audio directive (the ladder's
+    // "safe" audioMode, used after an OUTPUT-AUDIO moderation block).
+    const detCache = new Map<boolean, string>();
+    const detVideoPrompt = (audioSafe = false): string => {
+      const cached = detCache.get(audioSafe);
+      if (cached !== undefined) return cached;
+      const built = buildDeterministicVideoPrompt(
+        {
           adStyle: ctx.adStyle,
           adType: ctx.adType,
           scenes: input.scenes,
@@ -299,17 +303,25 @@ export async function videoBuilder(
           hasProductSheet: Boolean(input.productSheetRef?.source),
           brandText: ctx.brandText,
           supportingCast: ctx.supportingCast,
-        });
-      }
-      return detVideoPromptCache;
+        },
+        { audioSafe },
+      );
+      detCache.set(audioSafe, built);
+      return built;
     };
-    // The prompt BODY for a ladder tier: the LLM prompt for early attempts (or
-    // the deterministic one if the LLM returned nothing), the deterministic
-    // prompt for the final attempt.
-    const videoPromptBody = (tier: "llm" | "deterministic"): string =>
-      tier === "deterministic" || !llmVideoPrompt
-        ? detVideoPrompt()
-        : llmVideoPrompt;
+    // The prompt BODY for a ladder tier + audio mode: "safe" audioMode always
+    // uses the audio-safe deterministic prompt (the flagged verbatim lines are
+    // dropped); otherwise the LLM prompt for early attempts (or the
+    // deterministic one if the LLM returned nothing), deterministic on the final.
+    const videoPromptBody = (
+      tier: "llm" | "deterministic",
+      audioMode: "full" | "safe" = "full",
+    ): string =>
+      audioMode === "safe"
+        ? detVideoPrompt(true)
+        : tier === "deterministic" || !llmVideoPrompt
+          ? detVideoPrompt()
+          : llmVideoPrompt;
     if (!llmVideoPrompt) {
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
@@ -406,8 +418,11 @@ export async function videoBuilder(
     // composed prompt can never carry a cut-vs-continuous contradiction.
     const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
-    const composePrompt = (tier: "llm" | "deterministic"): string =>
-      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier)}\n\n${negatives}${cameraFixed}`;
+    const composePrompt = (
+      tier: "llm" | "deterministic",
+      audioMode: "full" | "safe" = "full",
+    ): string =>
+      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier, audioMode)}\n\n${negatives}${cameraFixed}`;
 
     // RETRY LADDER: submit → poll → download, up to MAX_VIDEO_ATTEMPTS times.
     // A TRANSIENT provider failure (network / 5xx / timeout / expired /
@@ -424,10 +439,14 @@ export async function videoBuilder(
     let bytes: Uint8Array | undefined;
     let hasAudio = true;
     let videoPrompt = "";
+    // Audio moderation recovery (see the catch below): after Seedance flags the
+    // OUTPUT AUDIO, we retry ONCE in "safe" mode — the verbatim scripted lines
+    // are dropped for generic brand-safe speech, and the seed re-rolls.
+    let audioMode: "full" | "safe" = "full";
     for (let attempt = 1; attempt <= MAX_VIDEO_ATTEMPTS; attempt++) {
       const tier = promptTierForAttempt(attempt);
-      videoPrompt = videoPromptBody(tier);
-      const prompt = composePrompt(tier);
+      videoPrompt = videoPromptBody(tier, audioMode);
+      const prompt = composePrompt(tier, audioMode);
       try {
         task = await ctx.video.submitVideo({
           referenceImages,
@@ -446,8 +465,12 @@ export async function videoBuilder(
           // Multi-segment runs share ONE run-stable seed (same runId → same
           // seed) so the synthesized person/voice stay consistent across the
           // merged clips. Single 15s clips omit it for per-run variety; the eval
-          // env seed still overrides either way (handled in the provider).
-          seed: isSegment ? stableSeed(ctx.runId) : undefined,
+          // env seed still overrides either way (handled in the provider). In
+          // audio-safe mode a segment's seed is salted so the retry actually
+          // re-rolls (a single clip already re-rolls via an unset seed).
+          seed: isSegment
+            ? stableSeed(audioMode === "safe" ? `${ctx.runId}-safe` : ctx.runId)
+            : undefined,
           prompt,
           durationSec,
           aspectRatio: ctx.aspectRatio,
@@ -563,6 +586,37 @@ export async function videoBuilder(
       } catch (attemptErr) {
         const failure = classifyRunError(attemptErr, "VIDEO_GENERATION_FAILED");
         const isLast = attempt >= MAX_VIDEO_ATTEMPTS;
+        // OUTPUT-AUDIO moderation block: the verbatim scripted lines were
+        // flagged. Retry ONCE in "safe" audioMode — drop the exact lines for
+        // generic brand-safe speech + a fresh re-roll (keeps audio). A second
+        // audio block (or a block on the last attempt) falls through below to
+        // the soft-fail disposition → the run parks at awaiting_regen.
+        if (
+          failure.code === "PROVIDER_AUDIO_BLOCKED" &&
+          audioMode === "full" &&
+          !isLast
+        ) {
+          audioMode = "safe";
+          log.warn("video audio blocked — retrying with brand-safe speech", {
+            attempt,
+            ...(taskId ? { taskId } : {}),
+          });
+          await writeStepEvent({
+            runId: ctx.runId,
+            step,
+            status: "regenerated",
+            payload: {
+              ladderAttempt: attempt,
+              tier,
+              code: failure.code,
+              reason: "audio-safe",
+              ...(taskId ? { taskId } : {}),
+              ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
+            },
+          }).catch(() => {});
+          await sleep(1500 * attempt);
+          continue;
+        }
         const retryable =
           videoFailureDisposition(failure.code, step) === "retry";
         if (!retryable || isLast) throw attemptErr; // outer catch classifies + throws
