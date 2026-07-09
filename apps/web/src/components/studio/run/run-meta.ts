@@ -81,7 +81,9 @@ export const STEP_LABEL: Record<Step, string> = {
   merge: "Final merged video",
   // pipeline:"template" only — automatic, never gated (see plan.ts)
   template_plan: "Planning your template ad",
-  template_fill: "Writing your on-screen copy",
+  // "fill" in the step id is ambiguous — it reads as if it fills everything.
+  // It only writes the TEXT layers; the images and the clip are separate steps.
+  template_fill: "Writing the template's text",
   template_images: "Designing your template images",
   template_render: "Assembling your template ad",
 };
