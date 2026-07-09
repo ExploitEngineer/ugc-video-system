@@ -70,7 +70,32 @@ export type TemplateJobAssetInput =
       layerName: string;
       src: string;
     }
-  | { kind: "text"; composition: string; layerName: string; value: string };
+  | { kind: "text"; composition: string; layerName: string; value: string }
+  /**
+   * Scale an injected layer to its composition. Our generated media rarely
+   * matches the designer's layer exactly — the aspect is clamped for the image
+   * model, and Seedance only renders 16:9 or 9:16 — so without this the layer
+   * keeps the SOURCE's dimensions and sits at the wrong size in the frame.
+   *
+   * `fill` covers the composition and crops the overflow; `fit` letterboxes.
+   * Fill, always: cropped edges beat black bars in an ad.
+   *
+   * ORDER MATTERS. Nexrender applies assets in array order, so this must come
+   * AFTER the media asset it scales, or it scales the placeholder that is about
+   * to be replaced.
+   */
+  | {
+      kind: "autoscale";
+      composition: string;
+      layerName: string;
+      fit: "fill" | "fit";
+    }
+  /**
+   * Set a composition's work-area duration. Used when the template outruns
+   * Seedance's 15s ceiling: the clip fills its layer, and without the trim the
+   * remainder of the composition plays on past the end of the footage.
+   */
+  | { kind: "compDuration"; composition: string; valueSec: number };
 
 export interface TemplateRenderInput {
   /** Nexrender Cloud template id (from `registerTemplate`). */

@@ -9,7 +9,7 @@
 // Async, like the Video Builder: submit a render → poll the job id → download
 // the output mp4 → re-host to Supabase (Nexrender Cloud retains outputs ~14d).
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { runTemplateSchema, type TemplateTextFillEntry } from "@ugc/shared";
 import { db, schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
@@ -22,8 +22,6 @@ import {
 } from "../../lib/run-failure.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
 import type {
-  TemplateJobAssetInput,
-  TemplateRenderInput,
   TemplateRenderResult,
   TemplateRenderTask,
 } from "../../providers/template-render.js";
@@ -34,70 +32,40 @@ import type { SkillContext } from "../types.js";
 import { fillTemplateText } from "./fill-text/index.js";
 import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
+import { buildRenderInput } from "./render-input.js";
 
 type Video = typeof schema.videos.$inferSelect;
-type RunRow = typeof schema.runs.$inferSelect;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Build the render input from the run's template snapshot (`runs.template`,
- * resolved once at run creation) + its `template_fill` text
- * (`runs.template_text_fill`): every VIDEO slot gets the generated clip, every
- * TEXT slot gets its AI-written value (falling back to the template's own
- * placeholder text if `template_fill` missed it — never sent blank). IMAGE/
- * AUDIO slots are left untouched — the template keeps its own default asset
- * there (no manual per-layer mapping exists anymore in this pipeline).
+ * The stills `template_images` generated, keyed by the slot they belong to.
+ * A slot with no entry keeps the template's own artwork.
  */
-function buildRenderInput(
-  runId: string,
-  run: RunRow,
-  clipUrl: string,
-): { input: TemplateRenderInput; composition: string; nexrenderTemplateId: string } {
-  const tpl = runTemplateSchema.parse(run.template);
-  const textFill = new Map(
-    ((run.templateTextFill as TemplateTextFillEntry[] | null) ?? []).map(
-      (f) => [f.jobLayerName, f.value] as const,
-    ),
-  );
-  const assets: TemplateJobAssetInput[] = [];
-  for (const slot of tpl.slots) {
-    if (slot.asset === "VIDEO") {
-      if (slot.empty) continue; // placeholder precomp with no fillable inner layer
-      assets.push({
-        kind: "media",
-        mediaType: "video",
-        composition: slot.composition,
-        layerName: slot.jobLayerName,
-        src: clipUrl,
-      });
-    } else if (slot.asset === "TEXT") {
-      assets.push({
-        kind: "text",
-        composition: slot.composition,
-        layerName: slot.jobLayerName,
-        value: textFill.get(slot.jobLayerName) ?? slot.currentText ?? "",
-      });
-    }
+async function generatedImageUrls(runId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ url: schema.assets.url, meta: schema.assets.meta })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.runId, runId),
+        eq(schema.assets.kind, "template_image"),
+      ),
+    );
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const name = (r.meta as { jobLayerName?: string } | null)?.jobLayerName;
+    if (name && r.url) out.set(name, r.url);
   }
-  return {
-    input: {
-      nexrenderTemplateId: tpl.nexrenderTemplateId,
-      composition: tpl.mainComposition,
-      assets,
-      referenceTag: runId,
-    },
-    composition: tpl.mainComposition,
-    nexrenderTemplateId: tpl.nexrenderTemplateId,
-  };
+  return out;
 }
 
 /**
- * Composite the run's final clip + its AI-written template text into the
- * registered Nexrender template. Idempotent on resume: if a Nexrender job id
- * is already persisted (crash mid-render) we poll THAT job instead of
- * submitting a second paid render.
+ * Composite everything the pipeline generated — the clip, the written copy and
+ * the generated stills — into the template picked at run creation. Idempotent on
+ * resume: if a Nexrender job id is already persisted (crash mid-render) we poll
+ * THAT job instead of submitting a second paid render.
  */
 export async function applyTemplate(ctx: SkillContext): Promise<void> {
   const runId = ctx.runId;
@@ -115,11 +83,22 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
       throw new Error("template_render: no final_video to feed the template");
     }
 
-    const { input, composition, nexrenderTemplateId } = buildRenderInput(
+    const template = runTemplateSchema.parse(run.template);
+    const imageUrls = await generatedImageUrls(runId);
+    const input = buildRenderInput({
       runId,
-      run,
+      template,
+      textFill: (run.templateTextFill as TemplateTextFillEntry[] | null) ?? [],
+      imageUrls,
       clipUrl,
-    );
+    });
+    const { mainComposition: composition, nexrenderTemplateId } = template;
+    log.info("render job assembled", {
+      assets: input.assets.length,
+      images: imageUrls.size,
+      trimComp: template.metadata.trimComp,
+      clipSeconds: template.metadata.clipSeconds,
+    });
 
     const provider = createTemplateRenderProvider();
 

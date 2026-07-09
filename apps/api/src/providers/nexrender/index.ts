@@ -321,9 +321,19 @@ export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
   };
   if (input.preview) return { template, preview: true };
 
-  const assets: NexJobAsset[] = input.assets.map((a) =>
-    a.kind === "text"
-      ? {
+  // The array order is PRESERVED: Nexrender applies assets in sequence, and an
+  // `nx:layer-autoscale` must land after the media asset it scales.
+  const assets: NexJobAsset[] = input.assets.map((a) => {
+    switch (a.kind) {
+      case "media":
+        return {
+          type: a.mediaType,
+          composition: a.composition,
+          layerName: a.layerName,
+          src: a.src,
+        };
+      case "text":
+        return {
           type: "function" as const,
           name: "nx:text-params-set",
           params: {
@@ -331,14 +341,28 @@ export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
             layerName: a.layerName,
             textValue: a.value,
           },
-        }
-      : {
-          type: a.mediaType,
-          composition: a.composition,
-          layerName: a.layerName,
-          src: a.src,
-        },
-  );
+        };
+      case "autoscale":
+        return {
+          type: "function" as const,
+          name: "nx:layer-autoscale",
+          params: {
+            composition: a.composition,
+            layerName: a.layerName,
+            type: a.fit,
+          },
+        };
+      case "compDuration":
+        return {
+          type: "function" as const,
+          name: "nx:comp-duration-set",
+          params: {
+            composition: a.composition,
+            value: a.valueSec,
+          },
+        };
+    }
+  });
   return {
     template,
     assets,
