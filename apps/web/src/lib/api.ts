@@ -4,12 +4,7 @@
 // optional, and the localhost:3001 fallback is correct for the co-located API
 // in the single-image deploy. (Override it only if the API is a separate host.)
 
-import type {
-  AdTypeMenuItem,
-  Run,
-  RunDetail,
-  TemplateStructure,
-} from "@ugc/shared";
+import type { AdTypeMenuItem, Run, RunDetail } from "@ugc/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -101,47 +96,9 @@ export async function uploadEditedVideo(
   return res.json() as Promise<RunDetail>;
 }
 
-/**
- * Register + upload a template project (.aep/.zip/.mogrt) via the same-origin
- * proxy: the file streams to our API, which registers it with Nexrender and
- * PUTs the bytes to Nexrender's own store (never Supabase). Run-independent —
- * this is the FIRST action of the template pipeline, before any run/brief
- * exists. Resolves once the upload is done; introspection is polled separately
- * via `fetchTemplateStructure`. Throws a readable error.
- */
-export async function registerTemplate(
-  file: File,
-): Promise<{ nexrenderTemplateId: string }> {
-  const form = new FormData();
-  form.append("file", file, file.name);
-  const res = await fetch("/api/templates/register", {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "Failed to register the template.");
-  }
-  return res.json() as Promise<{ nexrenderTemplateId: string }>;
-}
-
-/**
- * Poll a registered template's introspected structure. `status` is
- * `processing` until Nexrender finishes, then `ready` with the classified
- * slots + a suggested aspect ratio derived from the composition's dimensions.
- */
-export async function fetchTemplateStructure(
-  nexrenderTemplateId: string,
-): Promise<TemplateStructure> {
-  const res = await fetch(
-    `/api/templates/${encodeURIComponent(nexrenderTemplateId)}/structure`,
-    { cache: "no-store" },
-  );
-  if (!res.ok) throw new Error("Failed to read the template structure");
-  return res.json() as Promise<TemplateStructure>;
-}
+// Template-library helpers land with the picker in the next build step. The v1
+// `registerTemplate` / `fetchTemplateStructure` pair is gone: end users no
+// longer upload templates, an admin curates the library and users pick from it.
 
 /**
  * Ensure the run's audio track exists as a standalone file and return its URL.

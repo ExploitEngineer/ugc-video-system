@@ -279,14 +279,12 @@ export const createRunInputSchema = z.object({
   /** Which pipeline to run. Omitted/legacy clients default to `video`. */
   pipeline: pipelineSchema.default("video"),
   /**
-   * Required when `pipeline === "template"` — the `nexrenderTemplateId`
-   * returned by `POST /templates/register` once `GET /templates/:id/structure`
-   * reports `status: "ready"`. The route re-fetches the structure itself (the
-   * server, not the client, is the source of truth) and derives `aspectRatio`/
-   * forces `duration: "15s"` from it — enforced in the route handler, not this
-   * schema, since the requirement is conditional on `pipeline`.
+   * Required when `pipeline === "template"` — OUR `templates.id` (a library
+   * row), never Nexrender's own id. The route resolves the structure from that
+   * row and derives `aspectRatio` from it; the requirement is conditional on
+   * `pipeline`, so it is enforced in the handler rather than here.
    */
-  templateId: z.string().trim().min(1).optional(),
+  templateId: z.string().uuid().optional(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
 

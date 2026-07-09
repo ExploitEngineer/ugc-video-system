@@ -29,8 +29,12 @@ import {
   resumeStepForVideoRegen,
 } from "../agents/creative-direction/index.js";
 import { getAdType } from "../agents/ad-types/registry.js";
-import { buildStructure, deriveAspectRatio } from "../agents/template/introspect.js";
-import { createTemplateRenderProvider } from "../providers/index.js";
+import {
+  getTemplate,
+  incrementTemplateUse,
+  parseMetadata,
+  parseStructure,
+} from "../agents/template/library.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
 import { env } from "../config/index.js";
@@ -334,56 +338,56 @@ runs.post(
   let aspectRatio = parsed.data.aspectRatio;
   let duration = parsed.data.duration;
 
-  // ── Template pipeline cost-safety gate ──────────────────────────────
-  // The template was already registered + introspected client-side via
-  // POST /templates/register + GET /templates/:id/structure, BEFORE the ad
-  // brief was even filled in. Re-fetch fresh here (the server, never the
-  // client's cached poll, is the source of truth) and reject immediately if
-  // it isn't ready or has nowhere to put the generated clip — BEFORE any
-  // image upload, DB insert, or AI call, so a bad template costs nothing.
+  // ── Template pipeline gate ──────────────────────────────────────────
+  // `templateId` is OUR `templates.id`, never Nexrender's. The admin already
+  // registered, introspected and validated this template when they added it to
+  // the library, so the structure is read straight from our DB: no network
+  // call, no trust in whatever the client cached, and a bad file could never
+  // have reached the picker in the first place. Runs before any image upload,
+  // DB insert or AI call.
   let runTemplate: RunTemplate | null = null;
   if (pipeline === "template") {
-    // Same master switch that gated the old mid-pipeline template step — the
-    // whole pipeline stays dark until it's been smoke-tested end to end.
+    // Master switch — the pipeline stays dark until it's smoke-tested end to end.
     if (!env.TEMPLATE_STEP_ENABLED) {
       throw unprocessable("The template pipeline isn't enabled yet.");
     }
     if (!templateId) {
       throw badRequest("A templateId is required for the template pipeline.");
     }
-    const provider = createTemplateRenderProvider();
-    const raw = await provider
-      .getTemplateStructure(templateId)
-      .catch(() => null);
-    if (!raw || raw.status !== "uploaded") {
-      throw unprocessable(
-        "This template isn't ready yet. Wait for it to finish processing, or upload a different file.",
-      );
+    const row = await getTemplate(templateId).catch(() => undefined);
+    if (!row || row.status !== "ready" || row.archivedAt) {
+      throw unprocessable("That template isn't available. Pick another one.");
     }
-    const structure = buildStructure(raw.compositions, raw.layers);
-    if (!structure.slots.some((s) => s.asset === "VIDEO")) {
-      throw unprocessable(
-        "This template has no spot for a video — upload a different template.",
-      );
+    const structure = parseStructure(row.structure);
+    const metadata = parseMetadata(row.metadata);
+    if (!structure || !metadata || !row.nexrenderTemplateId) {
+      throw unprocessable("That template is missing its structure. Pick another one.");
     }
+
     runTemplate = runTemplateSchema.parse({
-      nexrenderTemplateId: templateId,
+      templateId: row.id,
+      nexrenderTemplateId: row.nexrenderTemplateId,
       mainComposition: structure.mainComposition ?? "",
       renderCompositions: structure.renderCompositions,
       slots: structure.slots,
       compositionWidth: structure.mainCompositionWidth,
       compositionHeight: structure.mainCompositionHeight,
+      metadata,
+      displayName: row.displayName,
     });
+
     // The template's composition dictates the output shape — never let a
-    // mismatched pick letterbox/stretch inside it. Fall back to the client's
-    // pick only when the template's dimensions are unknown.
-    const derived = deriveAspectRatio(
-      structure.mainCompositionWidth,
-      structure.mainCompositionHeight,
-    );
-    if (derived) aspectRatio = derived;
-    // v1 scope: the template pipeline is 15s-only (no multi-segment merge).
+    // mismatched pick letterbox or stretch inside it.
+    if (metadata.aspectRatio) aspectRatio = metadata.aspectRatio;
+    // `duration` is the run's SEGMENT plan, not the clip length: a template run
+    // is always a single clip. The clip's real length is `metadata.clipSeconds`,
+    // derived from the template's own composition, and the video agent reads it
+    // from the snapshot rather than from this enum.
     duration = "15s";
+
+    // Powers the picker's "popular" sort. Best-effort: a failed counter must
+    // never block a run the user has already paid for.
+    void incrementTemplateUse(row.id).catch(() => {});
   }
 
   // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
@@ -460,7 +464,11 @@ runs.post(
       criticEnabled,
       characterEnabled,
       ...(brandText ? { brandText } : {}),
-      ...(runTemplate ? { template: runTemplate } : {}),
+      // The FK enables "which runs used this template"; the snapshot is what the
+      // pipeline actually reads, and stays valid even if the template is archived.
+      ...(runTemplate
+        ? { templateId: runTemplate.templateId, template: runTemplate }
+        : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
         : {}),

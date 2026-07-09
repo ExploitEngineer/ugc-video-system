@@ -62,7 +62,7 @@ export function CreateRunForm({
 }: {
   initialPrompt?: string;
   autoFocus?: boolean;
-  /** Present only for a template-pipeline brief (see /studio/template-new) —
+  /** Present only for a template-pipeline brief (see /studio/templates) —
    *  adds the template-info line above the composer and wires `pipeline` +
    *  `templateId` into the submitted FormData. Every other control/behavior
    *  is identical to the normal pipeline's composer. */
@@ -216,7 +216,7 @@ export function CreateRunForm({
         <div className="text-muted-foreground flex items-center justify-between px-1 text-xs">
           <span>Template: {template.infoLabel}</span>
           <Link
-            href="/studio/template-new"
+            href="/studio/templates"
             className="hover:text-foreground underline"
           >
             Change template

@@ -7,6 +7,8 @@ import { env } from "./config/index.js";
 import { onError } from "./lib/errors.js";
 import { createLogger } from "./lib/log.js";
 import { adTypeMenuList } from "./agents/ad-types/menu.js";
+import { ADMIN_KEY_HEADER, adminAuth } from "./lib/admin-auth.js";
+import { adminTemplates } from "./routes/admin-templates.js";
 import { runs } from "./routes/runs.js";
 import { templates } from "./routes/templates.js";
 
@@ -30,8 +32,8 @@ export function createApp() {
     "*",
     cors({
       origin: wildcard ? "*" : allowed,
-      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: ["Content-Type", ADMIN_KEY_HEADER],
     }),
   );
 
@@ -41,8 +43,15 @@ export function createApp() {
   // grows automatically as new ad types are registered.
   app.get("/ad-types", (c) => c.json(adTypeMenuList()));
 
-  // Template pipeline: register + introspect a Nexrender template BEFORE any
-  // run exists (cost-safety — a bad file fails fast, before any AI is spent).
+  // The admin-curated template library. `adminAuth` is mounted on this subtree
+  // ONLY — a shared-secret soft guard, not real auth (F8). It fails closed when
+  // ADMIN_API_KEY is unset.
+  const admin = new Hono();
+  admin.use("*", adminAuth);
+  admin.route("/templates", adminTemplates);
+  app.route("/admin", admin);
+
+  // Public: browse the library. Read-only; end users never upload a template.
   app.route("/templates", templates);
 
   app.route("/runs", runs);

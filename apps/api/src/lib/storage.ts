@@ -89,12 +89,47 @@ export async function uploadAsset({
   // The random UUID keeps `storagePath` stable across retries, so re-uploading
   // after a transient failure can never collide with a prior attempt.
   const storagePath = `runs/${runId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  return uploadBytes(storagePath, bytes, contentType);
+}
 
+/**
+ * A template's preview video / poster frame, under `templates/{templateId}/…`.
+ *
+ * These are NOT `assets` rows: `assets.run_id` is NOT NULL with an FK to `runs`,
+ * and a template preview belongs to no run. Their URLs live as columns on the
+ * `templates` row instead, and this prefix is deliberately outside `runs/` so
+ * `deleteRunObjects` and `db:reset` never touch them — rebuilding the library
+ * means re-uploading .aep files and paying for a preview render each.
+ */
+export async function uploadTemplateObject({
+  templateId,
+  kind,
+  bytes,
+  contentType,
+}: {
+  templateId: string;
+  kind: "preview" | "poster";
+  bytes: Uint8Array;
+  contentType: string;
+}): Promise<UploadAssetResult> {
+  const storagePath = `templates/${templateId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  return uploadBytes(storagePath, bytes, contentType);
+}
+
+/**
+ * The retrying upload core, shared by run assets and template objects. Races
+ * each attempt against a timeout (the Supabase client has none, so a stalled
+ * connection would hang forever) and retries only network blips.
+ */
+async function uploadBytes(
+  storagePath: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<UploadAssetResult> {
   let lastMessage = "";
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
-    // Race the upload against a timeout — the client itself has none, so a
-    // stalled connection would otherwise hang forever. A timeout resolves to a
-    // synthetic transient error (matches TRANSIENT_UPLOAD_ERROR → retried).
+    // A timeout resolves to a synthetic transient error (matches
+    // TRANSIENT_UPLOAD_ERROR → retried).
     let timer: ReturnType<typeof setTimeout> | undefined;
     const { error } = await Promise.race([
       supabase.storage
@@ -142,7 +177,15 @@ export function getPublicUrl(storagePath: string): string {
  * objects, well under the list page size).
  */
 export async function deleteRunObjects(runId: string): Promise<void> {
-  const prefix = `runs/${runId}`;
+  return deletePrefix(`runs/${runId}`, `run ${runId}`);
+}
+
+/** Delete a template's preview objects (`templates/{templateId}/…`). */
+export async function deleteTemplateObjects(templateId: string): Promise<void> {
+  return deletePrefix(`templates/${templateId}`, `template ${templateId}`);
+}
+
+async function deletePrefix(prefix: string, label: string): Promise<void> {
   const PAGE = 100;
   // Page through the flat prefix until a short/empty page. We always list from
   // offset 0 because each iteration REMOVES what it listed, so the next "first
@@ -152,7 +195,7 @@ export async function deleteRunObjects(runId: string): Promise<void> {
       .from(BUCKET)
       .list(prefix, { limit: PAGE });
     if (error) {
-      throw internal(`Storage list failed for run ${runId}: ${error.message}`);
+      throw internal(`Storage list failed for ${label}: ${error.message}`);
     }
     if (!data || data.length === 0) return;
 
@@ -162,7 +205,7 @@ export async function deleteRunObjects(runId: string): Promise<void> {
       .remove(paths);
     if (removeError) {
       throw internal(
-        `Storage delete failed for run ${runId}: ${removeError.message}`,
+        `Storage delete failed for ${label}: ${removeError.message}`,
       );
     }
     if (data.length < PAGE) return; // last page — nothing more to remove

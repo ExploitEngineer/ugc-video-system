@@ -1,12 +1,15 @@
 "use client";
 
-// The /studio landing page's Template-tab content — mirrors StudioIntro's
-// hero treatment (badge/heading/subtitle) so switching the sidebar tab swaps
-// straight into the upload flow, no extra "New template ad" click required.
+// The /studio landing page's Template-tab content — mirrors StudioIntro's hero
+// treatment (badge/heading/subtitle) so switching the sidebar tab reads as one
+// surface.
+//
+// Users no longer upload templates: an admin curates a library and this tab
+// becomes the picker. The grid lands in the next build step; until then this
+// says so plainly rather than linking at a route that does not exist yet.
 
 import { LayoutTemplateIcon } from "lucide-react";
 import { Reveal } from "@/components/motion/reveal";
-import { TemplateUploadView } from "@/components/studio/template-pipeline/template-upload-view";
 
 export function TemplateIntro() {
   return (
@@ -21,14 +24,20 @@ export function TemplateIntro() {
           <span className="text-brand-gradient">template</span>
         </h1>
         <p className="text-muted-foreground mx-auto mt-4 max-w-md text-pretty">
-          Upload an After Effects template first — we check it's renderable
-          before you spend anything on ad generation. Once it's ready, describe
-          your ad and the agents fill the template in automatically.
+          Pick a designed After Effects template, then describe your ad. The
+          agents write the copy, design the images and generate a clip that fits
+          the template exactly.
         </p>
       </Reveal>
 
       <Reveal delay={0.08}>
-        <TemplateUploadView />
+        <div className="border-border/70 bg-card/40 text-muted-foreground mx-auto max-w-md rounded-xl border p-8 text-center text-sm backdrop-blur">
+          <LayoutTemplateIcon className="text-muted-foreground/60 mx-auto mb-3 size-6" />
+          <p className="text-foreground mb-1 font-medium">No templates yet</p>
+          <p>
+            An admin needs to add one to the library before you can pick it.
+          </p>
+        </div>
       </Reveal>
     </>
   );

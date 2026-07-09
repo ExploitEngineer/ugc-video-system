@@ -86,6 +86,18 @@ const serverEnvSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  /**
+   * Shared secret for the `/admin/*` routes (template library management),
+   * sent as an `x-admin-key` header. Auth (F8) is not started and the rest of
+   * the API is unauthenticated, so this is a SOFT GUARD — it stops a stranger
+   * who finds the URL from uploading a 200MB .aep and burning Nexrender
+   * credits. It is not real auth and must never be described as such.
+   *
+   * Optional so the server still boots without it, but the admin routes then
+   * return 503 in EVERY environment rather than defaulting open: a misread
+   * NODE_ENV in a deploy must not silently expose template upload.
+   */
+  ADMIN_API_KEY: z.string().min(16).optional(),
   NEXRENDER_API_KEY: z.string().optional(),
   NEXRENDER_BASE_URL: z.string().url().default("https://api.nexrender.com"),
   NEXRENDER_STUB: z
