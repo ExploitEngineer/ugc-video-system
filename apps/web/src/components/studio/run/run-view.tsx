@@ -31,6 +31,7 @@ import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { FeedbackBar } from "@/components/studio/run/feedback-bar";
 import { AgentMessage, UserMessage } from "@/components/studio/run/message";
 import { NowRunning } from "@/components/studio/run/now-running";
+import { RegenerateClip } from "@/components/studio/run/regenerate-clip";
 import {
   GATE_NEXT_LABEL,
   gateOf,
@@ -381,13 +382,24 @@ export function RunView({ runId }: { runId: string }) {
                 </span>
               </h3>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {segmentClips.map((asset, i) => (
-                  <ArtifactCard
-                    key={asset.id}
-                    asset={asset}
-                    title={`Segment ${i + 1}`}
-                  />
-                ))}
+                {segmentClips.map((asset, i) => {
+                  const segIdx = Number(asset.meta?.segmentIndex ?? i);
+                  return (
+                    <div key={asset.id} className="flex flex-col gap-2">
+                      <ArtifactCard asset={asset} title={`Segment ${i + 1}`} />
+                      {(run.status === "completed" ||
+                        run.status === "awaiting_regen") && (
+                        <div className="flex justify-end">
+                          <RegenerateClip
+                            runId={run.id}
+                            segmentIndex={segIdx}
+                            variant="ghost"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -436,6 +448,24 @@ export function RunView({ runId }: { runId: string }) {
         </AgentMessage>
       )}
 
+      {/* Agent — soft-failed video (recoverable): offer a retry/tweak. */}
+      {run.status === "awaiting_regen" && (
+        <AgentMessage label="Clip needs a retry">
+          <div className="border-warning/40 bg-warning/5 flex flex-col gap-3 rounded-xl border px-4 py-3">
+            <div className="flex items-start gap-3">
+              <TriangleAlertIcon className="text-warning size-5 shrink-0" />
+              <p className="text-muted-foreground text-sm">
+                {run.error ??
+                  "The video couldn't be generated after several tries. You can regenerate it — optionally with a small tweak."}
+              </p>
+            </div>
+            <div className="flex justify-end pl-8">
+              <RegenerateClip runId={run.id} variant="brand" label="Regenerate" />
+            </div>
+          </div>
+        </AgentMessage>
+      )}
+
       {/* Agent — the finished video, the closing reply of the thread. */}
       {run.status === "completed" && finalVideo && (
         <AgentMessage label="Your ad video">
@@ -451,12 +481,17 @@ export function RunView({ runId }: { runId: string }) {
                   ? "Your edited ad video"
                   : "Your ad video is ready"}
               </div>
-              <Button asChild variant="brand" size="sm">
-                <Link href={`/studio/${run.id}/edit`}>
-                  <PencilIcon className="size-4" />
-                  Edit video
-                </Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Regenerate the whole clip (no segmentIndex → 15s final, or
+                    all segments of a multi run) reusing the same sheets. */}
+                <RegenerateClip runId={run.id} />
+                <Button asChild variant="brand" size="sm">
+                  <Link href={`/studio/${run.id}/edit`}>
+                    <PencilIcon className="size-4" />
+                    Edit video
+                  </Link>
+                </Button>
+              </div>
             </div>
             <div className="p-4">
               <ArtifactCard

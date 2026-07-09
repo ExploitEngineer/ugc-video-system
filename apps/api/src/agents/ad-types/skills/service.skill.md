@@ -36,9 +36,9 @@ coaching with no physical product or uploaded person to show — "we provide…"
 
 ## Favored hooks
 
-- **defaultHooks:** `problem-solution`, `striking-visual`
-- **allowedHooks:** `problem-solution`, `striking-visual`, `pattern-interrupt`,
-  `curiosity-gap`, `relatable-scenario`, `confession`, `before-after`
+- **defaultHooks:** `problem-solution`, `question`
+- **allowedHooks:** `problem-solution`, `question`, `stat`, `striking-visual`,
+  `relatable-scenario`, `curiosity-gap`
 
 ## Look & treatment
 

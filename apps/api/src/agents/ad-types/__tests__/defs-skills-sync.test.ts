@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { REGISTRY } from "../registry.js";
+import { hasHook } from "../hooks/registry.js";
 import { type AdTypeDef, type FragmentCtx, FRAGMENT_SEAMS } from "../types.js";
 
 const HERE = import.meta.dirname;
@@ -85,6 +86,21 @@ describe("ad-types defs ⇄ skills are in sync", () => {
         expect(
           Array.isArray(out),
           `${def.id}.fragments.${seam} must return string[]`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every def hook id exists in the catalog; defaultHooks ⊆ allowedHooks", () => {
+    for (const def of Object.values(REGISTRY) as AdTypeDef[]) {
+      for (const id of [...def.defaultHooks, ...def.allowedHooks]) {
+        expect(hasHook(id), `${def.id}: non-catalog hook id "${id}"`).toBe(true);
+      }
+      const allowed = new Set(def.allowedHooks);
+      for (const id of def.defaultHooks) {
+        expect(
+          allowed.has(id),
+          `${def.id}: defaultHook "${id}" not in allowedHooks`,
         ).toBe(true);
       }
     }

@@ -300,3 +300,17 @@ export const feedbackInputSchema = z.object({
   message: z.string().trim().max(2000).optional().default(""),
 });
 export type FeedbackInput = z.infer<typeof feedbackInputSchema>;
+
+/**
+ * Body for `POST /runs/:id/regenerate-video` — re-render the video clip(s) of a
+ * finished or soft-failed (`awaiting_regen`) run, reusing the existing
+ * storyboard + reference sheets (no image re-gen). `segmentIndex` targets ONE
+ * clip of a multi-segment run (omitted = the 15s final clip, or ALL segments of
+ * a multi run). `note` is an optional one-line steer ("less movement", "slower")
+ * threaded into the video prompt.
+ */
+export const regenerateVideoInputSchema = z.object({
+  segmentIndex: z.number().int().min(0).optional(),
+  note: z.string().trim().max(2000).optional(),
+});
+export type RegenerateVideoInput = z.infer<typeof regenerateVideoInputSchema>;

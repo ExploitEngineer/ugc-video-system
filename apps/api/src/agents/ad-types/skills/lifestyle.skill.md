@@ -44,9 +44,9 @@ context. Disambiguation:
 
 ## Favored hooks
 
-- **defaultHooks:** `relatable-scenario`, `pattern-interrupt`
-- **allowedHooks:** `relatable-scenario`, `pattern-interrupt`, `curiosity-gap`,
-  `direct-callout`, `bold-claim`
+- **defaultHooks:** `relatable-scenario`, `before-after`
+- **allowedHooks:** `relatable-scenario`, `before-after`, `pattern-interrupt`,
+  `striking-visual`, `curiosity-gap`
 
 ## Look & treatment
 

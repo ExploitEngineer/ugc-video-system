@@ -9,20 +9,31 @@ import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { type Logger, createLogger } from "../../lib/log.js";
 import { padToProviderAspect } from "../../lib/image/normalize.js";
+import { cleanSheet2x2 } from "../../lib/image/crop.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
-import { buildDeterministicVideoPrompt, buildVideoPrompt } from "./prompt.js";
+import {
+  buildDeterministicVideoPrompt,
+  buildVideoPrompt,
+  videoRenderDirective,
+} from "./prompt.js";
 import { getAdType } from "../ad-types/registry.js";
 import { videoNegatives } from "../ad-types/fragments/looks.js";
+import {
+  MAX_VIDEO_ATTEMPTS,
+  promptTierForAttempt,
+  videoFailureDisposition,
+} from "./retry.js";
 
 export interface VideoBuilderInput {
   /**
-   * The LABELLED storyboard sheet — four numbered keyframe panels (01–04), each
-   * with a caption. Sent to the video provider as the ordered shot-sequence /
-   * framing guide (alongside the product sheet and, when present, the person
-   * face). Shot order + framing reach the model through these numbered keyframes
-   * plus the `scenes` text and `transcript`s. The badges/captions are direction
-   * only and must not be rendered into the final clip (enforced via the prompt).
+   * The LABELLED storyboard sheet — four keyframe panels in a 2×2, each with a
+   * scene badge + caption bar. Used as the ordered shot-sequence / framing guide
+   * (alongside the product sheet and, when present, the person face). Shot order
+   * + framing reach the model through the panels plus the `scenes` text and
+   * `transcript`s. The badges/captions are direction only — the sheet is CROPPED
+   * clean of them (`cleanStoryboardRefUrl`) before it is sent, so nothing leaks
+   * into the final clip; this stored labelled copy stays the UI/review artifact.
    */
   storyboardSheetRef: ImageRef;
   /**
@@ -149,13 +160,50 @@ async function providerSafeRefUrl(
 }
 
 /**
+ * Build the provider-facing storyboard reference: crop the LABELLED 2×2 sheet
+ * into a CLEAN 2×2 (no scene badges / caption bars / gridlines) so those baked
+ * annotations can't leak into the rendered clip, then normalize + upload a
+ * provider-only copy. The stored labelled sheet (the UI/review artifact) is
+ * untouched. Any fetch/crop/encode hiccup falls back to the labelled sheet via
+ * `providerSafeRefUrl`, so a crop failure never fails the run.
+ */
+async function cleanStoryboardRefUrl(
+  url: string,
+  runId: string,
+  log: Logger,
+): Promise<string> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const raw = new Uint8Array(await res.arrayBuffer());
+    const cleaned = await cleanSheet2x2(raw);
+    const norm = await padToProviderAspect(cleaned, "image/png", {
+      forceJpeg: true,
+    });
+    const { url: safeUrl } = await uploadAsset({
+      runId,
+      kind: "storyboard_sheet",
+      bytes: norm.bytes,
+      contentType: norm.mime,
+    });
+    log.info("uploaded cleaned storyboard ref copy (badges/captions cropped)");
+    return safeUrl;
+  } catch (err) {
+    log.warn("storyboard clean-crop skipped — using labelled sheet", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return providerSafeRefUrl(url, runId, "storyboard_sheet", log);
+  }
+}
+
+/**
  * Video Builder skill — compose an LLM motion/audio prompt from the storyboard
  * scenes + transcripts (text plan) and send it to Seedance 2.0 (via the
- * injected video provider) together with the LABELLED storyboard sheet as the
- * ordered shot-sequence guide. The sheet's four numbered panels (01–04) are the
- * shot sequence — the model follows them in order while rendering ONE clean
- * continuous clip; the badges/captions are direction only and (per the prompt)
- * must not appear in the output. The product sheet (plain ref) and, when there
+ * injected video provider) together with the storyboard sheet as the ordered
+ * shot-sequence guide. The sheet's four panels are the shot sequence — the model
+ * follows them in order; the sheet is CROPPED clean of its badges/captions
+ * before submit (`cleanStoryboardRefUrl`), so no annotations leak into the
+ * output. The product sheet (plain ref) and, when there
  * is a person, the face (asset ref) are sent alongside it to lock identity.
  * Poll until ready, download, and persist `assets` (final_video) + `videos`.
  * Final output of the pipeline; no merge step.
@@ -219,11 +267,11 @@ export async function videoBuilder(
       brandText: ctx.brandText,
       supportingCast: ctx.supportingCast,
     });
-    let videoPrompt = "";
-    for (let attempt = 1; attempt <= 2 && !videoPrompt.trim(); attempt++) {
+    let llmVideoPrompt = "";
+    for (let attempt = 1; attempt <= 2 && !llmVideoPrompt.trim(); attempt++) {
       try {
         const planRaw = await ctx.openai.chat(messages, { jsonMode: true });
-        videoPrompt =
+        llmVideoPrompt =
           parseJsonObject<{ videoPrompt?: string }>(
             planRaw,
           ).videoPrompt?.trim() ?? "";
@@ -234,33 +282,49 @@ export async function videoBuilder(
         });
       }
     }
-    if (!videoPrompt) {
-      videoPrompt = buildDeterministicVideoPrompt({
-        adStyle: ctx.adStyle,
-        adType: ctx.adType,
-        scenes: input.scenes,
-        durationSec,
-        aspectRatio: ctx.aspectRatio,
-        characterAnchor: input.characterAnchor,
-        segmentIndex: input.segmentIndex,
-        hasProductSheet: Boolean(input.productSheetRef?.source),
-        brandText: ctx.brandText,
-        supportingCast: ctx.supportingCast,
-      });
+    // The simpler, camerafixed deterministic prompt — the retry ladder's final
+    // tier (and the fallback when the LLM returned nothing). Built lazily so a
+    // healthy first attempt never pays for it.
+    let detVideoPromptCache: string | undefined;
+    const detVideoPrompt = (): string => {
+      if (detVideoPromptCache === undefined) {
+        detVideoPromptCache = buildDeterministicVideoPrompt({
+          adStyle: ctx.adStyle,
+          adType: ctx.adType,
+          scenes: input.scenes,
+          durationSec,
+          aspectRatio: ctx.aspectRatio,
+          characterAnchor: input.characterAnchor,
+          segmentIndex: input.segmentIndex,
+          hasProductSheet: Boolean(input.productSheetRef?.source),
+          brandText: ctx.brandText,
+          supportingCast: ctx.supportingCast,
+        });
+      }
+      return detVideoPromptCache;
+    };
+    // The prompt BODY for a ladder tier: the LLM prompt for early attempts (or
+    // the deterministic one if the LLM returned nothing), the deterministic
+    // prompt for the final attempt.
+    const videoPromptBody = (tier: "llm" | "deterministic"): string =>
+      tier === "deterministic" || !llmVideoPrompt
+        ? detVideoPrompt()
+        : llmVideoPrompt;
+    if (!llmVideoPrompt) {
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
 
     // 2. Submit to the video provider. The detailed scene descriptions +
     // transcripts ride in the text prompt; the reference images carry identity,
-    // framing and shot order. The prompt tells the model to follow panels 01→04
-    // in order yet keep the badges/captions/grid out of the rendered frame.
+    // framing and shot order. The storyboard ref is cropped clean of its
+    // badges/captions/grid before submit, so the model just follows the panels
+    // in order and renders one full-frame scene.
     const storyboardUrl = input.storyboardSheetRef.source;
     const productUrl = input.productSheetRef?.source;
 
     // The @Image numbering is built from the SAME content[] order submit uses
     // (provider appends `referenceImages` (plain) then `personReferences`
     // (asset) after the text), so the legend can never drift from the array.
-    let prompt: string;
     let referenceImages: string[];
     let personReferences: string[];
 
@@ -279,16 +343,18 @@ export async function videoBuilder(
     // human image_url trips Seedance's input privacy filter
     // (InputImageSensitiveContentDetected.PrivacyInformation → the run failed
     // PROVIDER_CONTENT_BLOCKED). So route the sheet through the CreateAsset
-    // (asset://) path, which clears moderation and accepts aspect 0.4–2.5. Pad a
-    // provider copy first so a stray generated dimension can't fail the run.
-    // Order + count are preserved, so the @Image legend below stays correct.
+    // (asset://) path, which clears moderation and accepts aspect 0.4–2.5. The
+    // storyboard ref is first CROPPED clean of its badges/caption bars/gridlines
+    // (cleanStoryboardRefUrl) so those baked annotations can't leak into the clip
+    // — that also pads a provider copy so a stray generated dimension can't fail
+    // the run. Order + count are preserved, so the @Image legend below stays correct.
     const lookFamily = getAdType(ctx.adType).lookFamily;
     referenceImages = productUrl
       ? [await providerSafeRefUrl(productUrl, ctx.runId, "product_sheet", log)]
       : [];
     personReferences = [];
     personReferences.push(
-      await providerSafeRefUrl(storyboardUrl, ctx.runId, "storyboard_sheet", log),
+      await cleanStoryboardRefUrl(storyboardUrl, ctx.runId, log),
     );
     if (faceUrl) {
       personReferences.push(
@@ -331,141 +397,199 @@ export async function videoBuilder(
     // gets its own directive + negatives.
     const isService = ctx.adType === "service";
     const negatives = isService
-      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people); never render the sheet's badges, grid lines or caption bars."
+      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people)."
       : videoNegatives(lookFamily);
-    const renderDirective = isService
-      ? "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene — each output frame is ONE full-frame scene; match the board's identity and look, never its panel grid, badges or labels."
-      : "Render ONE continuous live-action take that fills the whole frame the entire time — match the board's framing and identity, never its panel grid, badges or labels.";
+    // Per-look render directive (single source of truth in ./prompt.js): service
+    // = skit cuts; cinematic_polished + demo_clean = clean cuts between beats
+    // (demo pins the product rigid); ugc_authentic = one continuous take. Kept in
+    // lockstep with buildVideoPrompt / buildDeterministicVideoPrompt so the
+    // composed prompt can never carry a cut-vs-continuous contradiction.
+    const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
-    prompt = `${roles.join(". ")}. ${renderDirective}\n\n${videoPrompt}\n\n${negatives}${cameraFixed}`;
+    const composePrompt = (tier: "llm" | "deterministic"): string =>
+      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier)}\n\n${negatives}${cameraFixed}`;
 
-    const task = await ctx.video.submitVideo({
-      referenceImages,
-      personReferences,
-      // Per-SEGMENT face-asset namespace: every 60s segment submits a DIFFERENT
-      // crop strip (all showing the same person), but the provider names face
-      // assets `${tag}-person-${i}` with `i` reset per submit — so a shared
-      // `ctx.runId` tag would register seg0 and seg1 both as `${runId}-person-0`
-      // and `findAssetByName` would hand segments 1-3 segment 0's strip. Scope
-      // the tag by segment so each strip registers (and resolves) distinctly.
-      referenceTag: isSegment
-        ? `${ctx.runId}-seg${input.segmentIndex}`
-        : ctx.runId,
-      // Multi-segment runs share ONE run-stable seed (same runId → same seed)
-      // so the synthesized person/voice stay consistent across the merged
-      // clips. Single 15s clips omit it for per-run variety; the eval env seed
-      // still overrides either way (handled in the provider).
-      seed: isSegment ? stableSeed(ctx.runId) : undefined,
-      prompt,
-      durationSec,
-      aspectRatio: ctx.aspectRatio,
-    });
-
-    // 3. Poll until completed / failed / timeout.
-    taskId = task.taskId;
-    const submittedAt = Date.now();
-    startedAt = submittedAt;
-    const deadline = submittedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
+    // RETRY LADDER: submit → poll → download, up to MAX_VIDEO_ATTEMPTS times.
+    // A TRANSIENT provider failure (network / 5xx / timeout / expired /
+    // rate-limit) re-submits after backoff; the final attempt escalates to the
+    // simpler deterministic prompt. A non-transient failure (content block, bad
+    // input) throws immediately — re-submitting the same inputs would not help.
+    // Reference uploads + the @Image legend are built ONCE above; only the
+    // prompt body + submit + poll + download repeat. The clip binds to a fresh
+    // provider task each attempt (submit is non-idempotent), so a partial charge
+    // is unavoidable — the ladder trades that for a far lower dead-run rate.
     const resolution = env.BYTEPLUS_VIDEO_RESOLUTION;
     const segLabel = isSegment ? `, segment ${input.segmentIndex}` : "";
-    log.info("task submitted — polling BytePlus", { taskId: task.taskId });
-    let result = await ctx.video.pollVideo(task);
-    lastStatus = result.status ?? "running";
-    // Split the wall-clock into BytePlus QUEUE wait vs actual RENDER: mark the
-    // first poll that reports `running`. Tells us whether a slow run is provider
-    // capacity (long queue) or pure 1080p render time — invisible while `queued`
-    // and `running` both read as "processing".
-    let runningSince: number | undefined =
-      lastStatus === "running" ? submittedAt : undefined;
-    while (result.state === "processing") {
-      const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
-      if (Date.now() > deadline) {
-        throw new Error(
-          `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms — ${elapsedSec}s elapsed, last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel}`,
-        );
-      }
-      await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
-      result = await ctx.video.pollVideo(task);
-      lastStatus = result.status ?? lastStatus;
-      if (runningSince === undefined && lastStatus === "running") {
-        runningSince = Date.now();
-        log.info("task left queue — rendering", {
-          taskId: task.taskId,
-          queuedSec: Math.round((runningSince - submittedAt) / 1000),
-        });
-      }
-      log.debug("still processing", {
-        taskId: task.taskId,
-        status: lastStatus,
-        elapsedSec: Math.round((Date.now() - submittedAt) / 1000),
-      });
-    }
-    if (result.state === "failed" || !result.videoUrl) {
-      const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
-      // pollVideo already prefixes failures with the taskId + raw status; only
-      // synthesize a message for the (rare) completed-without-url case.
-      throw new Error(
-        result.error ??
-          `video task ${task.taskId} produced no video — last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel} (${elapsedSec}s elapsed)`,
-      );
-    }
-
-    // Generation timing (submit → ready, excludes download). queuedSec falls
-    // back to 0 when we never observed a `running` poll (treat as render).
-    const readyAt = Date.now();
-    const totalSec = Math.round((readyAt - submittedAt) / 1000);
-    const queuedSec = runningSince
-      ? Math.round((runningSince - submittedAt) / 1000)
-      : 0;
-    log.info("✓ task ready", {
-      taskId: task.taskId,
-      totalSec,
-      queuedSec,
-      renderSec: totalSec - queuedSec,
-      resolution,
-      durationSec,
-    });
-
-    // 4. Download the mp4. Pass any auth headers the provider supplied
-    // (Seedance's video_url is directly fetchable, so this is usually empty).
-    // A single AbortController per attempt bounds BOTH the fetch AND the body
-    // read (arrayBuffer) — otherwise a connection that opens then never sends
-    // hangs the run forever with no error (the retry only caught THROWN errors,
-    // not a silent stall). Retry transient blips so a flaky download doesn't
-    // waste the already-generated (paid) clip.
-    log.info("downloading video", { taskId: task.taskId });
+    let task!: Awaited<ReturnType<typeof ctx.video.submitVideo>>;
     let bytes: Uint8Array | undefined;
-    let lastErr = "";
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
+    let hasAudio = true;
+    let videoPrompt = "";
+    for (let attempt = 1; attempt <= MAX_VIDEO_ATTEMPTS; attempt++) {
+      const tier = promptTierForAttempt(attempt);
+      videoPrompt = videoPromptBody(tier);
+      const prompt = composePrompt(tier);
       try {
-        const res = await fetch(result.videoUrl, {
-          headers: result.downloadHeaders,
-          signal: ac.signal,
+        task = await ctx.video.submitVideo({
+          referenceImages,
+          personReferences,
+          // Per-SEGMENT face-asset namespace: every 60s segment submits a
+          // DIFFERENT crop strip (all showing the same person), but the provider
+          // names face assets `${tag}-person-${i}` with `i` reset per submit — so
+          // a shared `ctx.runId` tag would register seg0 and seg1 both as
+          // `${runId}-person-0` and `findAssetByName` would hand segments 1-3
+          // segment 0's strip. Scope the tag by segment so each strip registers
+          // (and resolves) distinctly. Retries reuse the same tag (idempotent
+          // asset registration), so a re-submit does not multiply face assets.
+          referenceTag: isSegment
+            ? `${ctx.runId}-seg${input.segmentIndex}`
+            : ctx.runId,
+          // Multi-segment runs share ONE run-stable seed (same runId → same
+          // seed) so the synthesized person/voice stay consistent across the
+          // merged clips. Single 15s clips omit it for per-run variety; the eval
+          // env seed still overrides either way (handled in the provider).
+          seed: isSegment ? stableSeed(ctx.runId) : undefined,
+          prompt,
+          durationSec,
+          aspectRatio: ctx.aspectRatio,
         });
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        bytes = new Uint8Array(await res.arrayBuffer());
-        break;
-      } catch (err) {
-        const cause = (err as { cause?: { code?: string; message?: string } })
-          .cause;
-        lastErr =
-          (err as Error)?.name === "AbortError"
-            ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
-            : (cause?.code ?? cause?.message ?? (err as Error).message);
-        log.warn("video download retry", { attempt, err: lastErr });
-        if (attempt < 3) await sleep(800 * attempt);
-      } finally {
-        clearTimeout(timer);
+
+        // 3. Poll until completed / failed / timeout.
+        taskId = task.taskId;
+        const submittedAt = Date.now();
+        startedAt = submittedAt;
+        const deadline = submittedAt + env.BYTEPLUS_POLL_TIMEOUT_MS;
+        log.info("task submitted — polling BytePlus", {
+          taskId: task.taskId,
+          attempt,
+          tier,
+        });
+        let result = await ctx.video.pollVideo(task);
+        lastStatus = result.status ?? "running";
+        // Split the wall-clock into BytePlus QUEUE wait vs actual RENDER: mark
+        // the first poll that reports `running`. Tells us whether a slow run is
+        // provider capacity (long queue) or pure 1080p render time — invisible
+        // while `queued` and `running` both read as "processing".
+        let runningSince: number | undefined =
+          lastStatus === "running" ? submittedAt : undefined;
+        while (result.state === "processing") {
+          const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
+          if (Date.now() > deadline) {
+            throw new Error(
+              `video task ${task.taskId} timed out after ${env.BYTEPLUS_POLL_TIMEOUT_MS}ms — ${elapsedSec}s elapsed, last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel}`,
+            );
+          }
+          await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
+          result = await ctx.video.pollVideo(task);
+          lastStatus = result.status ?? lastStatus;
+          if (runningSince === undefined && lastStatus === "running") {
+            runningSince = Date.now();
+            log.info("task left queue — rendering", {
+              taskId: task.taskId,
+              queuedSec: Math.round((runningSince - submittedAt) / 1000),
+            });
+          }
+          log.debug("still processing", {
+            taskId: task.taskId,
+            status: lastStatus,
+            elapsedSec: Math.round((Date.now() - submittedAt) / 1000),
+          });
+        }
+        if (result.state === "failed" || !result.videoUrl) {
+          const elapsedSec = Math.round((Date.now() - submittedAt) / 1000);
+          // pollVideo already prefixes failures with the taskId + raw status;
+          // only synthesize a message for the (rare) completed-without-url case.
+          throw new Error(
+            result.error ??
+              `video task ${task.taskId} produced no video — last status=${lastStatus}, ${resolution} ${durationSec}s${segLabel} (${elapsedSec}s elapsed)`,
+          );
+        }
+
+        // Generation timing (submit → ready, excludes download). queuedSec falls
+        // back to 0 when we never observed a `running` poll (treat as render).
+        const readyAt = Date.now();
+        const totalSec = Math.round((readyAt - submittedAt) / 1000);
+        const queuedSec = runningSince
+          ? Math.round((runningSince - submittedAt) / 1000)
+          : 0;
+        log.info("✓ task ready", {
+          taskId: task.taskId,
+          totalSec,
+          queuedSec,
+          renderSec: totalSec - queuedSec,
+          resolution,
+          durationSec,
+        });
+
+        // 4. Download the mp4. Pass any auth headers the provider supplied
+        // (Seedance's video_url is directly fetchable, so this is usually
+        // empty). A single AbortController per attempt bounds BOTH the fetch AND
+        // the body read (arrayBuffer) — otherwise a connection that opens then
+        // never sends hangs the run forever with no error. Retry transient blips
+        // so a flaky download doesn't waste the already-generated (paid) clip.
+        log.info("downloading video", { taskId: task.taskId });
+        let lastErr = "";
+        for (let dl = 1; dl <= 3; dl++) {
+          const ac = new AbortController();
+          const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
+          try {
+            const res = await fetch(result.videoUrl, {
+              headers: result.downloadHeaders,
+              signal: ac.signal,
+            });
+            if (!res.ok) throw new Error(`status ${res.status}`);
+            bytes = new Uint8Array(await res.arrayBuffer());
+            break;
+          } catch (err) {
+            const cause = (
+              err as { cause?: { code?: string; message?: string } }
+            ).cause;
+            lastErr =
+              (err as Error)?.name === "AbortError"
+                ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
+                : (cause?.code ?? cause?.message ?? (err as Error).message);
+            log.warn("video download retry", { dl, err: lastErr });
+            if (dl < 3) await sleep(800 * dl);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
+        log.info("✓ video downloaded", {
+          taskId: task.taskId,
+          bytes: bytes.length,
+        });
+        hasAudio = result.hasAudio ?? true;
+        break; // attempt succeeded — leave the ladder
+      } catch (attemptErr) {
+        const failure = classifyRunError(attemptErr, "VIDEO_GENERATION_FAILED");
+        const isLast = attempt >= MAX_VIDEO_ATTEMPTS;
+        const retryable =
+          videoFailureDisposition(failure.code, step) === "retry";
+        if (!retryable || isLast) throw attemptErr; // outer catch classifies + throws
+        // Transient + attempts remaining: record the attempt (a `regenerated`
+        // event WITHOUT a `strategy` key, so it does not count against the
+        // Critic's per-run regen budget) and re-submit after backoff.
+        log.warn("video attempt failed — retrying", {
+          attempt,
+          code: failure.code,
+          err: failure.detail ?? failure.message,
+        });
+        await writeStepEvent({
+          runId: ctx.runId,
+          step,
+          status: "regenerated",
+          payload: {
+            ladderAttempt: attempt,
+            tier,
+            code: failure.code,
+            ...(taskId ? { taskId } : {}),
+            ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
+          },
+        }).catch(() => {});
+        await sleep(1500 * attempt);
       }
     }
-    if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
-    log.info("✓ video downloaded", {
-      taskId: task.taskId,
-      bytes: bytes.length,
-    });
-    const hasAudio = result.hasAudio ?? true;
+    if (!bytes) throw new Error("video ladder produced no clip");
 
     // 5. Persist: Storage → assets (final_video) → videos row, in one tx.
     log.info("uploading video to storage", { bytes: bytes.length });

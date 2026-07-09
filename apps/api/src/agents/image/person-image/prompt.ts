@@ -60,7 +60,7 @@ const SHEET_RULES =
   "directions — clearly different, never duplicated. A thin neutral separator between all panels, a plain seamless " +
   "neutral studio backdrop, soft natural lighting with gentle believable shadowing, " +
   "the person at a consistent scale within each row. Photorealistic — a real human " +
-  "photographed with a real camera (natural skin texture, lifelike face, relaxed " +
+  "photographed with a real camera (natural healthy skin, lifelike face, relaxed " +
   "candid expression), NOT CGI/plastic/illustration. No text, labels, captions, " +
   "numbers, arrows or watermarks anywhere.";
 
@@ -149,12 +149,13 @@ export function buildPersonImagePrompt({
     "- The two profile columns are MIRROR-OPPOSITE: the left and right profiles (and",
     "  their face close-ups) face OPPOSITE directions and must be clearly distinct —",
     "  never render the two profiles as the same or duplicated image.",
-    `- Output/canvas resolution: ${resolutionLabel}. Render at full detail.`,
+    `- Output/canvas resolution: ${resolutionLabel}; render at natural, flattering detail (not maxed-out).`,
     "- A thin, uniform neutral separator line (a small gutter/border) divides all",
     "  eight panels so each reads as its own clean panel.",
     "- Plain seamless studio backdrop: one flat neutral color, identical in",
-    "  every panel. Soft, natural studio lighting with gentle, believable shadowing",
-    "  (lifelike face modelling), consistent across all panels.",
+    "  every panel. Soft, natural, low-contrast studio lighting with gentle,",
+    "  believable shadowing (lifelike face modelling), neutral white balance,",
+    "  consistent across all panels.",
     "- Same person at a consistent scale within each row. In the full-body row, a",
     "  natural, relaxed standing pose with a candid, natural expression (not a",
     "  stiff posed stock smile), BOTH HANDS EMPTY and visible, holding or",
@@ -166,13 +167,14 @@ export function buildPersonImagePrompt({
     "",
     "PHOTOREALISM — the person MUST look like a REAL, living human photographed",
     "with a real camera, NOT a 3D render, CGI character, doll, or illustration:",
-    "- Natural skin with realistic texture, pores, fine detail and subtle",
-    "  imperfections; natural facial asymmetry (not mirror-symmetric); lifelike",
-    "  eyes with natural catchlights; real, individually detailed hair; believable",
-    "  hands and proportions.",
-    "- Soft, even, flattering studio lighting on the skin with natural soft",
-    "  shadowing; full-frame camera, sharp portrait/prime lens, accurate skin",
-    "  tones and natural color.",
+    "- Natural, healthy, even skin with soft realistic shading, balanced skin",
+    "  tone, no redness, no blotchiness; natural facial asymmetry (not",
+    "  mirror-symmetric); lifelike eyes with natural catchlights; real,",
+    "  individually detailed hair; believable hands and proportions.",
+    "- Soft, even, flattering, low-contrast light on the skin with natural soft",
+    "  shadowing; neutral white balance, accurate skin tones and natural colour;",
+    "  full-frame camera, 85mm-equivalent portrait/prime lens, natural",
+    "  perspective.",
     "- AVOID the plastic/airbrushed/over-smoothed/waxy 'AI' look, uncanny faces,",
     "  doll-like skin, symmetric mannequin features, or any cartoon/painterly",
     "  styling. The result should be indistinguishable from a real photo shoot.",
@@ -207,10 +209,11 @@ export function buildPersonImagePrompt({
     "the RIGHT frame edge; back — the two profiles being mirror-opposite,",
     "clearly-different views; bottom row four matching face close-ups, each facing",
     "the same direction as the body above it) with thin separators between all panels, the PHOTOREALISTIC",
-    "real-human look (real camera, natural skin texture,",
-    "lifelike face, candid relaxed expression, soft natural lighting with gentle",
-    "shadowing — a real, relatable everyday person, no CGI/plastic/airbrushed or",
-    "glossy-model look), EMPTY hands holding nothing and NO product / props /",
+    "real-human look (real camera, natural healthy skin, balanced skin tone,",
+    "neutral white balance, no redness, lifelike face, candid relaxed expression,",
+    "soft natural low-contrast lighting with gentle shadowing, 85mm-equivalent",
+    "portrait lens and natural perspective - a real, relatable everyday person, no",
+    "CGI/plastic/airbrushed or glossy-model look), EMPTY hands holding nothing and NO product / props /",
     "invented accessories, the images-only / no-added-text rule, and the",
     `${resolutionLabel} resolution. \`views\` (all four columns) and`,
     "`personDetails` are metadata (NOT drawn on the image).",

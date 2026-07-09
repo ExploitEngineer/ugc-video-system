@@ -4,15 +4,18 @@
 // block, all `cinematic_polished` types share one polished block, etc.
 //
 // Provenance:
-//   ugc_authentic       — keyframeLook began VERBATIM from the storyboard UGC
-//                         branch (legacy `ugc` look); a photoreal-skin block was
-//                         APPENDED (Fix 3) and the legacy fixtures re-baselined,
-//                         so it is no longer byte-identical to the pre-refactor
-//                         string. The other LOOK seams had no inline legacy
-//                         ternary, so they return [] (no-op).
-//   cinematic_polished  — keyframeLook began VERBATIM from the storyboard
+//   ugc_authentic       - keyframeLook began VERBATIM from the storyboard UGC
+//                         branch (legacy `ugc` look); the appended photoreal-skin
+//                         block (Fix 3) was REPLACED in the Phase-1 skin/colour
+//                         refactor by a softened skin + neutral-white-balance +
+//                         controlled-lighting block (drop pore/film-grain/oil-sheen
+//                         language, add a redness kill-switch), and the legacy
+//                         fixtures were re-baselined. The other LOOK seams had no
+//                         inline legacy ternary, so they return [] (no-op).
+//   cinematic_polished  - keyframeLook began VERBATIM from the storyboard
 //                         inspirational branch (legacy `inspirational` look); the
-//                         same photoreal-skin block was APPENDED (Fix 3).
+//                         same photoreal-skin block was REPLACED by the Phase-1
+//                         softened skin/colour/lighting block.
 //   graphic_text        — NET-NEW. No legacy string exists; authored from the
 //                         look definition (kinetic typography, no live footage).
 //   demo_clean          — NET-NEW. Authored from the look definition (clean
@@ -25,17 +28,17 @@ import type { FragmentCtx, LookFamily, LookStrategy } from "../types.js";
 const ugc_authentic: LookStrategy = {
   // VERBATIM-MOVE: image/storyboard/prompt.ts `keyframeLook` (adType === "ugc").
   keyframeLook: (_ctx: FragmentCtx): string[] => [
-    "- UGC LOOK — render every panel as an AUTHENTIC, phone-captured moment, NOT",
-    "  a glossy studio commercial: natural / available light from real windows or",
-    "  lamps, a real lived-in everyday setting with ordinary background detail,",
-    "  candid handheld-style framing, the person relaxed and real (talking to",
-    "  camera where it fits). Keep product/person IDENTITY faithful to the",
-    "  reference sheets — only lighting, setting and framing read as real UGC.",
-    "  Neutral 5500-6000K white balance, true-to-life colour, no warm/sepia/orange cast.",
-    "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
-    "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
-    "  natural oil sheen on the high points, faint 35mm film grain — a real candid",
-    "  phone photo, NOT a smoothed/waxy/airbrushed uncanny AI face or 3D render.",
+    "- UGC LOOK - render every panel as an AUTHENTIC, phone-captured moment, NOT",
+    "  a glossy studio commercial: a real lived-in everyday setting with ordinary",
+    "  background detail, candid handheld-style framing, the person relaxed and",
+    "  real (talking to camera where it fits). Soft natural window/room light,",
+    "  gentle and even. Keep product/person IDENTITY faithful to the reference",
+    "  sheets - only lighting, setting and framing read as real UGC. Neutral white",
+    "  balance, true-to-life colour, no warm/sepia/orange cast.",
+    "- SKIN on any face: natural, healthy skin with soft realistic texture, even",
+    "  complexion, true-to-life colour, balanced skin tone, no redness, no",
+    "  blotchiness, no heavy retouching - candid but clean, NOT a smoothed/waxy/",
+    "  airbrushed uncanny AI face or 3D render.",
   ],
   // No legacy inline ternary for these seams → [] keeps the legacy path identical.
   shotDirection: (_ctx) => [],
@@ -50,15 +53,15 @@ const ugc_authentic: LookStrategy = {
 const cinematic_polished: LookStrategy = {
   // VERBATIM-MOVE: image/storyboard/prompt.ts `keyframeLook` (else / inspirational).
   keyframeLook: (_ctx) => [
-    "- CINEMATIC LOOK — render every panel as a polished, cinematic keyframe:",
-    "  intentional lighting, rich colour and depth, shallow depth of field, a still",
-    "  lifted straight from a high-end commercial. Keep skin and faces PHOTOGRAPHIC",
-    "  with real texture. True-to-life colour and a neutral white balance — no",
-    "  heavy warm/sepia/orange cast.",
-    "- PHOTOREAL SKIN on any face: visible pores, fine micro-texture, peach fuzz,",
-    "  fine flyaway hairs, slight natural asymmetry, subtle natural redness, a",
-    "  natural oil sheen on the high points, faint 35mm film grain — a real",
-    "  photographed frame, NOT a waxy/plastic/over-retouched AI portrait or 3D render.",
+    "- CINEMATIC LOOK - render every panel as a polished, cinematic keyframe:",
+    "  soft directional key light with gentle fill, flattering and low-contrast on",
+    "  faces, rich colour and depth, shallow depth of field, a still lifted straight",
+    "  from a high-end commercial. Keep skin and faces PHOTOGRAPHIC. True-to-life",
+    "  colour and a neutral white balance - no heavy warm/sepia/orange cast.",
+    "- SKIN on any face: smooth, healthy, even skin with soft editorial retouching,",
+    "  soft flattering light, balanced skin tone, even complexion, no redness, no",
+    "  blotchiness - a real photographed frame, NOT a waxy/plastic/over-retouched",
+    "  AI portrait or 3D render.",
   ],
   shotDirection: (_ctx) => [
     "- Vary the framing across panels for cinematic rhythm — mix WIDE, MEDIUM,",
@@ -92,6 +95,8 @@ const demo_clean: LookStrategy = {
     "  no props, no clutter — a commercial catalog look. Never a busy lived-in scene,",
     "  never glossy HDR over-processing that distorts the real material; no extra",
     "  objects, no invented text, no morphing product.",
+    "- If any hands appear, render natural clean skin with balanced tone, neutral",
+    "  white balance, no redness.",
   ],
   shotDirection: (_ctx) => [
     "- Controlled product angles — clean front / three-quarter / top-down flat-lay /",
@@ -141,10 +146,10 @@ export function videoNegatives(family: LookFamily): string {
   // failures actually seen in that look — per the seedance-2.0-prompting skill.
   switch (family) {
     case "demo_clean":
-      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; one continuous full-frame scene. No morphing product, no garbled label, no jitter.";
+      return "The product stays rigid and dimensionally fixed — silhouette, proportions and printed label identical every frame; smooth, slow, stable motion; each frame is one full-frame scene. No morphing product, no garbled label, no jitter.";
     case "ugc_authentic":
       return "One real person and one product, identity constant every frame, with natural well-formed hands; stable handheld motion; one continuous full-frame scene. No music, no on-screen text, no warped hands.";
     case "cinematic_polished":
-      return "One consistent face and product, identity constant and stable every frame; smooth motion; one continuous full-frame scene. No identity drift, no on-screen text, no warped face.";
+      return "One consistent face and product, identity constant and stable every frame; smooth motion; each frame is one full-frame scene. No identity drift, no on-screen text, no warped face.";
   }
 }

@@ -18,6 +18,7 @@
 import {
   detectPlaceholders,
   isMultiSegment,
+  type RunStatus,
   segmentCountFor,
   type Step,
 } from "@ugc/shared";
@@ -44,6 +45,7 @@ import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { videoAgent } from "../video/index.js";
+import { dispositionAfterLadder } from "../video/retry.js";
 import type { SkillContext } from "../types.js";
 import { FALLBACK_AD_TYPE_ID, getAdType } from "../ad-types/registry.js";
 import { reconcile } from "../ad-types/reconcile.js";
@@ -253,7 +255,12 @@ async function executeStep(
 ): Promise<{ outcome?: CriticOutcome }> {
   const runId = ctx.runId;
   const { productUpload, personUpload } = await loadUploads(runId);
-  const userPrompt = (await readRun(runId))?.prompt ?? "";
+  const runRow = await readRun(runId);
+  const userPrompt = runRow?.prompt ?? "";
+  // A one-line steer from `POST /regenerate-video` (persisted in `runs.feedback`)
+  // rides into the video prompt as `critique`. Only the video/segment_video
+  // steps read it; the route resets it each regen, so a stale note can't bleed.
+  const regenNote = runRow?.feedback?.trim() || undefined;
 
   switch (step) {
     case "product_sheet": {
@@ -410,6 +417,7 @@ async function executeStep(
         // persons (no text brief) — the gender-locked scene text carries it then.
         characterAnchor: ctx.personBrief,
         userPrompt,
+        critique: regenNote,
       });
       return {};
     }
@@ -611,6 +619,7 @@ async function executeStep(
             userPrompt,
             segmentIndex: sheet.segmentIndex,
             segmentCount: segCount,
+            critique: regenNote,
           });
         },
       );
@@ -880,7 +889,8 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     if (
       status === "completed" ||
       status === "failed" ||
-      status === "awaiting_confirmation"
+      status === "awaiting_confirmation" ||
+      status === "awaiting_regen"
     ) {
       return;
     }
@@ -1130,6 +1140,12 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
  * Mark a run failed and record a `failed` step_event (best effort). The run row
  * only ever gets the classified friendly message + code; the raw error text
  * stays in the server log and the step_event payload (`detail`).
+ *
+ * A RECOVERABLE video failure (a transient provider error that exhausted the
+ * in-clip retry ladder, or a content-safety block) parks the run at the
+ * `awaiting_regen` soft-fail gate instead of dead `failed`, so the user can
+ * regenerate/tweak the clip. Only `video`/`segment_video` steps qualify; every
+ * other failure is terminal `failed` exactly as before.
  */
 export async function failRun(
   runId: string,
@@ -1138,9 +1154,11 @@ export async function failRun(
 ): Promise<void> {
   const failure = classifyRunError(err);
   const raw = err instanceof Error ? err.message : String(err);
+  const soft = dispositionAfterLadder(failure.code, step) === "soft_fail";
+  const finalStatus: RunStatus = soft ? "awaiting_regen" : "failed";
   logRunError(
     runId,
-    `${step ?? "run"} failed [${failure.code}]: ${failure.detail ?? raw}`,
+    `${step ?? "run"} failed [${failure.code}] → ${finalStatus}: ${failure.detail ?? raw}`,
   );
   if (step) {
     await writeStepEvent({
@@ -1151,6 +1169,7 @@ export async function failRun(
         error: failure.userMessage,
         code: failure.code,
         detail: truncateDetail(failure.detail ?? raw),
+        ...(soft ? { recoverable: true } : {}),
       },
     }).catch((e) =>
       logRunError(
@@ -1160,14 +1179,14 @@ export async function failRun(
     );
   }
   await setRun(runId, {
-    status: "failed",
+    status: finalStatus,
     ...(step ? { currentStep: step } : {}),
     error: failure.userMessage,
     errorCode: failure.code,
   }).catch((e) =>
     logRunError(
       runId,
-      `could not mark run failed: ${e instanceof Error ? e.message : String(e)}`,
+      `could not mark run ${finalStatus}: ${e instanceof Error ? e.message : String(e)}`,
     ),
   );
 }

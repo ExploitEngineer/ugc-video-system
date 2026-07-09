@@ -78,8 +78,10 @@ describe("downgradeTarget (look-preserving chain)", () => {
 
 describe("clampHooks", () => {
   it("strips a person-only hook when no person, seeds a compatible default", () => {
-    const sel = clampHooks("testimonial", ["testimonial"], true, false);
-    expect(sel.visualLead.id).toBe("problem-solution");
+    // confession is person-gated (worksWithoutPerson: false); with no person it is
+    // dropped and testimonial falls back to its first compatible default.
+    const sel = clampHooks("testimonial", ["confession"], true, false);
+    expect(sel.visualLead.id).toBe("relatable-scenario");
   });
 });
 

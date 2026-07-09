@@ -54,9 +54,8 @@ Neighbour disambiguation:
 ## Favored hooks
 
 - **defaultHooks:** `confession`, `problem-solution`
-- **allowedHooks:** `confession`, `problem-solution`, `curiosity-gap`,
-  `contrarian`, `direct-callout`, `relatable-scenario`, `question`,
-  `pattern-interrupt`
+- **allowedHooks:** `confession`, `problem-solution`, `relatable-scenario`,
+  `question`, `curiosity-gap`
 
 The `confession` opener ("I'll be honest…", "for years I couldn't…") fits the
 intimate founder register; `problem-solution` carries the why-we-built-it arc.

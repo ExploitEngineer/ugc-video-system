@@ -66,3 +66,30 @@ export async function cancelRunAction(
 ): Promise<RunDetail | null> {
   return mutateRun(runId, "cancel");
 }
+
+/**
+ * Re-render the video clip(s) of a finished or soft-failed run, reusing the
+ * existing storyboard + reference sheets. `segmentIndex` targets one clip of a
+ * multi-segment run (omit for the 15s clip / all segments); `note` is an
+ * optional one-line steer. Returns the fresh RunDetail (run flips to `running`).
+ */
+export async function regenerateVideoAction(
+  runId: string,
+  opts: { segmentIndex?: number; note?: string } = {},
+): Promise<RunDetail | null> {
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}/regenerate-video`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(opts.segmentIndex != null ? { segmentIndex: opts.segmentIndex } : {}),
+        ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
+      }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as RunDetail;
+  } catch (err) {
+    console.error("[regenerateVideoAction] request to API failed:", err);
+    return null;
+  }
+}

@@ -265,6 +265,16 @@ export function stepState(run: RunDetail, step: Step): StepState {
   return "pending";
 }
 
+/**
+ * A resting state for the reply composer: no step is actively advancing, so the
+ * step-by-step FeedbackBar / cancel bar are hidden and the "new chat" footer
+ * shows. `awaiting_regen` is recoverable (the user regenerates via the clip
+ * banner), but for composer purposes it rests exactly like `completed`/`failed`.
+ */
 export function isTerminal(status: RunStatus) {
-  return status === "completed" || status === "failed";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "awaiting_regen"
+  );
 }
