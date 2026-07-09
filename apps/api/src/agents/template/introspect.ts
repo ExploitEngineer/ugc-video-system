@@ -295,7 +295,9 @@ export function buildStructure(
         injectVia: comp === mainName ? "asset" : "function",
         width: l.width ?? null,
         height: l.height ?? null,
-        charBudget: deriveCharBudget(l.name, l.width, fontSize),
+        // The box wins over the placeholder's length; when the `data` bag has no
+        // font size, the layer's HEIGHT stands in for it.
+        charBudget: deriveCharBudget(l.name, l.width, fontSize, l.height),
         ...(font ? { font } : {}),
       });
       continue;

@@ -30,6 +30,19 @@ const serverEnvSchema = z.object({
     .string()
     .min(1)
     .default("anthropic/claude-sonnet-4.6"),
+  /**
+   * The SMALL reasoning model (`backend: "small"`), for short, mechanical,
+   * high-volume calls where the big model's judgement buys nothing: the template
+   * pipeline's per-slot plan and its on-screen copy.
+   *
+   * Same OpenRouter endpoint as `OPENROUTER_CLAUDE_MODEL`, so it needs no extra
+   * key, and it degrades to the default backend when `OPENROUTER_API_KEY` is
+   * unset. Swap the slug per-deploy if quality disappoints.
+   */
+  OPENROUTER_SMALL_MODEL: z
+    .string()
+    .min(1)
+    .default("anthropic/claude-haiku-4.5"),
 
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
   // The `ark-` key authenticates VIDEO GENERATION (inference) only.

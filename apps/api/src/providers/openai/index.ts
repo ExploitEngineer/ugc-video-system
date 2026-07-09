@@ -25,6 +25,7 @@ import {
   OPENAI_IMAGE_OUTPUT_FORMAT,
   OPENROUTER_BASE_URL,
   OPENROUTER_CLAUDE_MODEL,
+  OPENROUTER_SMALL_MODEL,
 } from "./constants.js";
 
 const log = createLogger("openai");
@@ -86,11 +87,16 @@ export interface ChatOptions {
    */
   jsonMode?: boolean;
   /**
-   * Reasoning backend. `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
-   * `"openai"` → forces gpt-4.1. When `OPENROUTER_API_KEY` is unset, the default
-   * silently falls back to gpt-4.1, so the server runs without the key.
+   * Reasoning backend.
+   *   `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
+   *   `"small"`            → Claude Haiku 4.5 via OpenRouter. For short,
+   *                          mechanical calls (the template plan + its copy).
+   *   `"openai"`           → forces gpt-4.1.
+   *
+   * Both OpenRouter backends silently fall back to gpt-4.1 when
+   * `OPENROUTER_API_KEY` is unset, so the server runs without the key.
    */
-  backend?: "openai" | "claude";
+  backend?: "openai" | "claude" | "small";
 }
 
 export interface OpenAIProvider {
@@ -306,26 +312,51 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
   return toFile(bytes, `ref.${ext}`, { type: mime });
 }
 
+/** Which model + transport a `chat()` call actually uses. */
+export interface ResolvedBackend {
+  /** `true` → the OpenRouter client; `false` → the OpenAI client (gpt-4.1). */
+  viaOpenRouter: boolean;
+  model: string;
+  /** For logs. Reflects the ACTUAL route, not what the caller asked for. */
+  label: "claude" | "small" | "openai";
+}
+
+/**
+ * Resolve the requested backend against what is actually configured. Pure, so
+ * the fallback rules are pinned by a test rather than rediscovered when a key
+ * goes missing in a deploy.
+ *
+ * Both OpenRouter backends degrade to gpt-4.1 when `OPENROUTER_API_KEY` is
+ * unset — the server must run without it.
+ */
+export function resolveBackend(
+  backend: ChatOptions["backend"],
+  hasOpenRouterKey: boolean,
+): ResolvedBackend {
+  const want = backend ?? "claude";
+  if (want !== "openai" && hasOpenRouterKey) {
+    return want === "small"
+      ? { viaOpenRouter: true, model: OPENROUTER_SMALL_MODEL, label: "small" }
+      : { viaOpenRouter: true, model: OPENROUTER_CLAUDE_MODEL, label: "claude" };
+  }
+  return { viaOpenRouter: false, model: OPENAI_CHAT_MODEL, label: "openai" };
+}
+
 export function createOpenAIProvider(): OpenAIProvider {
   return {
     async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
-      // Claude Sonnet 4.6 (via OpenRouter) is the DEFAULT reasoning/vision
-      // backend. A call routes to Claude unless it explicitly forces
-      // `backend:"openai"`; if `OPENROUTER_API_KEY` is unset we degrade to
-      // gpt-4.1 (so the server still runs without the key).
-      const backend = opts?.backend ?? "claude";
-      const useClaude = backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
-      const apiClient = useClaude ? getOpenRouterClient() : getClient();
-      const model = useClaude ? OPENROUTER_CLAUDE_MODEL : OPENAI_CHAT_MODEL;
+      const route = resolveBackend(opts?.backend, Boolean(env.OPENROUTER_API_KEY));
+      const apiClient = route.viaOpenRouter ? getOpenRouterClient() : getClient();
+      const model = route.model;
       // json_object is reliable on gpt-4.1; on Claude-via-OpenRouter it is not
       // guaranteed (and can error) — skip it there and trust the prompt + parser.
-      const wantJson = Boolean(opts?.jsonMode) && !useClaude;
+      const wantJson = Boolean(opts?.jsonMode) && !route.viaOpenRouter;
       const t0 = Date.now();
       log.debug("chat →", {
         model,
-        backend: useClaude ? "claude" : "openai",
+        backend: route.label,
         msgs: sdkMessages.length,
         maxTokens,
         jsonMode: wantJson,
@@ -362,7 +393,7 @@ export function createOpenAIProvider(): OpenAIProvider {
               : String(err);
         log.error("chat ✗ provider error", {
           model,
-          backend: useClaude ? "claude" : "openai",
+          backend: route.label,
           ms: Date.now() - t0,
           status: e?.status,
           detail,

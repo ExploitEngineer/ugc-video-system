@@ -26,6 +26,15 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
  */
 export const OPENROUTER_CLAUDE_MODEL = env.OPENROUTER_CLAUDE_MODEL;
 
+/**
+ * Claude Haiku 4.5 via OpenRouter — the SMALL backend (`backend: "small"`).
+ * Used for short, mechanical calls where the big model's judgement buys nothing:
+ * the template pipeline's per-slot plan and its on-screen copy. Env-overridable
+ * via `OPENROUTER_SMALL_MODEL`; VERIFY the slug is live before deploy
+ * (`GET https://openrouter.ai/api/v1/models`).
+ */
+export const OPENROUTER_SMALL_MODEL = env.OPENROUTER_SMALL_MODEL;
+
 /** GPT Image 2. Generate + edit (reference-image) capable. */
 export const OPENAI_IMAGE_MODEL = "gpt-image-2";
 

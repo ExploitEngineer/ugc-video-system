@@ -229,23 +229,46 @@ export function classifyImageSlot(input: {
 const GLYPH_WIDTH_RATIO = 0.5;
 
 /**
- * How many characters a text box can hold before it overflows the designer's
- * layout. The designer sized the box for their own placeholder, so the
- * placeholder's own length is the strongest available signal; a width + font
- * size estimate refines it when Nexrender exposes both.
+ * A single-line text layer's box is a little taller than its font size (the
+ * ascender-to-descender run plus leading). Inverting that gives a usable font
+ * size when Nexrender's opaque `data` bag does not carry one — which is most of
+ * the time, since the field is undocumented.
  *
- * The copywriter treats this as a ceiling rather than "match the rough length".
- * Returns undefined when there is nothing to go on.
+ * A MULTI-line box overshoots this, which under-estimates the character budget.
+ * That errs short, and short copy always renders; long copy never does.
+ */
+const LINE_HEIGHT_RATIO = 1.25;
+
+export function estimateFontSizeFromBox(height?: number | null): number | undefined {
+  if (!height || height <= 0) return undefined;
+  return height / LINE_HEIGHT_RATIO;
+}
+
+/**
+ * How many characters a text box can hold before it overflows the designer's
+ * layout.
+ *
+ * The BOX is the real constraint, so it wins when we can measure it. The
+ * placeholder's own length is only a floor: a layer whose placeholder text is
+ * the single word "Subhead" is not a 7-character slot, it is a 900px-wide box
+ * that happens to say "Subhead" today. Capping the copywriter at 7 characters
+ * there would be absurd, which is exactly what happened before the box estimate
+ * learned to fall back to the layer's height.
+ *
+ * The copywriter treats this as a hard ceiling, not "match the rough length".
+ * Returns undefined when there is nothing at all to go on.
  */
 export function deriveCharBudget(
   currentText: string | undefined,
   width?: number | null,
   fontSize?: number | null,
+  height?: number | null,
 ): number | undefined {
+  const size = fontSize && fontSize > 0 ? fontSize : estimateFontSizeFromBox(height);
   const fromText = currentText?.trim().length ?? 0;
   const fromBox =
-    width && fontSize && fontSize > 0
-      ? Math.floor(width / (fontSize * GLYPH_WIDTH_RATIO))
+    width && size && size > 0
+      ? Math.floor(width / (size * GLYPH_WIDTH_RATIO))
       : 0;
   const budget = Math.max(fromText, fromBox);
   return budget > 0 ? budget : undefined;

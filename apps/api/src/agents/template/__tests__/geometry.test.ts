@@ -6,6 +6,7 @@ import {
   compNeedsTrim,
   deriveCharBudget,
   DEFAULT_SLOT_SIZE,
+  estimateFontSizeFromBox,
   gptImageSizeForSlot,
   MAX_CLIP_SEC,
   MIN_CLIP_SEC,
@@ -252,7 +253,7 @@ describe("classifyImageSlot — a generated photo in a logo layer is always wron
 
 // ── deriveCharBudget ─────────────────────────────────────────────────────────
 
-describe("deriveCharBudget — the designer sized the box for their placeholder", () => {
+describe("deriveCharBudget — the box is the constraint, not the placeholder", () => {
   it("uses the placeholder's own length when that is all we have", () => {
     expect(deriveCharBudget("Your Headline Here")).toBe(18);
   });
@@ -265,14 +266,43 @@ describe("deriveCharBudget — the designer sized the box for their placeholder"
     expect(deriveCharBudget(long, 200, 72)).toBe(long.length);
   });
 
-  it("ignores the box when the font size is unknown", () => {
-    expect(deriveCharBudget("Headline", 1200, null)).toBe(8);
-    expect(deriveCharBudget("Headline", 1200, 0)).toBe(8);
+  it("falls back to the layer HEIGHT when no font size is exposed", () => {
+    // Caught by a live prompt dump, not by a unit test: a 900x60 layer whose
+    // placeholder is the single word "Subhead" was being capped at 7 characters.
+    // It is not a 7-character slot; it is a 900px box that says "Subhead" today.
+    // Nexrender's `data` bag is undocumented, so a missing font size is the
+    // COMMON case, and the height is the only signal left.
+    expect(deriveCharBudget("Subhead", 900, null, 60)).toBe(37);
+    expect(deriveCharBudget("Subhead", 900, null, null)).toBe(7); // nothing to go on
+  });
+
+  it("prefers a real font size over the height estimate", () => {
+    // 1200 / (72 * 0.5) = 33, not the height-derived 1200 / (96 * 0.5) = 25.
+    expect(deriveCharBudget("Hi", 1200, 72, 120)).toBe(33);
+  });
+
+  it("errs SHORT on a multi-line box, because short copy always renders", () => {
+    // A 3-line box overshoots the inferred font size, under-estimating the
+    // budget. Clipped layout is unrecoverable; a shorter line is not.
+    const oneLine = deriveCharBudget("x", 900, null, 60) ?? 0;
+    const threeLine = deriveCharBudget("x", 900, null, 180) ?? 0;
+    expect(threeLine).toBeLessThan(oneLine);
   });
 
   it("is undefined when there is nothing to go on", () => {
     expect(deriveCharBudget(undefined)).toBeUndefined();
     expect(deriveCharBudget("")).toBeUndefined();
     expect(deriveCharBudget("   ")).toBeUndefined();
+  });
+});
+
+describe("estimateFontSizeFromBox", () => {
+  it("inverts the line-height ratio", () => {
+    expect(estimateFontSizeFromBox(60)).toBeCloseTo(48, 0);
+  });
+  it("is undefined for a missing or degenerate box", () => {
+    expect(estimateFontSizeFromBox(null)).toBeUndefined();
+    expect(estimateFontSizeFromBox(0)).toBeUndefined();
+    expect(estimateFontSizeFromBox(-10)).toBeUndefined();
   });
 });

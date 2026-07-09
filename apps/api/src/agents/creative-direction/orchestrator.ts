@@ -641,18 +641,40 @@ async function executeStep(
       return {};
     }
 
-    // The template pipeline's plan + image steps land in build steps 6-7 of the
-    // Template Library Pipeline plan, along with the agents they call. They are
-    // UNREACHABLE today: `TEMPLATE_STEP_ENABLED` defaults false and `POST /runs`
-    // rejects `pipeline: "template"` outright, so no run can ever be sequenced
-    // into them. Fail loudly rather than silently no-op, so a premature flag
-    // flip surfaces as a clear error instead of a run that quietly skips work.
-    case "template_plan":
+    case "template_plan": {
+      // pipeline:"template" only. The FIRST step of a template run, before any
+      // image or video spend: one cheap call on the small model turns the
+      // template's slots + the ad brief into a per-slot plan that the
+      // copywriter, the image agent and the video agent all read. That single
+      // plan is what stops them describing three unrelated ads.
+      //
+      // Idempotent on resume: a run that crashed after planning does not re-plan.
+      if (runRow?.templatePlan) return {};
+      await writeStepEvent({ runId, step, status: "started" });
+      const plan = await templateAgent.planTemplate(ctx);
+      await setRun(runId, { templatePlan: plan });
+      const images = plan.slots.filter(
+        (s) => s.asset === "IMAGE" && s.fill,
+      ).length;
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { slots: plan.slots.length, imagesToGenerate: images },
+      });
+      return {};
+    }
+
+    // Lands in build step 7 with the agent it calls. UNREACHABLE today:
+    // `TEMPLATE_STEP_ENABLED` defaults false and `POST /runs` rejects
+    // `pipeline: "template"`, so no run can be sequenced into it. Fail loudly
+    // rather than silently no-op, so a premature flag flip surfaces as a clear
+    // error instead of a run that quietly skips work.
     case "template_images": {
       throw new RunFailure(
         "INTERNAL",
         RUN_ERROR_MESSAGES.INTERNAL,
-        `${step} is not implemented yet (template pipeline v2, build steps 6-7)`,
+        `${step} is not implemented yet (template pipeline v2, build step 7)`,
       );
     }
 

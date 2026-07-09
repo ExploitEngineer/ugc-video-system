@@ -9,9 +9,14 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { runTemplateSchema, type TemplateTextFillEntry } from "@ugc/shared";
+import {
+  runTemplateSchema,
+  templatePlanSchema,
+  type TemplateTextFillEntry,
+} from "@ugc/shared";
 import { db, schema } from "../../../db/index.js";
 import { classifyRunError } from "../../../lib/run-failure.js";
+import { latestStoryboardSheet } from "../../creative-direction/inputs.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext } from "../../types.js";
 import { buildTemplateTextFillPrompt } from "./prompt.js";
@@ -48,22 +53,38 @@ export async function fillTemplateText(
     // An all-media template (no TEXT slots) — nothing to write.
     if (textSlots.length === 0) return [];
 
+    // `template_plan` gave each slot a purpose; the storyboard gave the ad its
+    // spoken script. Both make the copy specific to THIS ad instead of a guess
+    // from the raw prompt. Either may be absent (a plan that skipped a slot, a
+    // storyboard with no transcript) — the placeholder still covers us.
+    const plan = templatePlanSchema.safeParse(run.templatePlan).data ?? null;
+    const intentByName = new Map(
+      (plan?.slots ?? []).map((s) => [s.jobLayerName, s.copyIntent]),
+    );
+    const transcript = await latestTranscript(runId);
+
     const messages = buildTemplateTextFillPrompt({
       userPrompt: run.prompt,
       brandText: run.brandText ?? undefined,
       adType: run.adType ?? "",
       adStyle: run.adStyle ?? "",
+      conceptSummary: plan?.conceptSummary || undefined,
+      transcript,
       slots: textSlots.map((s) => ({
         jobLayerName: s.jobLayerName,
         currentText: s.currentText,
+        copyIntent: intentByName.get(s.jobLayerName),
+        charBudget: s.charBudget,
       })),
     });
 
     // One retry with a larger ceiling on an unparseable reply, same pattern
-    // as every other one-shot LLM skill in this codebase.
+    // as every other one-shot LLM skill in this codebase. Short, mechanical
+    // copywriting — the small backend, not Sonnet.
     let reply: TemplateTextFillReply;
     try {
       const raw = await ctx.openai.chat(messages, {
+        backend: "small",
         jsonMode: true,
         maxTokens: 1500,
       });
@@ -73,6 +94,7 @@ export async function fillTemplateText(
       );
     } catch {
       const raw = await ctx.openai.chat(messages, {
+        backend: "small",
         jsonMode: true,
         maxTokens: 2048,
       });
@@ -84,12 +106,58 @@ export async function fillTemplateText(
 
     const byName = new Map(reply.fills.map((f) => [f.jobLayerName, f.value]));
     // Map back onto the ORIGINAL slot list by jobLayerName — never trust the
-    // model's own list shape/order.
+    // model's own list shape/order. The character budget is ENFORCED here, not
+    // merely requested in the prompt: an overrun renders clipped in After
+    // Effects, and a model that ignores the ceiling must not be able to break
+    // the designer's layout.
     return textSlots.map((s) => ({
       jobLayerName: s.jobLayerName,
-      value: byName.get(s.jobLayerName)?.trim() || s.currentText || "",
+      value: fitToBudget(
+        byName.get(s.jobLayerName)?.trim() || "",
+        s.charBudget,
+        s.currentText ?? "",
+      ),
     }));
   } catch (err) {
     throw classifyRunError(err, "TEMPLATE_FILL_FAILED");
   }
+}
+
+/**
+ * Keep a written line inside the box the designer drew.
+ *
+ * An empty line falls back to the template's own placeholder — a slot is never
+ * left blank. An overlong line is trimmed at a word boundary; if that leaves a
+ * stub (a single very long word), it is cut hard, because a clipped word still
+ * beats a clipped layout.
+ */
+export function fitToBudget(
+  value: string,
+  budget: number | undefined,
+  placeholder: string,
+): string {
+  const text = value.trim() || placeholder.trim();
+  if (!budget || text.length <= budget) return text;
+
+  const clipped = text.slice(0, budget);
+  const lastSpace = clipped.lastIndexOf(" ");
+  // Only honour the word boundary when it keeps most of the box filled;
+  // otherwise a long first word would collapse the line to almost nothing.
+  if (lastSpace >= Math.floor(budget * 0.6)) {
+    return clipped.slice(0, lastSpace).trimEnd();
+  }
+  return clipped.trimEnd();
+}
+
+/**
+ * The spoken script of the generated clip, joined across its scenes. Gives the
+ * on-screen copy something to echo, so the ad reads as one piece.
+ */
+async function latestTranscript(runId: string): Promise<string | undefined> {
+  const sheet = await latestStoryboardSheet(runId);
+  const scenes = (sheet?.scenes ?? []) as Array<{ transcript?: string }>;
+  const lines = scenes
+    .map((s) => s.transcript?.trim())
+    .filter((l): l is string => Boolean(l));
+  return lines.length ? lines.join(" ") : undefined;
 }
