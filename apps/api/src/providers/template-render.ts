@@ -79,8 +79,20 @@ export interface TemplateRenderInput {
   composition: string;
   /** The resolved assets to inject (media swaps + text). */
   assets: TemplateJobAssetInput[];
-  /** Stable tag for logs + idempotency (the runId). */
+  /** Stable tag for logs + idempotency (the runId, or the templateId). */
   referenceTag?: string;
+  /**
+   * Render a fast, cheap, LOW-RESOLUTION preview instead of a deliverable.
+   *
+   * This is the template library's only way to show a user what they are
+   * picking: Nexrender exposes no thumbnail endpoint and no way to attach our
+   * own metadata to a template. Submitted with an EMPTY `assets` array, so the
+   * template renders its own placeholder content.
+   *
+   * `preview` and `settings` are mutually exclusive in the Nexrender API — the
+   * provider must omit `settings` entirely when this is set.
+   */
+  preview?: boolean;
 }
 
 export interface TemplateRenderTask {

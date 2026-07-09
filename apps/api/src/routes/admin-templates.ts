@@ -20,6 +20,11 @@ import {
   templateTypeFromName,
   updateTemplate,
 } from "../agents/template/library.js";
+import {
+  previewTemplate,
+  regeneratePreview,
+  setPreviewOverride,
+} from "../agents/template/preview.js";
 import { badRequest, notFound, unprocessable } from "../lib/errors.js";
 import { createLogger } from "../lib/log.js";
 import { toTemplateAdminDto } from "../lib/template-mappers.js";
@@ -29,6 +34,10 @@ const log = createLogger("admin-templates");
 /** An AE project plus its collected footage. */
 const MAX_TEMPLATE_BYTES = 200 * 1024 * 1024; // 200MB
 const MAX_TEMPLATE_BODY_BYTES = 210 * 1024 * 1024; // headroom over the file limit
+
+/** A hand-supplied preview clip — a short demo video, not a deliverable. */
+const MAX_PREVIEW_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_PREVIEW_BODY_BYTES = 55 * 1024 * 1024;
 
 const bodyTooLarge = (c: Context) =>
   c.json({ error: "Upload too large.", code: "PAYLOAD_TOO_LARGE" }, 413);
@@ -110,6 +119,65 @@ adminTemplates.get("/:id", async (c) => {
  */
 adminTemplates.post("/:id/introspect", async (c) => {
   const row = await introspectTemplate(c.req.param("id"));
+  return c.json(toTemplateAdminDto(row));
+});
+
+/**
+ * POST /admin/templates/:id/preview — advance the preview render by one step.
+ *
+ * Same shape as `/introspect`: idempotent, polls once, safe on a timer. It
+ * submits the `preview: true` job on the first call and polls it thereafter.
+ */
+adminTemplates.post("/:id/preview", async (c) => {
+  const existing = await getTemplate(c.req.param("id"));
+  if (!existing) throw notFound("Template not found.");
+  const row = await previewTemplate(existing.id);
+  return c.json(toTemplateAdminDto(row));
+});
+
+/**
+ * PUT /admin/templates/:id/preview — replace the preview with an admin's clip.
+ *
+ * The escape hatch for a template whose own placeholder content is grey boxes
+ * and Lorem Ipsum: the auto-render is faithful but ugly, so let the admin drop
+ * in the designer's demo video instead. Skips Nexrender entirely.
+ */
+adminTemplates.put(
+  "/:id/preview",
+  bodyLimit({ maxSize: MAX_PREVIEW_BODY_BYTES, onError: bodyTooLarge }),
+  async (c) => {
+    const existing = await getTemplate(c.req.param("id"));
+    if (!existing) throw notFound("Template not found.");
+
+    const body = await c.req.parseBody();
+    const file = body.file;
+    if (!(file instanceof File) || file.size === 0) {
+      throw unprocessable("A preview video file is required.");
+    }
+    if (!/^video\/(mp4|quicktime|webm)$/.test(file.type)) {
+      throw unprocessable("Preview must be an mp4, mov or webm video.");
+    }
+    if (file.size > MAX_PREVIEW_BYTES) {
+      throw unprocessable(
+        `Preview exceeds the ${MAX_PREVIEW_BYTES / (1024 * 1024)}MB limit.`,
+      );
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const row = await setPreviewOverride(existing.id, bytes, file.type);
+    return c.json(toTemplateAdminDto(row));
+  },
+);
+
+/**
+ * DELETE /admin/templates/:id/preview — throw the preview away and re-render it.
+ * Clears the persisted job id so a fresh job is submitted rather than the dead
+ * one being polled.
+ */
+adminTemplates.delete("/:id/preview", async (c) => {
+  const existing = await getTemplate(c.req.param("id"));
+  if (!existing) throw notFound("Template not found.");
+  const row = await regeneratePreview(existing.id);
   return c.json(toTemplateAdminDto(row));
 });
 

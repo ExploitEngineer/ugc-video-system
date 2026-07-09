@@ -32,7 +32,7 @@ export function createApp() {
     "*",
     cors({
       origin: wildcard ? "*" : allowed,
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", ADMIN_KEY_HEADER],
     }),
   );

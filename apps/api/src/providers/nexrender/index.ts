@@ -16,6 +16,7 @@ import { env } from "../../config/index.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
 import { redactUrls } from "../../lib/run-failure.js";
+import { STUB_PREVIEW_MP4_DATA_URL } from "./stub-preview.js";
 import type {
   NexComposition,
   NexLayer,
@@ -198,6 +199,7 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
     },
 
     async getTemplateStructure(templateId: string): Promise<TemplateStructureRaw> {
+      assertNotStubTemplate(templateId, "introspect against");
       const meta = (await nexrenderFetch(
         `/templates/${templateId}`,
         undefined,
@@ -215,34 +217,14 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
     },
 
     async submitRender(input: TemplateRenderInput): Promise<TemplateRenderTask> {
-      const assets = input.assets.map((a) =>
-        a.kind === "text"
-          ? {
-              type: "function",
-              name: "nx:text-params-set",
-              params: {
-                composition: a.composition,
-                layerName: a.layerName,
-                textValue: a.value,
-              },
-            }
-          : {
-              type: a.mediaType,
-              composition: a.composition,
-              layerName: a.layerName,
-              src: a.src,
-            },
-      );
-      const body = {
-        template: { id: input.nexrenderTemplateId, composition: input.composition },
-        assets,
-        settings: { type: "video", quality: "full", codec: "video_h264_vbr_15mbps" },
-      };
+      assertNotStubTemplate(input.nexrenderTemplateId, "submit a render to");
+      const body = buildRenderJobBody(input);
       log.info("submit render", {
         run: input.referenceTag,
         template: input.nexrenderTemplateId,
         composition: input.composition,
-        assets: assets.length,
+        assets: "assets" in body ? body.assets.length : 0,
+        preview: Boolean(input.preview),
       });
       const json = (await nexrenderFetch("/jobs", {
         method: "POST",
@@ -304,6 +286,98 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
 }
 
 // Stub jobId carries the clip URL so pollRender is restart-safe.
+/** One entry of a Nexrender job's `assets` array. */
+type NexJobAsset =
+  | { type: string; composition: string; layerName: string; src: string }
+  | {
+      type: "function";
+      name: string;
+      params: Record<string, unknown>;
+    };
+
+export type NexJobBody =
+  | {
+      template: { id: string; composition: string };
+      preview: true;
+    }
+  | {
+      template: { id: string; composition: string };
+      assets: NexJobAsset[];
+      settings: { type: string; quality: string; codec: string };
+    };
+
+/**
+ * Build the `POST /api/v2/jobs` body. Pure, so the payload shape is pinned by a
+ * test rather than discovered in production.
+ *
+ * `preview` and `settings` are MUTUALLY EXCLUSIVE in the Nexrender API — sending
+ * both is rejected. A preview job also carries NO assets, so the template
+ * renders its own placeholder content at low resolution.
+ */
+export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
+  const template = {
+    id: input.nexrenderTemplateId,
+    composition: input.composition,
+  };
+  if (input.preview) return { template, preview: true };
+
+  const assets: NexJobAsset[] = input.assets.map((a) =>
+    a.kind === "text"
+      ? {
+          type: "function" as const,
+          name: "nx:text-params-set",
+          params: {
+            composition: a.composition,
+            layerName: a.layerName,
+            textValue: a.value,
+          },
+        }
+      : {
+          type: a.mediaType,
+          composition: a.composition,
+          layerName: a.layerName,
+          src: a.src,
+        },
+  );
+  return {
+    template,
+    assets,
+    settings: {
+      type: "video",
+      quality: "full",
+      codec: "video_h264_vbr_15mbps",
+    },
+  };
+}
+
+/**
+ * Every template id the STUB hands out starts with this.
+ *
+ * The cloud provider refuses to act on one (`assertNotStubTemplate`). Both the
+ * run worker and the template worker claim rows from the DATABASE, so a second
+ * process pointed at the same database — a `pnpm dev` server that hot-reloaded,
+ * a rolling deploy, a stray instance — will happily pick up rows a stub-mode
+ * process created. Without this guard, a process holding real credentials
+ * submits a real, paid job for a template that only ever existed in a stub.
+ * Real Nexrender ids are 26-char ULIDs (`^[A-Z0-9]{26}$`), so these can never
+ * collide.
+ */
+export const STUB_TEMPLATE_ID_PREFIX = "stub-template-";
+
+export function isStubTemplateId(id: string): boolean {
+  return id.startsWith(STUB_TEMPLATE_ID_PREFIX);
+}
+
+function assertNotStubTemplate(id: string, op: string): void {
+  if (!isStubTemplateId(id)) return;
+  throw new Error(
+    `Refusing to ${op} the real Nexrender API for stub template "${id}". ` +
+      "This row was created by a stub-mode process; a real-credential process " +
+      "is now driving it (two servers sharing one database). Set NEXRENDER_STUB=true " +
+      "here, or delete the stub rows.",
+  );
+}
+
 const STUB_PREFIX = "stub:";
 
 /** Stub renderer — no Nexrender account needed. Canned structure + clip echo. */
@@ -315,7 +389,9 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
       log.warn("STUB — pretending to register template", { filename: input.filename });
       // No `upload` — the client skips the upload step and polls the canned
       // structure straight away.
-      return { templateId: `stub-template-${input.type}` };
+      // Deliberately non-random: a stub template is a fixture, and the id must
+      // be recognisable as one by `assertNotStubTemplate` in the cloud provider.
+      return { templateId: `${STUB_TEMPLATE_ID_PREFIX}${input.type}` };
     },
     async uploadTemplateBytes(): Promise<void> {
       log.warn("STUB — skipping template upload (no real target)");
@@ -438,6 +514,20 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
           clip = a.src;
           break;
         }
+      }
+      // A preview job carries no assets (the template renders its own
+      // placeholder content), so there is no clip to echo. Hand back a real,
+      // tiny MP4 instead: the preview stage then genuinely downloads it,
+      // re-hosts it, and pulls a poster frame out of it, all for free.
+      if (input.preview) {
+        log.warn("STUB — returning a canned preview clip", {
+          template: input.referenceTag,
+        });
+        return {
+          jobId:
+            STUB_PREFIX +
+            Buffer.from(STUB_PREVIEW_MP4_DATA_URL).toString("base64url"),
+        };
       }
       log.warn("STUB — echoing input clip as render output", {
         run: input.referenceTag,

@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 
+import type { TemplateMetadata, TemplateStructure } from "@ugc/shared";
+
 import {
   parseMetadata,
   parseStructure,
   sha256,
   templateTypeFromName,
+  validateForLibrary,
 } from "../library.js";
 
 describe("templateTypeFromName", () => {
@@ -38,6 +41,49 @@ describe("sha256 — the dedupe key", () => {
     expect(sha256(a)).toBe(sha256(b));
     expect(sha256(a)).not.toBe(sha256(c));
     expect(sha256(a)).toHaveLength(64);
+  });
+});
+
+describe("validateForLibrary — which templates the pipeline can actually fill", () => {
+  const structure = (mainComposition: string | null): TemplateStructure =>
+    ({
+      status: "ready",
+      mainComposition,
+      renderCompositions: [],
+      slots: [],
+      mainCompositionWidth: 1920,
+      mainCompositionHeight: 1080,
+      mainCompositionDurationSec: 12,
+      mainCompositionFrameRate: 30,
+      suggestedAspectRatio: "16:9",
+    }) as TemplateStructure;
+
+  const meta = (video: number): TemplateMetadata =>
+    ({
+      durationSec: 12,
+      frameRate: 30,
+      width: 1920,
+      height: 1080,
+      aspectRatio: "16:9",
+      clipSeconds: 12,
+      trimComp: false,
+      slotCounts: { video, image: 2, text: 1, audio: 0 },
+    }) as TemplateMetadata;
+
+  it("accepts exactly one video slot", () => {
+    expect(validateForLibrary(structure("main"), meta(1))).toBeNull();
+  });
+
+  it("rejects a template with nowhere to put the clip", () => {
+    expect(validateForLibrary(structure("main"), meta(0))).toMatch(/no spot for a video/i);
+  });
+
+  it("rejects multiple video slots — each would need its own paid clip", () => {
+    expect(validateForLibrary(structure("main"), meta(3))).toMatch(/3 video slots/);
+  });
+
+  it("rejects a template with no renderable composition", () => {
+    expect(validateForLibrary(structure(null), meta(1))).toMatch(/which composition/i);
   });
 });
 

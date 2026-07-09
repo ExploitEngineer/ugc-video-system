@@ -362,6 +362,61 @@ export async function mergeSegmentUrls(
  * download, and signal/timeout-aware ffmpeg runner as `mergeSegmentUrls` —
  * `-vn` drops the video so this is a cheap, audio-only re-encode.
  */
+/**
+ * Grab a single frame from a video as a JPEG poster.
+ *
+ * Used for the template library's preview cards: the `<video>` element shows
+ * this until the card is hovered, so the grid never has to decode a dozen clips
+ * just to render. Seeks ~1s in rather than to frame 0, because the first frame
+ * of a rendered AE template is very often a black or empty fade-in.
+ *
+ * Seeking BEFORE `-i` is the fast path (ffmpeg jumps to the nearest keyframe
+ * instead of decoding up to it). If the clip is shorter than the seek target
+ * that yields no frames, so we retry from the very start.
+ */
+export async function extractPoster(
+  videoUrl: string,
+  atSeconds = 1,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-poster-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.jpg");
+
+    const grab = (seek: number) =>
+      runFfmpegWithRetry(
+        [
+          "-y",
+          ...(seek > 0 ? ["-ss", String(seek)] : []),
+          "-i", input,
+          "-frames:v", "1",
+          "-q:v", "3", // visually lossless enough for a card thumbnail
+          "-threads", String(FFMPEG_THREADS),
+          out,
+        ],
+        "extract-poster",
+      );
+
+    log.info("▶ extracting poster frame", { atSeconds });
+    await grab(atSeconds);
+    let bytes = await readFile(out).catch(() => null);
+    if (!bytes || bytes.length === 0) {
+      // Clip shorter than the seek target — take the first frame instead.
+      log.warn("poster seek past end of clip; retrying from frame 0");
+      await grab(0);
+      bytes = await readFile(out);
+    }
+
+    log.info("✓ poster extracted", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "image/jpeg" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function extractAudio(
   videoUrl: string,
 ): Promise<{ bytes: Uint8Array; mime: string }> {

@@ -1,5 +1,9 @@
 import { serve } from "@hono/node-server";
 import { startWorker } from "./agents/creative-direction/index.js";
+import {
+  releaseStaleTemplateLocks,
+  startTemplateWorker,
+} from "./agents/template/preview-worker.js";
 import { createApp } from "./app.js";
 import { env } from "./config/index.js";
 import { migrate } from "./db/migrate.js";
@@ -52,6 +56,18 @@ const server = serve(
 // F7: in-process background worker advances runs through the pipeline.
 const stopWorker = startWorker();
 
+// The template library has its own lifecycle (introspecting → previewing →
+// ready), polling async Nexrender operations that offer no webhook. Templates
+// are not runs, so they get their own loop. Release any lock a previous process
+// left behind first, or those rows wait out the full stale timeout on every
+// `tsx watch` restart.
+await releaseStaleTemplateLocks().catch((err) => {
+  log.warn("could not release stale template locks", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+const stopTemplateWorker = startTemplateWorker();
+
 // Graceful shutdown. The worker loop keeps Node's event loop alive, so without
 // these handlers the process never exits on its own — closing the terminal
 // (SIGHUP) or a killed parent leaves an orphaned server still bound to the
@@ -63,6 +79,7 @@ function shutdown(signal: NodeJS.Signals): void {
   shuttingDown = true;
   log.warn("shutting down", { signal });
   stopWorker();
+  stopTemplateWorker();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
 }

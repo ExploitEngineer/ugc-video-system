@@ -1,14 +1,16 @@
 // The admin-curated template library — the lifecycle of a `templates` row.
 //
-//   registering → introspecting → (previewing) → ready
-//                      ↓               ↓
-//                    failed          failed
+//   registering → introspecting → previewing → ready
+//                      ↓              ↓
+//                    failed         failed
 //
-// `previewing` is inserted by the preview worker in the next build step; for now
-// introspection lands straight on `ready` with no preview.
+// Every stage is driven by BOTH the admin routes and the preview worker
+// (`preview-worker.ts`), so each is idempotent and safe to re-enter after a
+// crash. `previewTemplate` lives in `preview.ts`.
 //
-// Everything here is called by BOTH the admin routes and (later) the preview
-// worker, so each stage is idempotent and safe to re-enter after a crash.
+// The render provider is INJECTED rather than constructed, so the validation
+// branches here (no video slot / more than one) are unit-testable without a
+// network or a Nexrender account.
 
 import { createHash } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -24,6 +26,7 @@ import { db, schema } from "../../db/index.js";
 import { unprocessable } from "../../lib/errors.js";
 import { createLogger } from "../../lib/log.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
+import type { TemplateRenderProvider } from "../../providers/template-render.js";
 import { buildMetadata, buildStructure } from "./introspect.js";
 
 const log = createLogger("template-library");
@@ -63,7 +66,7 @@ export function parseMetadata(v: unknown): TemplateMetadata | null {
   return r.success ? r.data : null;
 }
 
-async function setTemplate(
+export async function setTemplate(
   id: string,
   patch: Partial<typeof schema.templates.$inferInsert>,
 ): Promise<void> {
@@ -73,7 +76,7 @@ async function setTemplate(
     .where(eq(schema.templates.id, id));
 }
 
-async function failTemplate(id: string, reason: string): Promise<void> {
+export async function failTemplate(id: string, reason: string): Promise<void> {
   log.error("template failed", { id, reason });
   await setTemplate(id, { status: "failed", error: reason });
 }
@@ -101,6 +104,7 @@ export interface CreateTemplateInput {
  */
 export async function createTemplate(
   input: CreateTemplateInput,
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
 ): Promise<{ row: TemplateRow; deduped: boolean }> {
   const sourceType = templateTypeFromName(input.filename);
   if (!sourceType) {
@@ -139,7 +143,6 @@ export async function createTemplate(
   // immediately that their file was rejected rather than discovering it in a
   // background status three seconds later.
   try {
-    const provider = createTemplateRenderProvider();
     const { templateId, upload } = await provider.registerTemplate({
       filename: input.filename,
       displayName: input.displayName,
@@ -166,6 +169,30 @@ export async function createTemplate(
 // ── introspect ───────────────────────────────────────────────────────────────
 
 /**
+ * Why a template cannot join the library, or null when it can. Pure, so the
+ * rejection rules are unit-testable without a Nexrender account.
+ *
+ * The library only accepts templates the pipeline can actually fill: one with
+ * no video slot has nowhere to put the generated clip, and one with several
+ * would need a paid Seedance clip each (out of scope — the admin curates for
+ * single-video templates).
+ */
+export function validateForLibrary(
+  structure: TemplateStructure,
+  metadata: TemplateMetadata,
+): string | null {
+  const videoSlots = metadata.slotCounts.video;
+  if (videoSlots === 0) return "This template has no spot for a video.";
+  if (videoSlots > 1) {
+    return `This template has ${videoSlots} video slots; exactly one is supported.`;
+  }
+  if (!structure.mainComposition) {
+    return "Could not determine which composition to render.";
+  }
+  return null;
+}
+
+/**
  * Poll Nexrender's introspection ONCE and advance the row if it is done.
  * Idempotent and cheap, so the admin console (and later the preview worker) can
  * call it on a timer.
@@ -173,7 +200,10 @@ export async function createTemplate(
  * Returns the row's status after the attempt: still `introspecting` means
  * Nexrender is still parsing the project.
  */
-export async function introspectTemplate(id: string): Promise<TemplateRow> {
+export async function introspectTemplate(
+  id: string,
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
+): Promise<TemplateRow> {
   const row = await getTemplate(id);
   if (!row) throw unprocessable("Template not found.");
   if (!row.nexrenderTemplateId) {
@@ -181,7 +211,6 @@ export async function introspectTemplate(id: string): Promise<TemplateRow> {
     return (await getTemplate(id)) ?? row;
   }
 
-  const provider = createTemplateRenderProvider();
   const raw = await provider.getTemplateStructure(row.nexrenderTemplateId);
 
   if (raw.status === "error" || raw.status === "failed") {
@@ -196,23 +225,9 @@ export async function introspectTemplate(id: string): Promise<TemplateRow> {
   const structure = buildStructure(raw.compositions, raw.layers);
   const metadata = buildMetadata(structure);
 
-  // The library only accepts templates our pipeline can actually fill. A
-  // template with no video slot has nowhere to put the generated clip; one with
-  // several would need a clip each (out of scope — the admin curates for this).
-  const videoSlots = metadata.slotCounts.video;
-  if (videoSlots === 0) {
-    await failTemplate(id, "This template has no spot for a video.");
-    return (await getTemplate(id)) ?? row;
-  }
-  if (videoSlots > 1) {
-    await failTemplate(
-      id,
-      `This template has ${videoSlots} video slots; exactly one is supported.`,
-    );
-    return (await getTemplate(id)) ?? row;
-  }
-  if (!structure.mainComposition) {
-    await failTemplate(id, "Could not determine which composition to render.");
+  const rejection = validateForLibrary(structure, metadata);
+  if (rejection) {
+    await failTemplate(id, rejection);
     return (await getTemplate(id)) ?? row;
   }
 
@@ -220,9 +235,10 @@ export async function introspectTemplate(id: string): Promise<TemplateRow> {
     structure,
     metadata,
     error: null,
-    // The preview stage lands in the next build step; until then a successfully
-    // introspected template is immediately usable, just without a preview clip.
-    status: "ready",
+    // Hand off to the preview stage. A template is not pickable until a user can
+    // SEE it: `previewTemplate` renders the template's own placeholder content
+    // and re-hosts the clip + a poster frame, then flips this to `ready`.
+    status: "previewing",
   });
   const { video, image, text, audio } = metadata.slotCounts;
   log.info("template introspected", {

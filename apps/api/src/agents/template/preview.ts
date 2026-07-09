@@ -1,0 +1,228 @@
+// The `previewing` stage of a template's lifecycle.
+//
+// Nexrender exposes no thumbnail endpoint and no way to attach our own metadata
+// to a template, so the ONLY way to show a user what they are picking is to
+// render the template once ourselves. A `preview: true` job with an EMPTY asset
+// list renders the template's own placeholder content, fast and cheap.
+//
+// The output lives on Nexrender's CDN and expires (~14 days), so we download it
+// immediately, re-host it to Supabase under `templates/{id}/`, and pull a poster
+// frame out of it so the picker's grid does not have to decode a dozen clips.
+//
+// A preview render is a REAL render of the same template through the same
+// engine. If it fails, the deliverable render would fail too — so a preview
+// failure marks the template `failed` rather than merely leaving it thumbnail-
+// less. That makes this stage a genuine validation gate, not just cosmetics.
+
+import { env } from "../../config/index.js";
+import { fetchWithRetry } from "../../lib/http.js";
+import { createLogger } from "../../lib/log.js";
+import { uploadTemplateObject } from "../../lib/storage.js";
+import { extractPoster } from "../../lib/video/merge.js";
+import { createTemplateRenderProvider } from "../../providers/index.js";
+import type { TemplateRenderProvider } from "../../providers/template-render.js";
+import {
+  failTemplate,
+  getTemplate,
+  parseStructure,
+  setTemplate,
+  type TemplateRow,
+} from "./library.js";
+
+const log = createLogger("template-preview");
+
+/**
+ * Advance a `previewing` template by ONE step, then return.
+ *
+ * Called on a timer by the preview worker (and by the admin console), so it
+ * never blocks: it submits the job on the first call and polls on later ones.
+ *
+ *  - still rendering → the row is returned unchanged, still `previewing`
+ *  - completed       → download, re-host, poster, `ready`
+ *  - failed / timeout→ `failed`, with the reason on the row
+ */
+export async function previewTemplate(
+  id: string,
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
+): Promise<TemplateRow> {
+  const row = await getTemplate(id);
+  if (!row) throw new Error(`preview: template ${id} not found`);
+  if (!row.nexrenderTemplateId) {
+    await failTemplate(id, "Template was never registered with Nexrender.");
+    return (await getTemplate(id)) ?? row;
+  }
+
+  const structure = parseStructure(row.structure);
+  if (!structure?.mainComposition) {
+    await failTemplate(id, "Template has no renderable composition.");
+    return (await getTemplate(id)) ?? row;
+  }
+
+  // Submit once. The job id is persisted BEFORE the first poll, so a process
+  // that crashes mid-render resumes by polling THAT job rather than paying for
+  // a second one — the same guarantee `runs.nexrender_job_id` gives a render.
+  let jobId = row.previewJobId;
+  if (!jobId) {
+    const task = await provider.submitRender({
+      nexrenderTemplateId: row.nexrenderTemplateId,
+      composition: structure.mainComposition,
+      assets: [], // the template renders its OWN placeholder content
+      preview: true,
+      referenceTag: id,
+    });
+    jobId = task.jobId;
+    await setTemplate(id, { previewJobId: jobId });
+    log.info("preview submitted", { id, jobId });
+    return (await getTemplate(id)) ?? row;
+  }
+
+  const result = await provider.pollRender({ jobId });
+
+  if (result.state === "failed") {
+    await failTemplate(
+      id,
+      result.error ?? `Preview render failed (job ${jobId}).`,
+    );
+    return (await getTemplate(id)) ?? row;
+  }
+
+  if (result.state !== "completed" || !result.videoUrl) {
+    // Dead-man's switch. `updatedAt` was stamped when `previewJobId` was
+    // persisted and is not touched while polling, so it dates the submission.
+    const age = Date.now() - row.updatedAt.getTime();
+    if (age > env.NEXRENDER_POLL_TIMEOUT_MS) {
+      await failTemplate(
+        id,
+        `Preview render did not finish within ${Math.round(env.NEXRENDER_POLL_TIMEOUT_MS / 60000)} minutes (job ${jobId}, last status: ${result.status ?? "unknown"}).`,
+      );
+      return (await getTemplate(id)) ?? row;
+    }
+    return row; // still rendering
+  }
+
+  // Completed. Nexrender's output URL expires, so re-host it right now.
+  log.info("preview completed — re-hosting", { id, jobId });
+  const res = await fetchWithRetry(result.videoUrl, undefined, {
+    label: "template-preview-download",
+  });
+  if (!res.ok) {
+    await failTemplate(id, `Could not download the preview render (${res.status}).`);
+    return (await getTemplate(id)) ?? row;
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+
+  const video = await uploadTemplateObject({
+    templateId: id,
+    kind: "preview",
+    bytes,
+    contentType: "video/mp4",
+  });
+
+  // The poster is a nicety, not a requirement: a card can fall back to the
+  // video's own first frame. Never fail a good template over a missing JPEG.
+  let poster: { url: string; storagePath: string } | null = null;
+  try {
+    const frame = await extractPoster(video.url);
+    poster = await uploadTemplateObject({
+      templateId: id,
+      kind: "poster",
+      bytes: frame.bytes,
+      contentType: frame.mime,
+    });
+  } catch (err) {
+    log.warn("poster extraction failed (non-fatal)", {
+      id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  await setTemplate(id, {
+    previewVideoUrl: video.url,
+    previewVideoPath: video.storagePath,
+    previewPosterUrl: poster?.url ?? null,
+    previewPosterPath: poster?.storagePath ?? null,
+    previewSource: "auto",
+    error: null,
+    status: "ready",
+  });
+  log.info("✓ preview ready", { id, hasPoster: Boolean(poster) });
+  return (await getTemplate(id)) ?? row;
+}
+
+/**
+ * Replace a template's preview with an admin-supplied clip.
+ *
+ * The escape hatch for a template whose placeholder content is grey boxes and
+ * Lorem Ipsum: the auto-render is faithful but ugly, so let the admin drop in
+ * the designer's own demo video. Skips Nexrender entirely.
+ */
+export async function setPreviewOverride(
+  id: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<TemplateRow> {
+  const row = await getTemplate(id);
+  if (!row) throw new Error(`preview override: template ${id} not found`);
+
+  const video = await uploadTemplateObject({
+    templateId: id,
+    kind: "preview",
+    bytes,
+    contentType,
+  });
+
+  let poster: { url: string; storagePath: string } | null = null;
+  try {
+    const frame = await extractPoster(video.url);
+    poster = await uploadTemplateObject({
+      templateId: id,
+      kind: "poster",
+      bytes: frame.bytes,
+      contentType: frame.mime,
+    });
+  } catch (err) {
+    log.warn("poster extraction failed for override (non-fatal)", {
+      id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // A template with an introspected structure is usable; one without still needs
+  // to finish introspecting before it can be picked.
+  const introspected = Boolean(parseStructure(row.structure)?.mainComposition);
+  await setTemplate(id, {
+    previewVideoUrl: video.url,
+    previewVideoPath: video.storagePath,
+    previewPosterUrl: poster?.url ?? null,
+    previewPosterPath: poster?.storagePath ?? null,
+    previewSource: "admin",
+    error: null,
+    ...(introspected ? { status: "ready" as const } : {}),
+  });
+  log.info("✓ preview override stored", { id, introspected });
+  return (await getTemplate(id)) ?? row;
+}
+
+/**
+ * Throw away the current preview and re-render it. Clears the persisted job id
+ * so `previewTemplate` submits a fresh one rather than polling the dead job.
+ */
+export async function regeneratePreview(id: string): Promise<TemplateRow> {
+  const row = await getTemplate(id);
+  if (!row) throw new Error(`regenerate preview: template ${id} not found`);
+
+  const hasStructure = Boolean(parseStructure(row.structure)?.mainComposition);
+  await setTemplate(id, {
+    previewJobId: null,
+    previewVideoUrl: null,
+    previewVideoPath: null,
+    previewPosterUrl: null,
+    previewPosterPath: null,
+    previewSource: null,
+    error: null,
+    // A template that never introspected has to do that first.
+    status: hasStructure ? "previewing" : "introspecting",
+  });
+  log.info("preview reset", { id, hasStructure });
+  return (await getTemplate(id)) ?? row;
+}
