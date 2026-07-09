@@ -12,39 +12,23 @@ import {
   GPT_IMAGE_MAX_EDGE,
   GPT_IMAGE_MIN_TOTAL_PX,
 } from "../../providers/openai/constants.js";
+import {
+  MAX_CLIP_SEC,
+  MIN_CLIP_SEC,
+  SEEDANCE_DURATIONS,
+  snapSeedanceDuration as snapUp,
+} from "../../providers/video.js";
 
 // ── Clip duration ────────────────────────────────────────────────────────────
 
-/**
- * The ONLY clip lengths Seedance 2.0 accepts. It is a discrete set, not a
- * range: 7, 9, 11, 13 and 14 are rejected outright by ModelArk.
- *
- * NOTE: sourced from BytePlus' docs + two independent secondary sources; the
- * official parameter table would not render when fetched. `submitVideo` snaps
- * any out-of-set value onto this list rather than letting the API reject a
- * request halfway through a paid run.
- */
-export const SEEDANCE_DURATIONS = [4, 5, 6, 8, 10, 12, 15] as const;
-
-export const MIN_CLIP_SEC = SEEDANCE_DURATIONS[0]; // 4
-export const MAX_CLIP_SEC = SEEDANCE_DURATIONS[SEEDANCE_DURATIONS.length - 1]; // 15
+// What Seedance accepts is a fact about the VIDEO PROVIDER, so it lives on that
+// boundary and is enforced there. Re-exported here because the template geometry
+// is where the constraint is first applied, and every existing caller and test
+// reaches for it under these names.
+export { MAX_CLIP_SEC, MIN_CLIP_SEC, SEEDANCE_DURATIONS, snapUp };
 
 /** Floating-point slack, so a 15.0000001s composition is not "longer than 15s". */
 const EPSILON = 1e-6;
-
-/**
- * The smallest Seedance duration >= `seconds`, clamped to the set's bounds.
- *
- * Snapping UP is the whole point. A clip SHORTER than the template layer it
- * fills ends on a frozen frame (and the native audio cuts out early), while a
- * clip LONGER than its layer is simply trimmed by After Effects. Given the
- * choice, always overshoot.
- */
-export function snapUp(seconds: number): number {
-  if (!Number.isFinite(seconds) || seconds <= MIN_CLIP_SEC) return MIN_CLIP_SEC;
-  const want = Math.ceil(seconds - EPSILON);
-  return SEEDANCE_DURATIONS.find((d) => d >= want) ?? MAX_CLIP_SEC;
-}
 
 /**
  * The Seedance clip length for a template whose main composition runs

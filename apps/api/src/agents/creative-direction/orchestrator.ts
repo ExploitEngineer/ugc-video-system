@@ -18,6 +18,7 @@
 import {
   detectPlaceholders,
   isMultiSegment,
+  runTemplateSchema,
   type RunStatus,
   segmentCountFor,
   type Step,
@@ -412,6 +413,15 @@ async function executeStep(
       const productSheetRef: ImageRef | undefined = product
         ? { source: product.assetUrl, mime: "image/png" }
         : undefined;
+      // A TEMPLATE run's clip must be as long as the template's video slot, not
+      // the pipeline's default 15s. `clipSeconds` was snapped at introspection
+      // to a length Seedance actually accepts ({4,5,6,8,10,12,15}), and snapped
+      // UP — a clip shorter than its layer ends on a freeze frame.
+      const templateClipSeconds =
+        runRow?.pipeline === "template"
+          ? runTemplateSchema.safeParse(runRow.template).data?.metadata.clipSeconds
+          : undefined;
+
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
@@ -424,6 +434,7 @@ async function executeStep(
         characterAnchor: ctx.personBrief,
         userPrompt,
         critique: regenNote,
+        ...(templateClipSeconds ? { durationSec: templateClipSeconds } : {}),
       });
       return {};
     }
@@ -1091,37 +1102,19 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     let referenceExists = true;
     const t0 = Date.now();
 
+    // ── Which step runs now ──────────────────────────────────────────────
+    // `person_sheet` as a FORWARD step MEANS the parallel reference phase (see
+    // the dispatch below). That equivalence is what lets a template run put
+    // `template_plan` in front of the phase: before this, the phase was welded
+    // to `currentStep === null` and nothing could precede it.
+    const isService = (run.adType ?? "") === "service";
     if (run.currentStep === null) {
-      if ((run.adType ?? "") === "service") {
-        // Service path: the creative-director brief runs FIRST (it plans the
-        // synthesized cast + scenes). No product/person reference sheets, so
-        // there is no reference gate.
-        step = "creative_brief";
-        logRun(runId, "▶ creative brief …", tag);
-        try {
-          ({ outcome } = await executeStep(ctx, step));
-        } catch (err) {
-          await failRun(runId, step, err);
-          return;
-        }
-        referenceExists = false;
-      } else {
-        // First generation: product + person sheets run CONCURRENTLY (each
-        // skipped when its asset is optional + not uploaded). `person_sheet` is
-        // always the checkpoint the phase advances to — the gate/advance block
-        // below treats it exactly like a single completed reference step.
-        step = "person_sheet";
-        logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
-        const { failedStep, err, hasReference } = await runReferencePhase(
-          ctx,
-          tag,
-        );
-        if (failedStep) {
-          await failRun(runId, failedStep, err);
-          return;
-        }
-        referenceExists = hasReference;
-      }
+      // A template run plans first, before any image or video spend.
+      step = run.pipeline === "template"
+        ? "template_plan"
+        : isService
+          ? "creative_brief"
+          : "person_sheet";
     } else {
       step = nextStep(
         run.currentStep,
@@ -1134,6 +1127,32 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         await setRun(runId, { status: "completed" });
         return;
       }
+      // `nextStep` hands `template_plan` to the reference phase, but a service
+      // ad has no product or person to reference — it goes straight to the
+      // creative brief instead. `nextStep` cannot know this; only the run's
+      // adType does, and that already lives here.
+      if (run.currentStep === "template_plan" && isService) {
+        step = "creative_brief";
+      }
+    }
+
+    if (step === "person_sheet") {
+      // Product + person sheets run CONCURRENTLY (each skipped when its asset is
+      // optional and not uploaded). `person_sheet` is the checkpoint the phase
+      // advances to, so the gate/advance block below treats it exactly like a
+      // single completed reference step.
+      //
+      // Safe as a forward step: `person_sheet` is only ever reached from
+      // `currentStep === null` or from `template_plan`. `product_sheet` is never
+      // a forward step at all — it runs INSIDE the phase.
+      logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
+      const { failedStep, err, hasReference } = await runReferencePhase(ctx, tag);
+      if (failedStep) {
+        await failRun(runId, failedStep, err);
+        return;
+      }
+      referenceExists = hasReference;
+    } else {
       logRun(runId, `▶ ${step} …`, tag);
       try {
         ({ outcome } = await executeStep(ctx, step));
@@ -1141,6 +1160,9 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         await failRun(runId, step, err);
         return;
       }
+      // The service path plans a synthesized cast instead of reference sheets,
+      // so there is nothing for the reference gate to pause on.
+      if (step === "creative_brief") referenceExists = false;
     }
     logRun(
       runId,

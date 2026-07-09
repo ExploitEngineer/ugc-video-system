@@ -18,6 +18,7 @@ import type { Run } from "@ugc/shared";
 import {
   hookSelectionSchema,
   isMultiSegment,
+  templatePlanSchema,
   narrativeOutlineSchema,
   runErrorCodeSchema,
   sceneSchema,
@@ -207,13 +208,19 @@ export function toRunDetailDto(
       "segment_video",
       "merge",
     );
-    // A template whose IMAGE slots are all logos/backgrounds (or which has none)
-    // has nothing for the Image Agent to generate.
+    // Before the plan exists we can only say the step is POSSIBLE (some slot is
+    // a content image). Once it exists, the plan is authoritative: it may have
+    // declined every slot, in which case the Image Agent has nothing to do and
+    // the timeline should say "skipped", not sit on "pending" forever.
     const slots = (run.template as RunTemplate | null)?.slots ?? [];
-    const fillable = slots.filter(
-      (s) => s.asset === "IMAGE" && s.imageClass === "content",
-    ).length;
-    if (fillable === 0) skippedSteps.push("template_images");
+    const plan = templatePlanSchema.safeParse(run.templatePlan).data;
+    const willGenerate = plan
+      ? plan.slots.some((s) => s.asset === "IMAGE" && s.fill)
+      : slots.some((s) => s.asset === "IMAGE" && s.imageClass === "content");
+    if (!willGenerate) skippedSteps.push("template_images");
+    // A service ad has no product to photograph, so it never enters the
+    // reference phase — but `creative_brief` above is only skipped for
+    // non-service runs, so nothing more is needed here.
   } else {
     skippedSteps.push(
       "template_plan",

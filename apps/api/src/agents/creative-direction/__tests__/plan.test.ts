@@ -9,6 +9,7 @@ import {
   hasAnyReference,
   nextStep,
   resumeStepForVideoRegen,
+  rewindStepForTemplateRegen,
   willGeneratePerson,
   willGenerateProduct,
 } from "../plan.js";
@@ -176,6 +177,50 @@ describe("nextStep — template pipeline chain", () => {
       "video",
       "template_render",
     ]);
+  });
+});
+
+describe("resumeStepForVideoRegen — a template regen must not re-pay for images", () => {
+  it("rewinds a template run to template_images, whose next step is video", () => {
+    const step = resumeStepForVideoRegen("15s", "template");
+    expect(step).toBe("template_images");
+    // The whole point: the clip is regenerated, the stills and copy are not.
+    expect(nextStep(step, false, false, "15s", "template")).toBe("video");
+  });
+
+  it("leaves the normal pipeline untouched", () => {
+    expect(resumeStepForVideoRegen("15s")).toBe("storyboard_inspection");
+    expect(resumeStepForVideoRegen("15s", "video")).toBe("storyboard_inspection");
+    expect(resumeStepForVideoRegen("60s", "video")).toBe("segment_storyboard");
+  });
+});
+
+describe("rewindStepForTemplateRegen — the checkpoint depends on what failed", () => {
+  // A single fixed checkpoint is wrong in BOTH directions: too far back and the
+  // run re-pays gpt-image-2 for stills it already has; not far enough and the
+  // composite renders with no copy and no images in it.
+  it("restarts a failed plan from scratch — nothing downstream ran", () => {
+    expect(rewindStepForTemplateRegen("TEMPLATE_PLAN_FAILED")).toBeNull();
+  });
+
+  it("re-runs fill → images → video → render after a failed fill", () => {
+    const step = rewindStepForTemplateRegen("TEMPLATE_FILL_FAILED");
+    expect(step).toBe("storyboard");
+    expect(nextStep(step as Step, false, false, "15s", "template")).toBe("template_fill");
+  });
+
+  it("re-runs ONLY the render after a failed render — the clip is not re-paid", () => {
+    const step = rewindStepForTemplateRegen("TEMPLATE_RENDER_FAILED");
+    expect(step).toBe("video");
+    expect(nextStep(step as Step, false, false, "15s", "template")).toBe("template_render");
+  });
+
+  it("distinguishes 'start over' from 'not a template failure'", () => {
+    // `null` means rewind to the beginning; `undefined` means reject the request.
+    expect(rewindStepForTemplateRegen("TEMPLATE_PLAN_FAILED")).toBeNull();
+    expect(rewindStepForTemplateRegen("VIDEO_GENERATION_FAILED")).toBeUndefined();
+    expect(rewindStepForTemplateRegen(null)).toBeUndefined();
+    expect(rewindStepForTemplateRegen("INTERNAL")).toBeUndefined();
   });
 });
 

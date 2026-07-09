@@ -27,6 +27,7 @@ import {
   getOpenAI,
   interpretFeedback,
   resumeStepForVideoRegen,
+  rewindStepForTemplateRegen,
 } from "../agents/creative-direction/index.js";
 import { getAdType } from "../agents/ad-types/registry.js";
 import {
@@ -333,10 +334,17 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, criticEnabled, adType, brandText, pipeline, templateId } =
-    parsed.data;
+  const { prompt, adType, brandText, pipeline, templateId } = parsed.data;
   let aspectRatio = parsed.data.aspectRatio;
   let duration = parsed.data.duration;
+  // A template run is FULL AUTO by contract: `plan.ts` collapses its chain on
+  // the assumption that no gate ever fires and no inspection step ever runs.
+  // Enforce that here, at the boundary, rather than threading the exception
+  // through the gate map — a confirm-mode template run would otherwise pause at
+  // the reference gate and wait for a "continue" the studio never offers.
+  const isTemplateRun = pipeline === "template";
+  const mode = isTemplateRun ? ("automatic" as const) : parsed.data.mode;
+  const criticEnabled = isTemplateRun ? false : parsed.data.criticEnabled;
 
   // ── Template pipeline gate ──────────────────────────────────────────
   // `templateId` is OUR `templates.id`, never Nexrender's. The admin already
@@ -902,10 +910,14 @@ runs.post("/:id/regenerate-video", async (c) => {
       .update(schema.runs)
       .set({
         status: "running",
-        currentStep: resumeStepForVideoRegen(run.duration),
+        currentStep: resumeStepForVideoRegen(run.duration, run.pipeline),
         feedback: note,
         error: null,
         errorCode: null,
+        // A template run re-renders after the new clip. A stale Nexrender job id
+        // would make `applyTemplate` poll the OLD render and persist its output,
+        // so the user would get a "regenerated" video containing the old clip.
+        ...(run.pipeline === "template" ? { nexrenderJobId: null } : {}),
         lockedAt: null,
         lockedBy: null,
         updatedAt: new Date(),
@@ -917,14 +929,17 @@ runs.post("/:id/regenerate-video", async (c) => {
   return c.json(await loadRunDetail(id));
 });
 
-// ── POST /runs/:id/regenerate-template — retry a failed template_fill/
-// template_render step. The template pipeline never gates mid-run (the
-// template was already validated at creation, and text-fill/render are fully
-// automatic — see plan.ts), so a failure here is a hard `failed` with no
-// recovery gate to fall back into. This route is the recovery path: rewind
-// to the pre-fill checkpoint and let the driver re-enter template_fill →
-// template_render, re-running the LLM fill too (cheap, and self-healing if
-// bad text caused the failure). Mirrors `POST /runs/:id/regenerate-video`.
+// ── POST /runs/:id/regenerate-template — retry a failed template step.
+//
+// The template pipeline never gates mid-run (the template was validated at
+// creation, and plan/fill/images/render are fully automatic), so a failure is a
+// hard `failed` with no gate to fall back into. This route is the recovery path.
+//
+// The rewind checkpoint is chosen by WHICH step failed — see
+// `rewindStepForTemplateRegen`. A single fixed checkpoint is wrong in both
+// directions: rewind too far and the run re-pays gpt-image-2 for stills it
+// already has; rewind too little and the composite renders with no copy and no
+// images in it.
 runs.post("/:id/regenerate-template", async (c) => {
   const id = c.req.param("id");
   const run = await getRunOr404(id);
@@ -932,23 +947,46 @@ runs.post("/:id/regenerate-template", async (c) => {
     throw badRequest("This run does not use the template pipeline.");
   }
   assertStatus(run, ["failed"], "Run is not in a failed state.");
-  if (
-    run.errorCode !== "TEMPLATE_RENDER_FAILED" &&
-    run.errorCode !== "TEMPLATE_FILL_FAILED"
-  ) {
+
+  const rewindTo = rewindStepForTemplateRegen(run.errorCode);
+  if (rewindTo === undefined) {
     throw badRequest("This run's failure isn't a template step failure.");
   }
 
-  log.info("regenerate-template", { run: id, errorCode: run.errorCode });
+  log.info("regenerate-template", {
+    run: id,
+    errorCode: run.errorCode,
+    rewindTo: rewindTo ?? "(start)",
+  });
+
+  // A stale Nexrender job id would make `applyTemplate` poll the OLD render and
+  // persist ITS output instead of submitting a fresh one. Always clear it.
+  //
+  // The previous composite (a `videos` row with a null segmentIndex, whose
+  // `assets` row cascades) is dropped too — otherwise a retry that succeeds
+  // leaves two `templated_video` rows and the run view picks whichever is newest
+  // by luck.
+  await db
+    .delete(schema.videos)
+    .where(
+      and(
+        eq(schema.videos.runId, id),
+        isNull(schema.videos.segmentIndex),
+        sql`${schema.videos.providerMeta} ->> 'provider' = 'nexrender'`,
+      ),
+    );
 
   await db
     .update(schema.runs)
     .set({
       status: "running",
-      currentStep: "video",
+      currentStep: rewindTo,
       error: null,
       errorCode: null,
       nexrenderJobId: null,
+      // A failed plan is re-planned from scratch; a stale one would be skipped
+      // by `template_plan`'s idempotency guard.
+      ...(rewindTo === null ? { templatePlan: null } : {}),
       lockedAt: null,
       lockedBy: null,
       updatedAt: new Date(),

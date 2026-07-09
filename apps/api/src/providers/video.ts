@@ -6,10 +6,43 @@
 
 import type { AspectRatio } from "@ugc/shared";
 
+/**
+ * The ONLY clip lengths Seedance 2.0 accepts. A discrete set, not a range: 7, 9,
+ * 11, 13 and 14 are rejected outright by ModelArk.
+ *
+ * Lives on the provider boundary because it is a fact about the provider, not
+ * about the template pipeline that happens to care most about it. `snapSeedanceDuration`
+ * is applied at the boundary too, so an out-of-set request can never reach the
+ * API and fail a run that has already paid for its storyboard.
+ */
+export const SEEDANCE_DURATIONS = [4, 5, 6, 8, 10, 12, 15] as const;
+
+export const MIN_CLIP_SEC = SEEDANCE_DURATIONS[0]; // 4
+export const MAX_CLIP_SEC = SEEDANCE_DURATIONS[SEEDANCE_DURATIONS.length - 1]; // 15
+
+/** Floating-point slack, so 12.0000001s is not treated as longer than 12s. */
+const EPSILON = 1e-6;
+
+/**
+ * The smallest Seedance duration >= `seconds`, clamped to the set's bounds.
+ *
+ * Snapping UP is deliberate. A clip SHORTER than the layer it fills ends on a
+ * frozen frame (and its native audio cuts out early), while a LONGER one is
+ * simply trimmed by After Effects. Given the choice, always overshoot.
+ */
+export function snapSeedanceDuration(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= MIN_CLIP_SEC) return MIN_CLIP_SEC;
+  const want = Math.ceil(seconds - EPSILON);
+  return SEEDANCE_DURATIONS.find((d) => d >= want) ?? MAX_CLIP_SEC;
+}
+
 export interface SubmitVideoInput {
   /** Text prompt describing motion/ad style for the ~15s clip. */
   prompt: string;
-  /** Target duration in seconds (~15). */
+  /**
+   * Target duration in seconds. Snapped onto `SEEDANCE_DURATIONS` at the
+   * provider boundary — the API rejects anything else.
+   */
   durationSec?: number;
   /** Output aspect ratio (Seedance `ratio` key). Defaults to 16:9 when omitted. */
   aspectRatio?: AspectRatio;

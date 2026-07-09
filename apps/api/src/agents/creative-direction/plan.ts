@@ -227,8 +227,46 @@ export function gateForCurrentStep(step: Step): Gate | null {
  * step's idempotency guards (`persistedFinalVideo` / the segment `done` set) no
  * longer short-circuit it.
  */
-export function resumeStepForVideoRegen(duration: Duration = "15s"): Step {
+export function resumeStepForVideoRegen(
+  duration: Duration = "15s",
+  pipeline: Pipeline = "video",
+): Step {
+  // A template run's chain puts the copywriter and the image agent BEFORE the
+  // clip. Rewinding to the storyboard would re-run both — re-paying gpt-image-2
+  // for every slot — when all the user asked for is a new clip. `template_images`
+  // is the checkpoint whose next step is `video`.
+  if (pipeline === "template") return "template_images";
   return isMultiSegment(duration) ? "segment_storyboard" : "storyboard_inspection";
+}
+
+/**
+ * Where a failed template run rewinds to, by the step that failed. Returns the
+ * checkpoint to write into `runs.current_step` (`null` = start over), or
+ * `undefined` when the failure is not a template-step failure.
+ *
+ * Getting this wrong is silent and expensive in both directions: rewind too far
+ * and the run re-pays for images it already has; rewind too little and the
+ * template renders with no copy and no stills in it.
+ */
+export function rewindStepForTemplateRegen(
+  errorCode: string | null,
+): Step | null | undefined {
+  switch (errorCode) {
+    // Nothing downstream ran, so restarting is cheap. `currentStep = null` sends
+    // the driver back through `template_plan`.
+    case "TEMPLATE_PLAN_FAILED":
+      return null;
+    // The copy failed, so the images and the clip had not run yet.
+    // `nextStep("storyboard")` is `template_fill`.
+    case "TEMPLATE_FILL_FAILED":
+      return "storyboard";
+    // Everything generated fine; only the composite failed.
+    // `nextStep("video")` is `template_render` — the clip is NOT re-generated.
+    case "TEMPLATE_RENDER_FAILED":
+      return "video";
+    default:
+      return undefined;
+  }
 }
 
 /**

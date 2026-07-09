@@ -24,6 +24,7 @@ import type {
   VideoTaskResult,
   VideoTaskState,
 } from "../video.js";
+import { snapSeedanceDuration } from "../video.js";
 
 const log = createLogger("byteplus");
 
@@ -144,10 +145,24 @@ export function createBytePlusProvider(): VideoProvider {
       // otherwise the caller's per-run seed (multi-segment continuity); else
       // unset → BytePlus picks at random for per-run variety.
       const seed = env.BYTEPLUS_VIDEO_SEED ?? input.seed;
+      // Seedance accepts a DISCRETE duration set. Snap here, at the boundary, so
+      // an out-of-set value can never reach ModelArk and fail a run that has
+      // already paid for its reference sheets and storyboard. Template runs ask
+      // for their composition's own length, which is exactly where a 7 or a 9
+      // would otherwise slip through.
+      const requested = input.durationSec ?? DEFAULT_DURATION_SEC;
+      const duration = snapSeedanceDuration(requested);
+      if (duration !== requested) {
+        log.warn("duration snapped to a supported Seedance value", {
+          run: input.referenceTag,
+          requested,
+          duration,
+        });
+      }
       const body = {
         model: env.BYTEPLUS_VIDEO_MODEL,
         content,
-        duration: input.durationSec ?? DEFAULT_DURATION_SEC,
+        duration,
         resolution,
         ratio: input.aspectRatio ?? DEFAULT_RATIO, // Seedance 2.0 key (16:9 | 9:16)
         generate_audio: true, // native synchronized audio
