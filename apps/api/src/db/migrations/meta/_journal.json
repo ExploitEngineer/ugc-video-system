@@ -169,6 +169,13 @@
       "when": 1783586554933,
       "tag": "0023_kind_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783595590013,
+      "tag": "0024_dear_malcolm_colcord",
+      "breakpoints": true
     }
   ]
 }

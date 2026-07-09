@@ -89,13 +89,11 @@ export type TemplateJobAssetInput =
       composition: string;
       layerName: string;
       fit: "fill" | "fit";
-    }
-  /**
-   * Set a composition's work-area duration. Used when the template outruns
-   * Seedance's 15s ceiling: the clip fills its layer, and without the trim the
-   * remainder of the composition plays on past the end of the footage.
-   */
-  | { kind: "compDuration"; composition: string; valueSec: number };
+    };
+
+// NOTE: there is deliberately no `compDuration` variant. Nothing trims the
+// composition. Each video slot receives a slice of the master cut to that slot's
+// own length, so a 30s template renders 30 seconds with its outro intact.
 
 export interface TemplateRenderInput {
   /** Nexrender Cloud template id (from `registerTemplate`). */

@@ -29,6 +29,7 @@ import { latestFinalVideoUrl } from "../creative-direction/inputs.js";
 import { writeStepEvent } from "../events.js";
 import { persistAsset, persistSheet } from "../persist.js";
 import type { SkillContext } from "../types.js";
+import { prepareTemplateClips } from "./clips.js";
 import { fillTemplateText } from "./fill-text/index.js";
 import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
@@ -85,19 +86,31 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
 
     const template = runTemplateSchema.parse(run.template);
     const imageUrls = await generatedImageUrls(runId);
+    // Cut the 15s master into a slice per video slot, and route its voiceover to
+    // the template's audio layer. Idempotent: a rewind into this step reuses the
+    // slices already cut rather than paying for ffmpeg twice.
+    const { clipUrls, audioUrl, audioLayerName } = await prepareTemplateClips(
+      runId,
+      template,
+      clipUrl,
+    );
+
     const input = buildRenderInput({
       runId,
       template,
       textFill: (run.templateTextFill as TemplateTextFillEntry[] | null) ?? [],
       imageUrls,
-      clipUrl,
+      clipUrls,
+      masterClipUrl: clipUrl,
+      audioUrl,
+      audioLayerName,
     });
     const { mainComposition: composition, nexrenderTemplateId } = template;
     log.info("render job assembled", {
       assets: input.assets.length,
       images: imageUrls.size,
-      trimComp: template.metadata.trimComp,
-      clipSeconds: template.metadata.clipSeconds,
+      clips: clipUrls.size,
+      voiceover: audioLayerName ?? "on the longest slice",
     });
 
     const provider = createTemplateRenderProvider();

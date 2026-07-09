@@ -352,15 +352,6 @@ export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
             type: a.fit,
           },
         };
-      case "compDuration":
-        return {
-          type: "function" as const,
-          name: "nx:comp-duration-set",
-          params: {
-            composition: a.composition,
-            value: a.valueSec,
-          },
-        };
     }
   });
   return {
@@ -425,11 +416,15 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
       // that exercises `buildStructure` in local dev + the free smoke test, so
       // it deliberately contains every slot shape the classifier must get right.
       //
-      //  - a 12s comp (a real Seedance duration, and NOT the old hardcoded 15s)
-      //  - one video slot (the render gate rejects a template without one)
-      //  - a logo image      → imageClass "brand"      → never AI-filled
-      //  - a background image → imageClass "decorative" → never AI-filled
-      //  - a product still    → imageClass "content"    → generated
+      //  - a 30s main comp, LONGER than the 15s master. Nothing gets trimmed:
+      //    the graphics simply fill the timeline the footage does not cover.
+      //  - THREE video slots as placeholder precomps whose child comps declare
+      //    7s, 2s and 2s. This is the case the slice planner exists for.
+      //  - an audio layer, so the master's voiceover has somewhere to live and
+      //    the slices can be muted.
+      //  - a logo image       → imageClass "brand"       → never AI-filled
+      //  - a background image → imageClass "decorative"  → never AI-filled
+      //  - a product still    → imageClass "content"     → generated
       //  - a placeholder precomp holding a STILL, which v1 misread as VIDEO
       //  - a text layer whose `data` bag carries a font, to exercise the probe
       return {
@@ -440,93 +435,39 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
             name: "main",
             width: 1920,
             height: 1080,
-            duration: 12,
+            duration: 30,
             frame_rate: 30,
           },
-          { aeid: 2, name: "PH_1_comp", width: 640, height: 360 },
+          // The child comps ARE the slot lengths. Only these carry a duration —
+          // Nexrender's layers response has no time fields at all.
+          { aeid: 2, name: "PH_HERO_comp", width: 1920, height: 1080, duration: 7 },
+          { aeid: 3, name: "PH_CUT_A_comp", width: 960, height: 540, duration: 2 },
+          { aeid: 4, name: "PH_CUT_B_comp", width: 960, height: 540, duration: 2 },
+          { aeid: 5, name: "PH_STILL_comp", width: 640, height: 360 },
         ],
         layers: [
-          {
-            composition_id: 1,
-            aeid: 10,
-            name: "your-clip.mp4",
-            layer_type: "av",
-            source_type: "file",
-            source_comp_id: null,
-            width: 1920,
-            height: 1080,
-          },
-          {
-            composition_id: 1,
-            aeid: 11,
-            name: "Headline",
-            layer_type: "text",
-            source_type: null,
-            source_comp_id: null,
-            width: 1200,
-            height: 120,
-            data: { font: "Montserrat-SemiBold", fontSize: 72 },
-          },
-          {
-            composition_id: 1,
-            aeid: 12,
-            name: "Subhead",
-            layer_type: "text",
-            source_type: null,
-            source_comp_id: null,
-            width: 900,
-            height: 60,
-          },
-          {
-            composition_id: 1,
-            aeid: 13,
-            name: "logo.png",
-            layer_type: "av",
-            source_type: "file",
-            source_comp_id: null,
-            width: 180,
-            height: 60,
-          },
-          {
-            composition_id: 1,
-            aeid: 14,
-            name: "background.jpg",
-            layer_type: "av",
-            source_type: "file",
-            source_comp_id: null,
-            width: 1920,
-            height: 1080,
-          },
-          {
-            composition_id: 1,
-            aeid: 15,
-            name: "product-photo.jpg",
-            layer_type: "av",
-            source_type: "file",
-            source_comp_id: null,
-            width: 800,
-            height: 800,
-          },
-          {
-            composition_id: 1,
-            aeid: 16,
-            name: "PH_1",
-            layer_type: "av",
-            source_type: "comp",
-            source_comp_id: 2,
-            width: 640,
-            height: 360,
-          },
-          {
-            composition_id: 2,
-            aeid: 20,
-            name: "hero-shot.jpg",
-            layer_type: "av",
-            source_type: "file",
-            source_comp_id: null,
-            width: 640,
-            height: 360,
-          },
+          // ── three video slots, each a placeholder precomp ──
+          { composition_id: 1, aeid: 10, name: "PH_HERO", layer_type: "av", source_type: "comp", source_comp_id: 2, width: 1920, height: 1080 },
+          { composition_id: 2, aeid: 11, name: "hero-clip.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 1920, height: 1080 },
+          { composition_id: 1, aeid: 12, name: "PH_CUT_A", layer_type: "av", source_type: "comp", source_comp_id: 3, width: 960, height: 540 },
+          { composition_id: 3, aeid: 13, name: "cutaway-a.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 960, height: 540 },
+          { composition_id: 1, aeid: 14, name: "PH_CUT_B", layer_type: "av", source_type: "comp", source_comp_id: 4, width: 960, height: 540 },
+          { composition_id: 4, aeid: 15, name: "cutaway-b.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 960, height: 540 },
+
+          // ── the template's own audio layer: takes the master's voiceover ──
+          { composition_id: 1, aeid: 20, name: "voiceover.mp3", layer_type: "av", source_type: "file", source_comp_id: null },
+
+          // ── text ──
+          { composition_id: 1, aeid: 30, name: "Headline", layer_type: "text", source_type: null, source_comp_id: null, width: 1200, height: 120, data: { font: "Montserrat-SemiBold", fontSize: 72 } },
+          { composition_id: 1, aeid: 31, name: "Subhead", layer_type: "text", source_type: null, source_comp_id: null, width: 900, height: 60 },
+
+          // ── images: one of each class ──
+          { composition_id: 1, aeid: 40, name: "logo.png", layer_type: "av", source_type: "file", source_comp_id: null, width: 180, height: 60 },
+          { composition_id: 1, aeid: 41, name: "background.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 1920, height: 1080 },
+          { composition_id: 1, aeid: 42, name: "product-photo.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 800, height: 800 },
+          // A placeholder precomp holding a STILL — v1 called this VIDEO.
+          { composition_id: 1, aeid: 43, name: "PH_STILL", layer_type: "av", source_type: "comp", source_comp_id: 5, width: 640, height: 360 },
+          { composition_id: 5, aeid: 44, name: "hero-shot.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 640, height: 360 },
         ],
       };
     },

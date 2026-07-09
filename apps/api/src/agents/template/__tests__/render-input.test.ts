@@ -12,6 +12,7 @@ const slot = (o: Partial<TemplateSlot> & Pick<TemplateSlot, "asset" | "jobLayerN
     injectVia: "asset",
     width: null,
     height: null,
+    durationSec: null,
     ...o,
   }) as TemplateSlot;
 
@@ -33,8 +34,6 @@ const template = (
     width: 1920,
     height: 1080,
     aspectRatio: "16:9",
-    clipSeconds: 12,
-    trimComp: false,
     slotCounts: { video: 1, image: 0, text: 0, audio: 0 },
     ...meta,
   },
@@ -47,7 +46,8 @@ const build = (t: RunTemplate, over: Partial<Parameters<typeof buildRenderInput>
     template: t,
     textFill: [],
     imageUrls: new Map(),
-    clipUrl: CLIP,
+    clipUrls: new Map(),
+    masterClipUrl: CLIP,
     ...over,
   });
 
@@ -153,44 +153,111 @@ describe("buildRenderInput — slot filling", () => {
   });
 });
 
-// ── comp duration ────────────────────────────────────────────────────────────
+// ── per-slot slices + the voiceover ──────────────────────────────────────────
 
-describe("buildRenderInput — comp trimming", () => {
-  const slots = [slot({ asset: "VIDEO", jobLayerName: "clip.mp4" })];
+describe("buildRenderInput — each video slot gets its OWN slice", () => {
+  const three = [
+    slot({ asset: "VIDEO", jobLayerName: "hero.mp4", durationSec: 7 }),
+    slot({ asset: "VIDEO", jobLayerName: "cut-a.mp4", durationSec: 2 }),
+    slot({ asset: "VIDEO", jobLayerName: "cut-b.mp4", durationSec: 2 }),
+  ];
 
-  it("does NOT trim a composition the clip already covers", () => {
-    const input = build(template(slots, { trimComp: false, clipSeconds: 12 }));
-    expect(input.assets.some((a) => a.kind === "compDuration")).toBe(false);
+  it("injects a DIFFERENT url per slot — the whole reason slicing exists", () => {
+    const input = build(template(three), {
+      clipUrls: new Map([
+        ["hero.mp4", "https://cdn/slice-0.mp4"],
+        ["cut-a.mp4", "https://cdn/slice-1.mp4"],
+        ["cut-b.mp4", "https://cdn/slice-2.mp4"],
+      ]),
+    });
+    const srcs = input.assets.filter((a) => a.kind === "media").map((a) => a.src);
+    expect(srcs).toEqual([
+      "https://cdn/slice-0.mp4",
+      "https://cdn/slice-1.mp4",
+      "https://cdn/slice-2.mp4",
+    ]);
+    expect(new Set(srcs).size).toBe(3);
   });
 
-  it("trims a composition that outruns Seedance's ceiling", () => {
-    // 25s template → a 15s clip. Without the trim, 10s of composition plays on
-    // past the end of the footage.
-    const input = build(template(slots, { trimComp: true, clipSeconds: 15, durationSec: 25 }));
-    expect(input.assets.at(-1)).toEqual({
-      kind: "compDuration",
+  it("falls back to the whole master for a slot that was never sliced", () => {
+    const input = build(template(three), {
+      clipUrls: new Map([["hero.mp4", "https://cdn/slice-0.mp4"]]),
+    });
+    const srcs = input.assets.filter((a) => a.kind === "media").map((a) => a.src);
+    expect(srcs).toEqual(["https://cdn/slice-0.mp4", CLIP, CLIP]);
+  });
+
+  it("NEVER emits a comp-duration asset — nothing trims the composition", () => {
+    // A 25s template renders 25 seconds. Its graphics fill whatever the footage
+    // does not cover, and its outro survives. The `compDuration` variant is gone
+    // from the type entirely, so assert on the serialized job instead.
+    const input = build(template(three, { durationSec: 25 }));
+    expect(JSON.stringify(input.assets)).not.toContain("compDuration");
+    expect(input.assets.map((a) => a.kind).sort()).toEqual([
+      "autoscale", "autoscale", "autoscale", "media", "media", "media",
+    ]);
+  });
+});
+
+describe("buildRenderInput — the voiceover", () => {
+  const withAudio = [
+    slot({ asset: "VIDEO", jobLayerName: "clip.mp4" }),
+    slot({ asset: "AUDIO", jobLayerName: "voiceover.mp3" }),
+  ];
+
+  it("routes the master's full track to the template's audio layer", () => {
+    // Slicing chops a baked-in voiceover into stuttering half-words, so the
+    // whole track goes to the audio layer and the slices are muted.
+    const input = build(template(withAudio), {
+      audioUrl: "https://cdn/vo.m4a",
+      audioLayerName: "voiceover.mp3",
+    });
+    const audio = input.assets.find(
+      (a) => a.kind === "media" && a.mediaType === "audio",
+    );
+    expect(audio).toEqual({
+      kind: "media",
+      mediaType: "audio",
       composition: "main",
-      valueSec: 15,
+      layerName: "voiceover.mp3",
+      src: "https://cdn/vo.m4a",
     });
   });
 
-  it("puts the trim LAST, so nothing above can re-lengthen the work area", () => {
-    const input = build(template(slots, { trimComp: true, clipSeconds: 15 }));
-    const idx = input.assets.findIndex((a) => a.kind === "compDuration");
-    expect(idx).toBe(input.assets.length - 1);
+  it("never autoscales an audio layer — it has no dimensions", () => {
+    const input = build(template(withAudio), {
+      audioUrl: "https://cdn/vo.m4a",
+      audioLayerName: "voiceover.mp3",
+    });
+    const scales = input.assets.filter((a) => a.kind === "autoscale");
+    expect(scales.map((a) => a.layerName)).toEqual(["clip.mp4"]);
+  });
+
+  it("leaves the audio layer alone when there is no track to give it", () => {
+    // No audio layer to route to → the voiceover rides on the longest slice.
+    const input = build(template(withAudio));
+    expect(input.assets.some((a) => a.kind === "media" && a.mediaType === "audio")).toBe(false);
+  });
+
+  it("does not hijack an audio layer the voiceover was not routed to", () => {
+    // A music bed keeps the template's own track.
+    const input = build(
+      template([
+        slot({ asset: "AUDIO", jobLayerName: "music.mp3" }),
+        slot({ asset: "AUDIO", jobLayerName: "voiceover.mp3" }),
+      ]),
+      { audioUrl: "https://cdn/vo.m4a", audioLayerName: "voiceover.mp3" },
+    );
+    expect(input.assets).toHaveLength(1);
+    expect(input.assets[0]).toMatchObject({ layerName: "voiceover.mp3" });
   });
 });
 
 // ── the wire format ──────────────────────────────────────────────────────────
 
 describe("buildRenderJobBody — the new function assets reach Nexrender intact", () => {
-  it("maps autoscale and compDuration to their nx: functions, preserving order", () => {
-    const input = build(
-      template([slot({ asset: "VIDEO", jobLayerName: "clip.mp4" })], {
-        trimComp: true,
-        clipSeconds: 15,
-      }),
-    );
+  it("maps autoscale to its nx: function, preserving order", () => {
+    const input = build(template([slot({ asset: "VIDEO", jobLayerName: "clip.mp4" })]));
     const body = buildRenderJobBody(input);
     if (!("assets" in body)) throw new Error("expected a deliverable job");
 
@@ -201,12 +268,32 @@ describe("buildRenderJobBody — the new function assets reach Nexrender intact"
         name: "nx:layer-autoscale",
         params: { composition: "main", layerName: "clip.mp4", type: "fill" },
       },
-      {
-        type: "function",
-        name: "nx:comp-duration-set",
-        params: { composition: "main", value: 15 },
-      },
     ]);
+  });
+
+  it("maps the voiceover to a plain `audio` asset", () => {
+    const input = build(
+      template([
+        slot({ asset: "VIDEO", jobLayerName: "clip.mp4" }),
+        slot({ asset: "AUDIO", jobLayerName: "vo.mp3" }),
+      ]),
+      { audioUrl: "https://cdn/vo.m4a", audioLayerName: "vo.mp3" },
+    );
+    const body = buildRenderJobBody(input);
+    if (!("assets" in body)) throw new Error("expected a deliverable job");
+    expect(body.assets.at(-1)).toEqual({
+      type: "audio",
+      composition: "main",
+      layerName: "vo.mp3",
+      src: "https://cdn/vo.m4a",
+    });
+  });
+
+  it("emits NO nx:comp-duration-set, ever", () => {
+    const input = build(template([slot({ asset: "VIDEO", jobLayerName: "clip.mp4" })], { durationSec: 40 }));
+    const body = buildRenderJobBody(input);
+    if (!("assets" in body)) throw new Error("expected a deliverable job");
+    expect(JSON.stringify(body)).not.toContain("comp-duration-set");
   });
 
   it("maps a generated still to an `image` asset", () => {

@@ -20,6 +20,7 @@ import { createLogger } from "../../../lib/log.js";
 import { classifyRunError } from "../../../lib/run-failure.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext } from "../../types.js";
+import { MASTER_CLIP_SECONDS } from "../geometry.js";
 import { buildTemplatePlanPrompt, type PlanSlotInput } from "./prompt.js";
 
 const log = createLogger("template-plan");
@@ -30,12 +31,23 @@ const log = createLogger("template-plan");
  * IMAGE slots the deterministic heuristic called `brand` (a logo) or
  * `decorative` (a background) are withheld entirely — a generated photo in a
  * logo layer is wrong every time, so the model never gets the chance to argue.
- * AUDIO slots keep the template's own track in v1.
+ *
+ * Only the FIRST video slot is shown, and it stands for the whole clip. There
+ * is one 15-second master, and the template cuts it into pieces; showing the
+ * model three video slots would invite three unrelated scenes when what we need
+ * is one continuous shot. AUDIO slots receive the master's voiceover, nothing
+ * for the model to plan.
  */
 export function planningSlots(slots: TemplateSlot[]): TemplateSlot[] {
+  let seenVideo = false;
   return slots.filter((s) => {
     if (s.asset === "AUDIO") return false;
     if (s.asset === "IMAGE") return s.imageClass === "content";
+    if (s.asset === "VIDEO") {
+      if (s.empty || seenVideo) return false;
+      seenVideo = true;
+      return true;
+    }
     return true;
   });
 }
@@ -119,7 +131,8 @@ export async function planTemplate(ctx: SkillContext): Promise<TemplatePlan> {
       adStyle: run.adStyle ?? "",
       brandText: run.brandText ?? undefined,
       productBrief: run.productBrief ?? undefined,
-      clipSeconds: tpl.metadata.clipSeconds,
+      // Always the master's length. The template's video slots are slices of it.
+      clipSeconds: MASTER_CLIP_SECONDS,
       aspectRatio: tpl.metadata.aspectRatio ?? ctx.aspectRatio,
       slots: slots.map(toPromptSlot),
     });

@@ -413,15 +413,11 @@ async function executeStep(
       const productSheetRef: ImageRef | undefined = product
         ? { source: product.assetUrl, mime: "image/png" }
         : undefined;
-      // A TEMPLATE run's clip must be as long as the template's video slot, not
-      // the pipeline's default 15s. `clipSeconds` was snapped at introspection
-      // to a length Seedance actually accepts ({4,5,6,8,10,12,15}), and snapped
-      // UP — a clip shorter than its layer ends on a freeze frame.
-      const templateClipSeconds =
-        runRow?.pipeline === "template"
-          ? runTemplateSchema.safeParse(runRow.template).data?.metadata.clipSeconds
-          : undefined;
-
+      // A template run generates the SAME 15s master as any other run. It is
+      // not cut to the template's length: `template_render` slices it into a
+      // piece per video slot instead, so the composition keeps its full runtime
+      // and every ad is built from the same amount of footage.
+      //
       // videoBuilder writes its own video step_events.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
@@ -434,7 +430,6 @@ async function executeStep(
         characterAnchor: ctx.personBrief,
         userPrompt,
         critique: regenNote,
-        ...(templateClipSeconds ? { durationSec: templateClipSeconds } : {}),
       });
       return {};
     }

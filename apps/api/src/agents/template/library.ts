@@ -169,13 +169,20 @@ export async function createTemplate(
 // ── introspect ───────────────────────────────────────────────────────────────
 
 /**
+ * The most video slots we will fill. Not a technical limit — one 15s master is
+ * sliced across all of them, so the cost is flat — but past this the slices are
+ * too short to read as anything, and the template is probably not an ad.
+ */
+export const MAX_VIDEO_SLOTS = 8;
+
+/**
  * Why a template cannot join the library, or null when it can. Pure, so the
  * rejection rules are unit-testable without a Nexrender account.
  *
- * The library only accepts templates the pipeline can actually fill: one with
- * no video slot has nowhere to put the generated clip, and one with several
- * would need a paid Seedance clip each (out of scope — the admin curates for
- * single-video templates).
+ * SEVERAL video slots are fine. One 15s master is generated and cut into a
+ * slice per slot, each of that slot's own length, so a 7s/2s/2s template costs
+ * exactly the same as a single-slot one. Only a template with NOWHERE to put
+ * the footage is unusable.
  */
 export function validateForLibrary(
   structure: TemplateStructure,
@@ -183,8 +190,8 @@ export function validateForLibrary(
 ): string | null {
   const videoSlots = metadata.slotCounts.video;
   if (videoSlots === 0) return "This template has no spot for a video.";
-  if (videoSlots > 1) {
-    return `This template has ${videoSlots} video slots; exactly one is supported.`;
+  if (videoSlots > MAX_VIDEO_SLOTS) {
+    return `This template has ${videoSlots} video slots; at most ${MAX_VIDEO_SLOTS} are supported.`;
   }
   if (!structure.mainComposition) {
     return "Could not determine which composition to render.";
@@ -243,7 +250,7 @@ export async function introspectTemplate(
   const { video, image, text, audio } = metadata.slotCounts;
   log.info("template introspected", {
     id,
-    clipSeconds: metadata.clipSeconds,
+    durationSec: metadata.durationSec ?? "unknown",
     slots: `${video}v ${image}i ${text}t ${audio}a`,
   });
   return (await getTemplate(id)) ?? row;

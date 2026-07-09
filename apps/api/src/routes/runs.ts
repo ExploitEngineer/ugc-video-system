@@ -906,6 +906,21 @@ runs.post("/:id/regenerate-video", async (c) => {
     if (assetIds.length) {
       await tx.delete(schema.assets).where(inArray(schema.assets.id, assetIds));
     }
+    // A template run's slices were cut FROM the clip we just deleted, so they
+    // show footage that no longer exists. `prepareTemplateClips` is idempotent
+    // by asset presence, so leaving them behind would silently re-render the old
+    // ad. The generated stills are NOT touched: they cost real money and are
+    // independent of the clip.
+    if (run.pipeline === "template") {
+      await tx
+        .delete(schema.assets)
+        .where(
+          and(
+            eq(schema.assets.runId, id),
+            inArray(schema.assets.kind, ["template_clip", "template_audio"]),
+          ),
+        );
+    }
     await tx
       .update(schema.runs)
       .set({

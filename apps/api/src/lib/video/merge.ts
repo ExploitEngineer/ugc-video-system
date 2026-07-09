@@ -363,6 +363,75 @@ export async function mergeSegmentUrls(
  * `-vn` drops the video so this is a cheap, audio-only re-encode.
  */
 /**
+ * Cut `[startSec, startSec + durationSec)` out of a clip.
+ *
+ * Used to fill a template's video slots: one 15s master is sliced into a piece
+ * per slot, each showing a different moment of the same continuous shot.
+ * Nexrender cannot do this — a job asset replaces the footage item and carries
+ * no in-point — so the cut happens here.
+ *
+ * Seeks AFTER `-i` (output seeking). Input seeking is faster but lands on the
+ * nearest keyframe, which would silently shift a 2s cutaway by up to a second.
+ * These clips are 15 seconds; accuracy is worth the decode.
+ *
+ * `keepAudio: false` strips the track. Slicing a clip with a baked-in voiceover
+ * otherwise yields stuttering half-words across the slots, so the master's audio
+ * is normally routed whole to the template's own audio layer instead.
+ */
+export async function sliceClip(
+  videoUrl: string,
+  opts: { startSec: number; durationSec: number; keepAudio?: boolean },
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  const { startSec, durationSec, keepAudio = false } = opts;
+  if (!(durationSec > 0)) {
+    throw new Error(`sliceClip: durationSec must be positive, got ${durationSec}`);
+  }
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-slice-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.mp4");
+
+    log.info("▶ slicing clip", { startSec, durationSec, keepAudio });
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-ss", String(startSec),
+        "-t", String(durationSec),
+        ...(keepAudio
+          ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+          : ["-an"]),
+        // Match mergeSegmentUrls' normalize pass, so slices and merged clips
+        // decode identically in After Effects.
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "slice-clip",
+    );
+
+    const bytes = await readFile(out);
+    if (bytes.length === 0) {
+      throw new Error(
+        `sliceClip: produced an empty file for [${startSec}, ${startSec + durationSec}]`,
+      );
+    }
+    log.info("✓ clip sliced", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Grab a single frame from a video as a JPEG poster.
  *
  * Used for the template library's preview cards: the `<video>` element shows

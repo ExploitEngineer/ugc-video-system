@@ -13,6 +13,7 @@ import {
   detectMainComposition,
   extractFont,
   extractFontSize,
+  extractLayerDuration,
   extType,
   fillableImageSlots,
 } from "../introspect.js";
@@ -178,28 +179,98 @@ describe("buildStructure — slot discovery, geometry and classification", () =>
 // ── buildMetadata ────────────────────────────────────────────────────────────
 
 describe("buildMetadata — the surface the picker + run gate read", () => {
-  it("derives clipSeconds from the composition, not a hardcoded 15s", () => {
+  it("reports the composition's own length, which is what the ad runs for", () => {
     const m = buildMetadata(buildStructure([MAIN], [layer({ composition_id: 1, aeid: 1, name: "c.mp4" })]));
-    expect(m.clipSeconds).toBe(12);
-    expect(m.trimComp).toBe(false);
     expect(m.durationSec).toBe(12);
     expect(m.frameRate).toBe(30);
     expect(m.aspectRatio).toBe("16:9");
   });
 
-  it("caps a long composition and flags it for trimming", () => {
+  it("does NOT cap or trim a composition longer than the 15s master", () => {
+    // The clip is sliced per video slot instead. A 25s template renders 25
+    // seconds, its graphics filling whatever the footage does not cover.
     const long = comp({ aeid: 1, name: "main", width: 1080, height: 1920, duration: 25 });
     const m = buildMetadata(buildStructure([long], [layer({ composition_id: 1, aeid: 1, name: "c.mp4" })]));
-    expect(m.clipSeconds).toBe(15);
-    expect(m.trimComp).toBe(true);
+    expect(m.durationSec).toBe(25);
     expect(m.aspectRatio).toBe("9:16");
+    expect(m).not.toHaveProperty("clipSeconds");
+    expect(m).not.toHaveProperty("trimComp");
   });
 
-  it("falls back to 15s when the composition reports no duration", () => {
+  it("tolerates a composition that reports no duration", () => {
     const noDur = comp({ aeid: 1, name: "main", width: 1920, height: 1080 });
     const m = buildMetadata(buildStructure([noDur], [layer({ composition_id: 1, aeid: 1, name: "c.mp4" })]));
-    expect(m.clipSeconds).toBe(15);
-    expect(m.trimComp).toBe(false);
+    expect(m.durationSec).toBeNull();
+  });
+});
+
+// ── per-slot video durations: the whole point of the slicing change ──────────
+
+describe("buildStructure — a VIDEO slot's own length", () => {
+  it("reads a placeholder precomp's CHILD composition duration", () => {
+    // Nexrender's layers response has no time fields at all. The child comp the
+    // designer built around a placeholder is the only per-slot time signal.
+    const comps = [
+      comp({ aeid: 1, name: "main", width: 1920, height: 1080, duration: 30 }),
+      comp({ aeid: 2, name: "PH_HERO_comp", width: 1920, height: 1080, duration: 7 }),
+      comp({ aeid: 3, name: "PH_CUT_comp", width: 960, height: 540, duration: 2 }),
+    ];
+    const layers = [
+      layer({ composition_id: 1, aeid: 10, name: "PH_HERO", source_type: "comp", source_comp_id: 2 }),
+      layer({ composition_id: 2, aeid: 11, name: "hero.mp4" }),
+      layer({ composition_id: 1, aeid: 12, name: "PH_CUT", source_type: "comp", source_comp_id: 3 }),
+      layer({ composition_id: 3, aeid: 13, name: "cut.mp4" }),
+    ];
+    const videos = buildStructure(comps, layers).slots.filter((s) => s.asset === "VIDEO");
+    expect(videos.map((s) => s.durationSec)).toEqual([7, 2]);
+  });
+
+  it("leaves a direct file layer's duration null — nothing exposes it", () => {
+    const s = buildStructure([MAIN], [layer({ composition_id: 1, aeid: 1, name: "clip.mp4" })]);
+    expect(s.slots[0]).toMatchObject({ asset: "VIDEO", durationSec: null });
+  });
+
+  it("ignores a child comp that reports a zero or negative duration", () => {
+    const comps = [
+      MAIN,
+      comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360, duration: 0 }),
+    ];
+    const layers = [
+      layer({ composition_id: 1, aeid: 10, name: "PH_1", source_type: "comp", source_comp_id: 2 }),
+      layer({ composition_id: 2, aeid: 11, name: "clip.mp4" }),
+    ];
+    const video = buildStructure(comps, layers).slots.find((s) => s.asset === "VIDEO");
+    expect(video?.durationSec).toBeNull();
+  });
+
+  it("falls back to the data bag when the child comp has no duration", () => {
+    const comps = [MAIN, comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360 })];
+    const layers = [
+      layer({ composition_id: 1, aeid: 10, name: "PH_1", source_type: "comp", source_comp_id: 2, data: { duration: 3.5 } }),
+      layer({ composition_id: 2, aeid: 11, name: "clip.mp4" }),
+    ];
+    const video = buildStructure(comps, layers).slots.find((s) => s.asset === "VIDEO");
+    expect(video?.durationSec).toBe(3.5);
+  });
+});
+
+describe("extractLayerDuration — the undocumented data bag", () => {
+  it("reads a direct duration under the shapes a parser plausibly emits", () => {
+    expect(extractLayerDuration({ duration: 4 })).toBe(4);
+    expect(extractLayerDuration({ durationSec: "2.5" })).toBe(2.5);
+    expect(extractLayerDuration({ source: { duration: 6 } })).toBe(6);
+  });
+
+  it("derives a duration from an in/out pair", () => {
+    expect(extractLayerDuration({ inPoint: 2, outPoint: 9 })).toBe(7);
+    expect(extractLayerDuration({ startTime: 1, endTime: 3 })).toBe(2);
+  });
+
+  it("returns undefined rather than guessing", () => {
+    expect(extractLayerDuration(undefined)).toBeUndefined();
+    expect(extractLayerDuration({})).toBeUndefined();
+    expect(extractLayerDuration({ duration: 0 })).toBeUndefined();
+    expect(extractLayerDuration({ inPoint: 9, outPoint: 2 })).toBeUndefined(); // out before in
   });
 });
 

@@ -30,7 +30,6 @@ export function toTemplateSummaryDto(row: TemplateRow): TemplateSummary {
     tags: row.tags ?? [],
     status: toStatus(row.status),
     durationSec: metadata?.durationSec ?? null,
-    clipSeconds: metadata?.clipSeconds ?? null,
     aspectRatio: metadata?.aspectRatio ?? null,
     slotCounts: metadata?.slotCounts ?? null,
     previewVideoUrl: row.previewVideoUrl,

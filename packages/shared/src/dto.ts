@@ -388,6 +388,18 @@ export const templateSlotSchema = z.object({
    * designer's own typography is always preserved.
    */
   font: z.string().optional(),
+  /**
+   * VIDEO only: how long this slot's footage is, in seconds.
+   *
+   * A slot that is a placeholder PRECOMP has one: its child composition's own
+   * `duration`. A slot that is a direct file layer has none — Nexrender's v3
+   * layers response carries no time fields at all — so this is null and the
+   * slice planner falls back to an even split of the master.
+   *
+   * This is what lets a 7s/2s/2s template receive three DIFFERENT slices of one
+   * 15s master rather than the same opening seconds three times.
+   */
+  durationSec: z.number().positive().nullable().default(null),
 });
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
 
@@ -413,13 +425,13 @@ export type SlotCounts = z.infer<typeof slotCountsSchema>;
 
 /**
  * Composition-level facts derived from the introspected structure. This is the
- * surface the picker card, the run gate and the video agent all read.
+ * surface the picker card and the run gate read.
  *
- * `clipSeconds` is the whole point of the v2 pipeline: the generated clip must
- * be as long as the template's video slot, not a fixed 15s. Seedance accepts
- * only `{4,5,6,8,10,12,15}`, so it is the smallest allowed value >= the comp's
- * duration, capped at 15 — snapping UP, never down, because a clip shorter than
- * its layer ends on a freeze frame while a longer one is simply trimmed by AE.
+ * NOTE what is NOT here. There is no `clipSeconds` and no `trimComp`. Every
+ * template run generates ONE 15-second master clip, which is then cut into a
+ * slice per video slot (`agents/template/slices.ts`). The composition keeps its
+ * full length, so a 30s template renders 30 seconds and its graphics fill the
+ * rest of the timeline — nothing is ever trimmed to fit the footage.
  */
 export const templateMetadataSchema = z.object({
   /** Main composition duration in seconds, from the v3 compositions response. */
@@ -429,10 +441,6 @@ export const templateMetadataSchema = z.object({
   height: z.number().nullable().default(null),
   /** Nearest Seedance-supported ratio for the composition (16:9 / 9:16). */
   aspectRatio: aspectRatioSchema.nullable().default(null),
-  /** The Seedance clip length for this template. See the note above. */
-  clipSeconds: z.number().int().min(4).max(15),
-  /** True when the comp is longer than 15s → `nx:comp-duration-set` trims it. */
-  trimComp: z.boolean().default(false),
   slotCounts: slotCountsSchema,
 });
 export type TemplateMetadata = z.infer<typeof templateMetadataSchema>;
@@ -556,8 +564,8 @@ export const templateSummarySchema = z.object({
   description: z.string().nullable(),
   tags: z.array(z.string()).default([]),
   status: templateStatusSchema,
+  /** The composition's real length — what the finished ad will run for. */
   durationSec: z.number().nullable(),
-  clipSeconds: z.number().int().nullable(),
   aspectRatio: aspectRatioSchema.nullable(),
   slotCounts: slotCountsSchema.nullable(),
   previewVideoUrl: z.string().nullable(),

@@ -2,10 +2,9 @@ import { describe, it, expect } from "vitest";
 
 import {
   classifyImageSlot,
-  clipLengthForComp,
-  compNeedsTrim,
   deriveCharBudget,
   DEFAULT_SLOT_SIZE,
+  MASTER_CLIP_SECONDS,
   estimateFontSizeFromBox,
   gptImageSizeForSlot,
   MAX_CLIP_SEC,
@@ -63,50 +62,16 @@ describe("snapUp — Seedance accepts a discrete duration set, not a range", () 
   });
 });
 
-// ── clipLengthForComp / compNeedsTrim ────────────────────────────────────────
+// ── the master clip length ───────────────────────────────────────────────────
 
-describe("clipLengthForComp — the clip is as long as the template", () => {
-  it("matches an exactly-supported composition", () => {
-    expect(clipLengthForComp(10)).toBe(10);
-    expect(clipLengthForComp(12)).toBe(12);
-  });
-
-  it("snaps a 7s template up to an 8s clip (AE trims the extra second)", () => {
-    expect(clipLengthForComp(7)).toBe(8);
-  });
-
-  it("clamps a 3s template up to Seedance's 4s floor", () => {
-    expect(clipLengthForComp(3)).toBe(4);
-  });
-
-  it("caps a 25s template at 15s (and the comp gets trimmed)", () => {
-    expect(clipLengthForComp(25)).toBe(15);
-    expect(compNeedsTrim(25)).toBe(true);
-  });
-
-  it("falls back to the maximum when the duration is unknown", () => {
-    // Better to generate a clip that gets trimmed than one that ends on a freeze.
-    expect(clipLengthForComp(null)).toBe(MAX_CLIP_SEC);
-    expect(clipLengthForComp(undefined)).toBe(MAX_CLIP_SEC);
-    expect(clipLengthForComp(0)).toBe(MAX_CLIP_SEC);
-    expect(clipLengthForComp(Number.NaN)).toBe(MAX_CLIP_SEC);
-    expect(clipLengthForComp(-5)).toBe(MAX_CLIP_SEC);
-  });
-});
-
-describe("compNeedsTrim — only when the comp outruns Seedance", () => {
-  it("is false at or under the ceiling", () => {
-    expect(compNeedsTrim(15)).toBe(false);
-    expect(compNeedsTrim(12)).toBe(false);
-    expect(compNeedsTrim(15.0000001)).toBe(false); // float slack
-  });
-  it("is true above it", () => {
-    expect(compNeedsTrim(15.5)).toBe(true);
-    expect(compNeedsTrim(30)).toBe(true);
-  });
-  it("is false when unknown", () => {
-    expect(compNeedsTrim(null)).toBe(false);
-    expect(compNeedsTrim(undefined)).toBe(false);
+describe("MASTER_CLIP_SECONDS", () => {
+  it("is a fixed 15s, whatever the template looks like", () => {
+    // The clip is NOT cut to the composition's duration. It is sliced per video
+    // slot instead (see slices.ts), so the composition keeps its full runtime
+    // and every ad is built from the same amount of footage.
+    expect(MASTER_CLIP_SECONDS).toBe(15);
+    expect(MASTER_CLIP_SECONDS).toBe(MAX_CLIP_SEC);
+    expect(SEEDANCE_DURATIONS).toContain(MASTER_CLIP_SECONDS as never);
   });
 });
 

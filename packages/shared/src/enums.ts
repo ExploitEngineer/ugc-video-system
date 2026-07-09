@@ -114,6 +114,17 @@ export const assetKindSchema = z.enum([
   // template (`template_images`). `meta.jobLayerName` maps it back to its slot
   // at render time. N per run, one per fillable slot.
   "template_image",
+  // One slice of the 15s master clip, cut to the exact length of ONE video slot
+  // in the template. A template with 7s/2s/2s video layers gets three of these,
+  // showing three DIFFERENT moments of the same continuous shot — Nexrender
+  // cannot offset a source's in-point, so the cut happens here (ffmpeg).
+  // `meta.jobLayerName` maps it back to its slot; muted unless it is the one
+  // slice carrying the voiceover (see `template_audio`).
+  "template_clip",
+  // The master clip's full 15s audio track, extracted so it can be injected
+  // into the template's own AUDIO layer. Without this, slicing the master would
+  // chop the voiceover into stuttering half-words across the video slots.
+  "template_audio",
   // The Nexrender output: the `pipeline: "template"` run's clip composited into
   // the template registered at run creation, re-hosted from Nexrender Cloud to
   // Supabase. The sole deliverable a template-pipeline run shows once completed.

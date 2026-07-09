@@ -23,8 +23,18 @@ export interface BuildRenderInputParts {
   textFill: TemplateTextFillEntry[];
   /** `template_images` output, keyed by `jobLayerName`. */
   imageUrls: Map<string, string>;
-  /** The generated Seedance clip. */
-  clipUrl: string;
+  /**
+   * One slice of the 15s master per video slot, keyed by `jobLayerName`
+   * (`agents/template/clips.ts`). A slot with no entry falls back to the whole
+   * master, which After Effects then trims to the layer.
+   */
+  clipUrls: Map<string, string>;
+  /** The 15s master itself — the fallback for an unsliced slot. */
+  masterClipUrl: string;
+  /** The master's full voiceover, when the template has an audio layer. */
+  audioUrl?: string;
+  /** The `jobLayerName` of that audio layer. */
+  audioLayerName?: string;
 }
 
 /** Media whose source will not match the designer's layer box exactly. */
@@ -59,19 +69,23 @@ function pushMediaWithAutoscale(
 /**
  * Assemble the render job.
  *
- * - every non-empty VIDEO slot gets the generated clip
+ * - every non-empty VIDEO slot gets ITS OWN slice of the 15s master, so a
+ *   7s/2s/2s template shows three different moments of one continuous shot
  * - every IMAGE slot the Image Agent filled gets its still; one it did not fill
  *   (a logo, a background, or a generation that failed) is simply omitted, and
  *   the template keeps its own artwork
  * - every TEXT slot gets its written copy, falling back to the template's own
  *   placeholder rather than rendering blank
- * - AUDIO slots keep the template's own track
- * - a composition longer than the clip is trimmed to it
+ * - an AUDIO slot receives the master's full voiceover, so the speech runs
+ *   continuously across the ad instead of restarting under each video slot
+ *
+ * The composition is NEVER trimmed. It keeps its full runtime, and its graphics
+ * fill whatever the footage does not cover.
  */
 export function buildRenderInput(
   parts: BuildRenderInputParts,
 ): TemplateRenderInput {
-  const { template, clipUrl, imageUrls, runId } = parts;
+  const { template, clipUrls, masterClipUrl, imageUrls, runId } = parts;
   const textByName = new Map(
     parts.textFill.map((f) => [f.jobLayerName, f.value] as const),
   );
@@ -83,7 +97,9 @@ export function buildRenderInput(
       case "VIDEO": {
         // A placeholder precomp with no fillable inner layer: nothing to target.
         if (slot.empty) continue;
-        pushMediaWithAutoscale(assets, slot, "video", clipUrl);
+        // An unsliced slot falls back to the whole master; AE trims it.
+        const url = clipUrls.get(slot.jobLayerName) ?? masterClipUrl;
+        pushMediaWithAutoscale(assets, slot, "video", url);
         break;
       }
       case "IMAGE": {
@@ -102,19 +118,21 @@ export function buildRenderInput(
         });
         break;
       }
-      case "AUDIO":
-        break; // v1: the template keeps its own track
+      case "AUDIO": {
+        // Only the layer `clips.ts` routed the voiceover to. Any other audio
+        // layer keeps the template's own track (its music bed, typically).
+        if (!parts.audioUrl || slot.jobLayerName !== parts.audioLayerName) break;
+        assets.push({
+          kind: "media",
+          mediaType: "audio",
+          composition: slot.composition,
+          layerName: slot.jobLayerName,
+          src: parts.audioUrl,
+        });
+        // Deliberately no autoscale: an audio layer has no dimensions.
+        break;
+      }
     }
-  }
-
-  // Last, so nothing above can re-lengthen the work area. Only when the
-  // composition outruns the clip — otherwise the tail plays past the footage.
-  if (template.metadata.trimComp) {
-    assets.push({
-      kind: "compDuration",
-      composition: template.mainComposition,
-      valueSec: template.metadata.clipSeconds,
-    });
   }
 
   return {

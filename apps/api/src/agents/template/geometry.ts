@@ -22,38 +22,21 @@ import {
 // ── Clip duration ────────────────────────────────────────────────────────────
 
 // What Seedance accepts is a fact about the VIDEO PROVIDER, so it lives on that
-// boundary and is enforced there. Re-exported here because the template geometry
-// is where the constraint is first applied, and every existing caller and test
-// reaches for it under these names.
+// boundary and is enforced there. Re-exported here because the template pipeline
+// is where the constraint is first applied, and callers/tests reach for it here.
 export { MAX_CLIP_SEC, MIN_CLIP_SEC, SEEDANCE_DURATIONS, snapUp };
 
-/** Floating-point slack, so a 15.0000001s composition is not "longer than 15s". */
-const EPSILON = 1e-6;
-
 /**
- * The Seedance clip length for a template whose main composition runs
- * `durationSec`. Capped at 15s (Seedance's hard ceiling) — a longer composition
- * is trimmed to match, see `compNeedsTrim`.
+ * Every template run generates ONE clip of exactly this length, whatever the
+ * template looks like.
  *
- * An unknown duration falls back to the maximum: we would rather generate a
- * clip that gets trimmed than one that ends on a freeze.
+ * It is NOT cut to the composition's duration. A template's video slots are
+ * sliced out of this master (`slices.ts`), each getting footage of its own
+ * length, so the composition keeps its full runtime and the design's outro is
+ * never truncated. It also means every ad is generated from the same amount of
+ * footage, whether the template runs 8 seconds or 40.
  */
-export function clipLengthForComp(durationSec: number | null | undefined): number {
-  if (durationSec == null || !Number.isFinite(durationSec) || durationSec <= 0) {
-    return MAX_CLIP_SEC;
-  }
-  return snapUp(Math.min(durationSec, MAX_CLIP_SEC));
-}
-
-/**
- * True when the composition outruns Seedance's 15s ceiling, so the render job
- * must emit `nx:comp-duration-set(main, MAX_CLIP_SEC)`. Without the trim, the
- * tail of the composition plays on past the end of the clip.
- */
-export function compNeedsTrim(durationSec: number | null | undefined): boolean {
-  if (durationSec == null || !Number.isFinite(durationSec)) return false;
-  return durationSec > MAX_CLIP_SEC + EPSILON;
-}
+export const MASTER_CLIP_SECONDS = MAX_CLIP_SEC; // 15
 
 // ── gpt-image-2 sizing ───────────────────────────────────────────────────────
 

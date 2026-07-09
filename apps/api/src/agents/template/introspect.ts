@@ -33,8 +33,6 @@ import type {
 } from "../../providers/template-render.js";
 import {
   classifyImageSlot,
-  clipLengthForComp,
-  compNeedsTrim,
   deriveCharBudget,
 } from "./geometry.js";
 
@@ -179,6 +177,52 @@ export function extractFontSize(data?: Record<string, unknown>): number | undefi
   return undefined;
 }
 
+/** A finite, strictly-positive number, else null. Guards a duration of 0 or -1. */
+export function positiveOrNull(n: number | null | undefined): number | null {
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * A VIDEO layer's length in seconds, IF the opaque `data` bag happens to carry
+ * it. The documented v3 layers response has no time fields at all, so this is a
+ * defensive probe over the shapes a parser plausibly emits — including an
+ * in/out pair, which we turn into a duration.
+ *
+ * Run `pnpm --filter api nexrender:inspect <templateId>` against a real .aep to
+ * see the real key names before trusting any of these.
+ */
+const DURATION_PATHS = [
+  ["duration"], ["durationSec"], ["length"],
+  ["source", "duration"], ["properties", "duration"],
+] as const;
+
+const IN_OUT_PAIRS = [
+  [["inPoint"], ["outPoint"]],
+  [["in"], ["out"]],
+  [["startTime"], ["endTime"]],
+] as const;
+
+export function extractLayerDuration(
+  data?: Record<string, unknown>,
+): number | undefined {
+  if (!data) return undefined;
+  const num = (v: unknown): number | undefined => {
+    const n = typeof v === "string" ? Number(v) : v;
+    return typeof n === "number" && Number.isFinite(n) ? n : undefined;
+  };
+
+  for (const path of DURATION_PATHS) {
+    const n = num(dig(data, path));
+    if (n !== undefined && n > 0) return n;
+  }
+  for (const [inPath, outPath] of IN_OUT_PAIRS) {
+    const a = num(dig(data, inPath));
+    const b = num(dig(data, outPath));
+    if (a !== undefined && b !== undefined && b > a) return b - a;
+  }
+  return undefined;
+}
+
 /**
  * The composition to render: the root nobody nests (not any layer's
  * `source_comp_id`), preferring a Final/Main/Master/1920/1080/Render name, else
@@ -212,6 +256,11 @@ export function buildStructure(
   const compName = new Map(comps.map((c) => [String(c.aeid), c.name]));
   const nameOf = (id: number | string | null) =>
     compName.get(String(id)) ?? `comp#${id}`;
+  // Keep the comps BY ID, not just their names. A placeholder precomp's child
+  // composition carries its own `duration`, and that is the only place a video
+  // slot's length exists — Nexrender's layers response has no time fields at
+  // all. Losing it here is what forced every slot to receive the whole clip.
+  const compById = new Map(comps.map((c) => [String(c.aeid), c]));
   const layersByComp = new Map<string, NexLayer[]>();
   for (const l of layers) {
     const k = String(l.composition_id);
@@ -266,6 +315,7 @@ export function buildStructure(
       injectVia: "asset",
       width: box.width ?? null,
       height: box.height ?? null,
+      durationSec: null, // stills have no length
       imageClass: classifyImageSlot({
         layerName: classifyName,
         width: box.width,
@@ -298,6 +348,7 @@ export function buildStructure(
         // The box wins over the placeholder's length; when the `data` bag has no
         // font size, the layer's HEIGHT stands in for it.
         charBudget: deriveCharBudget(l.name, l.width, fontSize, l.height),
+        durationSec: null, // text has no length
         ...(font ? { font } : {}),
       });
       continue;
@@ -321,6 +372,9 @@ export function buildStructure(
           injectVia: "asset",
           width: l.width ?? null,
           height: l.height ?? null,
+          // A direct file layer exposes no length. The `data` bag might, but it
+          // is undocumented; the slice planner falls back to an even split.
+          durationSec: extractLayerDuration(l.data) ?? null,
         });
       }
       continue;
@@ -335,6 +389,7 @@ export function buildStructure(
       isPlaceholder(l.name)
     ) {
       const childComp = nameOf(l.source_comp_id);
+      const child = compById.get(String(l.source_comp_id));
       const inner = layersByComp.get(String(l.source_comp_id)) ?? [];
       const target =
         inner.find(
@@ -365,6 +420,15 @@ export function buildStructure(
           injectVia: "asset",
           width: l.width ?? null,
           height: l.height ?? null,
+          // THE slot length. The child composition the designer built around this
+          // placeholder is as long as the footage it expects, so a 2s cutaway
+          // precomp reports 2. This is the only per-slot time signal Nexrender
+          // exposes; the inner layer itself carries none.
+          durationSec:
+            positiveOrNull(child?.duration) ??
+            extractLayerDuration(l.data) ??
+            extractLayerDuration(target?.data) ??
+            null,
         });
       }
       continue;
@@ -415,15 +479,22 @@ export function fillableImageSlots(slots: TemplateSlot[]): TemplateSlot[] {
  * video slot, not a fixed 15s.
  */
 export function buildMetadata(structure: TemplateStructure): TemplateMetadata {
-  const duration = structure.mainCompositionDurationSec;
   return {
-    durationSec: duration,
+    durationSec: structure.mainCompositionDurationSec,
     frameRate: structure.mainCompositionFrameRate,
     width: structure.mainCompositionWidth,
     height: structure.mainCompositionHeight,
     aspectRatio: structure.suggestedAspectRatio,
-    clipSeconds: clipLengthForComp(duration),
-    trimComp: compNeedsTrim(duration),
     slotCounts: countSlots(structure.slots),
   };
+}
+
+/** The VIDEO slots, in layer order, that actually have a layer to fill. */
+export function fillableVideoSlots(slots: TemplateSlot[]): TemplateSlot[] {
+  return slots.filter((s) => s.asset === "VIDEO" && !s.empty);
+}
+
+/** The template's own audio layer, if it has one. */
+export function audioSlot(slots: TemplateSlot[]): TemplateSlot | undefined {
+  return slots.find((s) => s.asset === "AUDIO");
 }
