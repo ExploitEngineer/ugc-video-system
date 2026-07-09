@@ -321,11 +321,30 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
       log.warn("STUB — skipping template upload (no real target)");
     },
     async getTemplateStructure(): Promise<TemplateStructureRaw> {
-      // A minimal template: one root comp "main" with a video file layer + a
-      // text layer — enough for the editor form + a real render echo.
+      // A REPRESENTATIVE template, not a minimal one: the stub is the only thing
+      // that exercises `buildStructure` in local dev + the free smoke test, so
+      // it deliberately contains every slot shape the classifier must get right.
+      //
+      //  - a 12s comp (a real Seedance duration, and NOT the old hardcoded 15s)
+      //  - one video slot (the render gate rejects a template without one)
+      //  - a logo image      → imageClass "brand"      → never AI-filled
+      //  - a background image → imageClass "decorative" → never AI-filled
+      //  - a product still    → imageClass "content"    → generated
+      //  - a placeholder precomp holding a STILL, which v1 misread as VIDEO
+      //  - a text layer whose `data` bag carries a font, to exercise the probe
       return {
         status: "uploaded",
-        compositions: [{ aeid: 1, name: "main", width: 1920, height: 1080 }],
+        compositions: [
+          {
+            aeid: 1,
+            name: "main",
+            width: 1920,
+            height: 1080,
+            duration: 12,
+            frame_rate: 30,
+          },
+          { aeid: 2, name: "PH_1_comp", width: 640, height: 360 },
+        ],
         layers: [
           {
             composition_id: 1,
@@ -334,6 +353,8 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
             layer_type: "av",
             source_type: "file",
             source_comp_id: null,
+            width: 1920,
+            height: 1080,
           },
           {
             composition_id: 1,
@@ -342,6 +363,69 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
             layer_type: "text",
             source_type: null,
             source_comp_id: null,
+            width: 1200,
+            height: 120,
+            data: { font: "Montserrat-SemiBold", fontSize: 72 },
+          },
+          {
+            composition_id: 1,
+            aeid: 12,
+            name: "Subhead",
+            layer_type: "text",
+            source_type: null,
+            source_comp_id: null,
+            width: 900,
+            height: 60,
+          },
+          {
+            composition_id: 1,
+            aeid: 13,
+            name: "logo.png",
+            layer_type: "av",
+            source_type: "file",
+            source_comp_id: null,
+            width: 180,
+            height: 60,
+          },
+          {
+            composition_id: 1,
+            aeid: 14,
+            name: "background.jpg",
+            layer_type: "av",
+            source_type: "file",
+            source_comp_id: null,
+            width: 1920,
+            height: 1080,
+          },
+          {
+            composition_id: 1,
+            aeid: 15,
+            name: "product-photo.jpg",
+            layer_type: "av",
+            source_type: "file",
+            source_comp_id: null,
+            width: 800,
+            height: 800,
+          },
+          {
+            composition_id: 1,
+            aeid: 16,
+            name: "PH_1",
+            layer_type: "av",
+            source_type: "comp",
+            source_comp_id: 2,
+            width: 640,
+            height: 360,
+          },
+          {
+            composition_id: 2,
+            aeid: 20,
+            name: "hero-shot.jpg",
+            layer_type: "av",
+            source_type: "file",
+            source_comp_id: null,
+            width: 640,
+            height: 360,
           },
         ],
       };

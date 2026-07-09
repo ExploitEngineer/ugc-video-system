@@ -1,19 +1,42 @@
 // Classify a Nexrender template's raw v3 introspection (compositions + layers)
-// into the editable SLOTS the in-app editor renders. Single source of truth,
-// shared by the API's `/template-structure` endpoint AND the read-only
-// `scripts/inspect-nexrender-layers.ts` (which imports these) so they never drift.
+// into the SLOTS the pipeline fills. Single source of truth, shared by the
+// template routes AND the read-only `scripts/inspect-nexrender-layers.ts`
+// (which imports these) so the two never drift.
 //
 // Real v3 fields (lowercase, proven by the script): `layer_type` `text`/`av`/
 // `shape`/`null`/`camera`; `source_type` `file`/`comp`/`solid`/null. No value
 // field — but a `text` layer's `name` IS its current words, and an `av/file`
 // layer's `name` carries the source filename+extension. Footage often sits in
 // PLACEHOLDER PRECOMPS (`av/comp` named PH_*/Media_*/…), sometimes empty.
+//
+// Beyond classification this captures what v2 needs and v1 threw away:
+//   - the main comp's `duration` + `frame_rate` → `clipSeconds` (generate a clip
+//     as long as the template, not a fixed 15s)
+//   - each layer's box → the gpt-image-2 size for an image slot, and the
+//     icon-vs-backdrop signal behind `imageClass`
+//   - each TEXT layer's `charBudget`, so the copywriter has a hard ceiling
+//
+// A placeholder precomp is NO LONGER assumed to hold video: `classifyPlaceholderSlot`
+// follows it one level in, because assuming VIDEO injected the generated clip
+// into every image placeholder in the template.
 
-import type { AspectRatio, TemplateSlot, TemplateStructure } from "@ugc/shared";
+import type {
+  AspectRatio,
+  SlotCounts,
+  TemplateMetadata,
+  TemplateSlot,
+  TemplateStructure,
+} from "@ugc/shared";
 import type {
   NexComposition,
   NexLayer,
 } from "../../providers/template-render.js";
+import {
+  classifyImageSlot,
+  clipLengthForComp,
+  compNeedsTrim,
+  deriveCharBudget,
+} from "./geometry.js";
 
 /**
  * Nearest-match aspect ratio from a composition's pixel dimensions — only two
@@ -46,9 +69,114 @@ const PLACEHOLDER = [
   /your\s*video/i,
   /video[_\s-]?\d*/i,
   /footage/i,
+  /^img[_\s-]?\d*/i,
+  /your\s*(image|photo|logo)/i,
 ];
 export function isPlaceholder(name: string): boolean {
   return PLACEHOLDER.some((re) => re.test(name));
+}
+
+// Layer names use underscores (`PH_IMAGE_2`), and `_` is a word character — so
+// a naive /\bimage\b/ never matches. Normalize separators to spaces FIRST, then
+// match whole words. Getting this wrong makes every name test silently fall
+// through to the default.
+const normalizeName = (name: string): string =>
+  ` ${name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+
+const hasAnyWord = (haystack: string, words: readonly string[]): boolean =>
+  words.some((w) => haystack.includes(` ${w} `));
+
+/** Words that mark a placeholder precomp as holding a still, not a clip. */
+const IMAGE_PLACEHOLDER_WORDS = [
+  "img", "image", "photo", "picture", "still",
+  "logo", "poster", "bg", "background", "thumb", "icon",
+] as const;
+/** Words that mark it as holding a clip. */
+const VIDEO_PLACEHOLDER_WORDS = [
+  "video", "clip", "footage", "movie", "reel",
+] as const;
+
+/**
+ * A placeholder precomp (`av/comp` named `PH_1`, `Media_2`, …) holds either a
+ * clip or a still. v1 assumed VIDEO unconditionally, which quietly turned every
+ * image placeholder into a slot the generated clip was injected into.
+ *
+ * The inner layer's filename extension is the ground truth; when the inner
+ * layer is a solid, a nested comp, or absent entirely, fall back to the names.
+ * Default VIDEO only when nothing at all disambiguates — a template must have a
+ * video slot to be usable, so an unclassifiable placeholder is more likely the
+ * hero clip than a still.
+ */
+export function classifyPlaceholderSlot(
+  outer: NexLayer,
+  inner: NexLayer | undefined,
+): "VIDEO" | "IMAGE" {
+  // 1. The inner layer's real filename wins outright.
+  if (inner && lower(inner.source_type) === "file") {
+    const ext = extType(inner.name);
+    if (ext === "IMAGE") return "IMAGE";
+    if (ext === "VIDEO") return "VIDEO";
+  }
+  // 2. Then the names — inner first, it is closer to the actual footage.
+  for (const raw of [inner?.name, outer.name]) {
+    if (!raw) continue;
+    const name = normalizeName(raw);
+    if (hasAnyWord(name, VIDEO_PLACEHOLDER_WORDS)) return "VIDEO";
+    if (hasAnyWord(name, IMAGE_PLACEHOLDER_WORDS)) return "IMAGE";
+  }
+  return "VIDEO";
+}
+
+// Nexrender's v3 layers response carries an opaque `data` bag
+// (`additionalProperties: true`). Its contents are UNDOCUMENTED, and no endpoint
+// anywhere reports which fonts a template needs — checked against the v3
+// template-metadata and fonts endpoints. So probe defensively across the shapes
+// a parser plausibly emits, and let `scripts/inspect-nexrender-layers.ts` dump
+// the real keys against a real .aep before anything depends on this.
+//
+// We never SEND a font back to Nexrender: its font bank auto-resolves by family
+// name at submit time, so the designer's typography is preserved untouched.
+// These values exist only so the plan agent knows how wide the copy will render.
+
+const FONT_PATHS = [
+  ["font"], ["fontName"], ["fontFamily"], ["family"],
+  ["text", "font"], ["text", "fontFamily"],
+  ["properties", "font"], ["style", "font"], ["style", "fontFamily"],
+] as const;
+
+const FONT_SIZE_PATHS = [
+  ["fontSize"], ["size"], ["text", "fontSize"],
+  ["properties", "fontSize"], ["style", "fontSize"],
+] as const;
+
+function dig(bag: Record<string, unknown> | undefined, path: readonly string[]): unknown {
+  let cur: unknown = bag;
+  for (const key of path) {
+    if (typeof cur !== "object" || cur === null) return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+/** The text layer's font family, if the opaque `data` bag happens to carry it. */
+export function extractFont(data?: Record<string, unknown>): string | undefined {
+  if (!data) return undefined;
+  for (const path of FONT_PATHS) {
+    const v = dig(data, path);
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+/** The text layer's font size in px, if present. Refines `charBudget`. */
+export function extractFontSize(data?: Record<string, unknown>): number | undefined {
+  if (!data) return undefined;
+  for (const path of FONT_SIZE_PATHS) {
+    const v = dig(data, path);
+    const n = typeof v === "string" ? Number(v) : v;
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
 }
 
 /**
@@ -113,43 +241,92 @@ export function buildStructure(
     ignored[k] = (ignored[k] ?? 0) + 1;
   };
 
+  const compW = main?.width ?? null;
+  const compH = main?.height ?? null;
+
+  /**
+   * An IMAGE slot, classified so the Image Agent knows whether it may fill it.
+   * `classifyName` may differ from `layerName`: for a placeholder precomp we
+   * classify on BOTH names, because the intent usually lives on the outer layer
+   * (`logo_placeholder`) while the inner one is a meaningless `Solid 1`.
+   */
+  const addImage = (
+    box: NexLayer,
+    comp: string,
+    jobLayerName: string,
+    layerName: string,
+    classifyName: string = layerName,
+    extra: Partial<TemplateSlot> = {},
+  ) =>
+    add({
+      asset: "IMAGE",
+      composition: comp,
+      layerName,
+      jobLayerName,
+      injectVia: "asset",
+      width: box.width ?? null,
+      height: box.height ?? null,
+      imageClass: classifyImageSlot({
+        layerName: classifyName,
+        width: box.width,
+        height: box.height,
+        compWidth: compW,
+        compHeight: compH,
+      }),
+      ...extra,
+    });
+
   for (const l of layers) {
     const t = lower(l.layer_type);
     const s = lower(l.source_type);
     const comp = nameOf(l.composition_id);
 
     if (t === "text" || t === "textlayer") {
+      const font = extractFont(l.data);
+      const fontSize = extractFontSize(l.data);
       add({
         asset: "TEXT",
         composition: comp,
         layerName: l.name,
         jobLayerName: l.name,
+        // A text layer's NAME is its current words — Nexrender exposes no
+        // separate value field. See the header note.
         currentText: l.name,
         injectVia: comp === mainName ? "asset" : "function",
-        width: null,
-        height: null,
+        width: l.width ?? null,
+        height: l.height ?? null,
+        charBudget: deriveCharBudget(l.name, l.width, fontSize),
+        ...(font ? { font } : {}),
       });
       continue;
     }
+
     // Direct file-backed media layer (name carries the extension).
     if ((t === "av" || t === "avlayer") && s === "file") {
       const m = extType(l.name);
-      if (m) {
+      if (!m) {
+        ignore("av/file(no-ext)");
+        continue;
+      }
+      if (m === "IMAGE") {
+        addImage(l, comp, l.name, l.name, l.name);
+      } else {
         add({
           asset: m,
           composition: comp,
           layerName: l.name,
           jobLayerName: l.name,
           injectVia: "asset",
-          width: null,
-          height: null,
+          width: l.width ?? null,
+          height: l.height ?? null,
         });
-      } else {
-        ignore("av/file(no-ext)");
       }
       continue;
     }
+
     // Placeholder precomp → a media slot; follow one level in for the real layer.
+    // The inner layer decides VIDEO vs IMAGE: assuming VIDEO (as v1 did) turns
+    // every image placeholder into a slot the clip gets injected into.
     if (
       (t === "av" || t === "avlayer") &&
       s === "comp" &&
@@ -163,18 +340,34 @@ export function buildStructure(
             lower(x.layer_type) === "av" &&
             (lower(x.source_type) === "file" || lower(x.source_type) === "solid"),
         ) ?? inner[0];
-      add({
-        asset: "VIDEO",
-        composition: childComp,
-        layerName: target ? target.name : `(empty ${childComp})`,
-        jobLayerName: target ? target.name : childComp,
-        empty: !target,
-        injectVia: "asset",
-        width: null,
-        height: null,
-      });
+
+      const kind = classifyPlaceholderSlot(l, target);
+      const layerName = target ? target.name : `(empty ${childComp})`;
+      const jobLayerName = target ? target.name : childComp;
+
+      if (kind === "IMAGE") {
+        // Geometry comes from the OUTER placeholder layer: it is the box the
+        // designer laid out in the main comp. The inner layer is 0,0-anchored.
+        // Classify on BOTH names — `logo_placeholder` wrapping `Solid 1` must
+        // still read as brand.
+        addImage(l, childComp, jobLayerName, layerName, `${l.name} ${target?.name ?? ""}`, {
+          empty: !target,
+        });
+      } else {
+        add({
+          asset: "VIDEO",
+          composition: childComp,
+          layerName,
+          jobLayerName,
+          empty: !target,
+          injectVia: "asset",
+          width: l.width ?? null,
+          height: l.height ?? null,
+        });
+      }
       continue;
     }
+
     // Everything else — structure/control.
     const k = t === "av" && s === "comp" ? "nested-comp" : t === "av" ? `av/${s}` : t || "?";
     ignore(k);
@@ -189,13 +382,46 @@ export function buildStructure(
     mainComposition: mainName,
     renderCompositions: renderCompositions.length ? renderCompositions : comps.map((c) => c.name),
     slots,
-    mainCompositionWidth: main?.width ?? null,
-    mainCompositionHeight: main?.height ?? null,
-    // Populated for real once `NexComposition` is widened to carry them
-    // (build step 3) — the v3 compositions response already returns both.
-    mainCompositionDurationSec: null,
-    mainCompositionFrameRate: null,
-    suggestedAspectRatio: deriveAspectRatio(main?.width, main?.height),
+    mainCompositionWidth: compW,
+    mainCompositionHeight: compH,
+    mainCompositionDurationSec: main?.duration ?? null,
+    mainCompositionFrameRate: main?.frame_rate ?? null,
+    suggestedAspectRatio: deriveAspectRatio(compW, compH),
     ignored,
+  };
+}
+
+/** How many slots of each kind a structure has. Drives the picker card. */
+export function countSlots(slots: TemplateSlot[]): SlotCounts {
+  return {
+    video: slots.filter((s) => s.asset === "VIDEO").length,
+    image: slots.filter((s) => s.asset === "IMAGE").length,
+    text: slots.filter((s) => s.asset === "TEXT").length,
+    audio: slots.filter((s) => s.asset === "AUDIO").length,
+  };
+}
+
+/** The IMAGE slots the Image Agent is allowed to generate. */
+export function fillableImageSlots(slots: TemplateSlot[]): TemplateSlot[] {
+  return slots.filter((s) => s.asset === "IMAGE" && s.imageClass === "content");
+}
+
+/**
+ * The composition-level summary derived from an introspected structure — the
+ * surface the picker card, the `POST /runs` gate and the video agent read.
+ * `clipSeconds` is the whole point: the clip must be as long as the template's
+ * video slot, not a fixed 15s.
+ */
+export function buildMetadata(structure: TemplateStructure): TemplateMetadata {
+  const duration = structure.mainCompositionDurationSec;
+  return {
+    durationSec: duration,
+    frameRate: structure.mainCompositionFrameRate,
+    width: structure.mainCompositionWidth,
+    height: structure.mainCompositionHeight,
+    aspectRatio: structure.suggestedAspectRatio,
+    clipSeconds: clipLengthForComp(duration),
+    trimComp: compNeedsTrim(duration),
+    slotCounts: countSlots(structure.slots),
   };
 }

@@ -7,15 +7,28 @@
 // swappable (and stubbable for local tests). Async: register a template →
 // introspect → submit a render job → poll until ready.
 
-/** Raw Nexrender v3 composition object (from GET …/templates/{id}/compositions). */
+/**
+ * Raw Nexrender v3 composition object (from GET …/templates/{id}/compositions).
+ * `duration` (seconds) and `frame_rate` are returned by the API today; they are
+ * what let the pipeline generate a clip as long as the template rather than a
+ * fixed 15s.
+ */
 export interface NexComposition {
   aeid: string | number;
   name: string;
   width?: number;
   height?: number;
+  duration?: number;
+  frame_rate?: number;
+  /** Undocumented parser metadata (`additionalProperties: true`). */
+  data?: Record<string, unknown>;
 }
 
-/** Raw Nexrender v3 layer object (from GET …/templates/{id}/layers). */
+/**
+ * Raw Nexrender v3 layer object (from GET …/templates/{id}/layers).
+ * The `top`/`left`/`width`/`height` box is what sizes a generated image to its
+ * slot and separates an icon-sized logo layer from a full-bleed backdrop.
+ */
 export interface NexLayer {
   composition_id: number | string;
   aeid: number;
@@ -23,6 +36,17 @@ export interface NexLayer {
   layer_type: string | null;
   source_type: string | null;
   source_comp_id: number | null;
+  top?: number;
+  left?: number;
+  width?: number;
+  height?: number;
+  /**
+   * Undocumented parser metadata (`additionalProperties: true`). May carry a
+   * text layer's font/size — Nexrender documents neither, and no endpoint
+   * reports which fonts a template needs. Probed defensively via `extractFont`
+   * and dumped by `scripts/inspect-nexrender-layers.ts`.
+   */
+  data?: Record<string, unknown>;
 }
 
 /** The raw introspection of a registered template, once Nexrender has parsed it. */

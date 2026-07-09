@@ -180,6 +180,76 @@ async function main(): Promise<void> {
       .join("\n"),
   );
 
+  // ── THE `data`-BAG PROBE ──
+  // Nexrender's v3 layer schema declares `data` as an opaque bag
+  // (`additionalProperties: true`) and documents NOTHING about its contents.
+  // No endpoint anywhere reports which fonts a template needs (checked against
+  // the v3 template-metadata and the fonts endpoints), so this bag is the only
+  // possible source. Dump every distinct key path we see, across every layer and
+  // composition, so `extractFont`/`extractFontSize` in
+  // `src/agents/template/introspect.ts` can be pointed at the REAL names instead
+  // of the defensive guesses they currently probe.
+  //
+  // Run this against a real .aep BEFORE writing anything font-dependent.
+  const keyPaths = (obj: unknown, prefix = ""): string[] => {
+    if (typeof obj !== "object" || obj === null) return [];
+    return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) => {
+      const path = prefix ? `${prefix}.${k}` : k;
+      const kind = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+      const here = `${path} <${kind}>`;
+      // One level deep is enough to spot `text.font` / `style.fontSize`.
+      return kind === "object" && !prefix
+        ? [here, ...keyPaths(v, path)]
+        : [here];
+    });
+  };
+
+  const dataKeys = new Map<string, number>();
+  const sampleFor = new Map<string, unknown>();
+  const bump = (path: string, value: unknown) => {
+    dataKeys.set(path, (dataKeys.get(path) ?? 0) + 1);
+    if (!sampleFor.has(path)) sampleFor.set(path, value);
+  };
+  for (const l of layers) {
+    for (const p of keyPaths(l.data)) bump(`layer.data.${p}`, undefined);
+  }
+  for (const c of comps) {
+    for (const p of keyPaths((c as { data?: unknown }).data)) {
+      bump(`comp.data.${p}`, undefined);
+    }
+  }
+
+  console.log("\n── `data` BAG PROBE (undocumented; this is why we look) ──");
+  if (dataKeys.size === 0) {
+    console.log("  (empty) — no `data` on any layer or composition.");
+    console.log("  → fonts are NOT discoverable. Never send `font` in a render");
+    console.log("    job; Nexrender's font bank auto-resolves by family name and");
+    console.log("    the designer's typography is preserved. Nothing to change.");
+  } else {
+    for (const [path, n] of [...dataKeys].sort()) {
+      console.log(`  ${path}  ×${n}`);
+    }
+    const fontish = [...dataKeys.keys()].filter((k) => /font|family|size|typeface/i.test(k));
+    console.log(
+      fontish.length
+        ? `\n  ★ FONT-ISH KEYS: ${fontish.join(", ")}\n    → point extractFont/extractFontSize at these exact paths.`
+        : "\n  no font-ish keys — fonts are not exposed here.",
+    );
+  }
+
+  // The text layers verbatim, so a font value is visible even if it hides under
+  // a key name the filter above did not guess.
+  const textLayers = layers.filter((l) => (l.layer_type ?? "").toLowerCase().startsWith("text"));
+  if (textLayers.length) {
+    console.log(`\n  raw TEXT layers (${textLayers.length}) — where a font would live:`);
+    console.log(
+      JSON.stringify(textLayers.slice(0, 3), null, 2)
+        .split("\n")
+        .map((l) => `    ${l}`)
+        .join("\n"),
+    );
+  }
+
   // ── Problem 1 + 3: build the fill-in slots ──
   const slots: Slot[] = [];
   for (const l of layers) {
