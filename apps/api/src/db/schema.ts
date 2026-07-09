@@ -20,6 +20,7 @@ import type {
   AssetKind,
   Duration,
   Mode,
+  Pipeline,
   RunStatus,
   Step,
 } from "@ugc/shared";
@@ -29,6 +30,7 @@ import {
   artifactStatusSchema,
   durationSchema,
   modeSchema,
+  pipelineSchema,
   runStatusSchema,
   stepSchema,
 } from "@ugc/shared";
@@ -80,6 +82,10 @@ export const durationEnum = pgEnum(
   "duration",
   durationSchema.options as [Duration, ...Duration[]],
 );
+export const pipelineEnum = pgEnum(
+  "pipeline",
+  pipelineSchema.options as [Pipeline, ...Pipeline[]],
+);
 
 // ── Core tables ───────────────────────────────────────────────────────
 
@@ -117,6 +123,7 @@ export const runs = pgTable(
     mode: modeEnum("mode").notNull(),
     aspectRatio: aspectRatioEnum("aspect_ratio").notNull().default("16:9"), // output shape, propagated to sheets + video
     duration: durationEnum("duration").notNull().default("15s"), // 15s single-clip pipeline | 60s four-clip merged pipeline
+    pipeline: pipelineEnum("pipeline").notNull().default("video"), // "video" (normal, unchanged) | "template" (Nexrender template, picked at creation — see the template_* columns below)
     narrativeOutline: jsonb("narrative_outline"), // 60s only: { segments: [{ index, beat, summary }], visualStyle } — continuity arc planned before any storyboard
     visualStyle: text("visual_style"), // 60s only: locked visual-style bible (grade/lens/lighting/palette/time-of-day arc), injected verbatim into all 4 storyboard + 4 video prompts
     criticEnabled: boolean("critic_enabled").notNull().default(false), // Critic parked — off by default
@@ -127,6 +134,9 @@ export const runs = pgTable(
     error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)
     errorCode: text("error_code"), // RunErrorCode — plain text so new codes need no enum migration; Zod-validated at the mapper
     feedback: text("feedback"), // pending step-by-step feedback, consumed by next regen
+    template: jsonb("template"), // pipeline:"template" only — immutable snapshot resolved server-side at run creation: RunTemplate { nexrenderTemplateId, mainComposition, renderCompositions, slots[], compositionWidth, compositionHeight, displayName? }
+    templateTextFill: jsonb("template_text_fill"), // TemplateTextFillEntry[] { jobLayerName, value } — written by the template_fill step (LLM), consumed by template_render
+    nexrenderJobId: text("nexrender_job_id"), // Nexrender Cloud job id — persisted on submit for idempotent resume/poll of template_render
     lockedAt: timestamp("locked_at", { withTimezone: true }), // worker lock — one driver per run
     lockedBy: text("locked_by"), // worker fencing token (workerId) — losing driver self-aborts
 

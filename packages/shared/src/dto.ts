@@ -12,6 +12,7 @@ import {
   assetKindSchema,
   durationSchema,
   modeSchema,
+  pipelineSchema,
   runErrorCodeSchema,
   runStatusSchema,
   stepSchema,
@@ -133,6 +134,8 @@ export const runSchema = z.object({
   aspectRatio: aspectRatioSchema,
   /** Target ad length — `15s` (single clip) or `30/45/60s` (N merged clips). */
   duration: durationSchema,
+  /** Which generation pipeline this run uses — picked at creation, never changes. */
+  pipeline: pipelineSchema,
   criticEnabled: z.boolean(),
   /** Whether a main on-screen character is generated for this run (Chunk 4). */
   characterEnabled: z.boolean(),
@@ -273,6 +276,17 @@ export const createRunInputSchema = z.object({
   adType: z.string().trim().optional(),
   /** Optional user-typed brand guidelines (tone, palette, wording, do/don'ts). */
   brandText: z.string().trim().max(4000).optional(),
+  /** Which pipeline to run. Omitted/legacy clients default to `video`. */
+  pipeline: pipelineSchema.default("video"),
+  /**
+   * Required when `pipeline === "template"` — the `nexrenderTemplateId`
+   * returned by `POST /templates/register` once `GET /templates/:id/structure`
+   * reports `status: "ready"`. The route re-fetches the structure itself (the
+   * server, not the client, is the source of truth) and derives `aspectRatio`/
+   * forces `duration: "15s"` from it — enforced in the route handler, not this
+   * schema, since the requirement is conditional on `pipeline`.
+   */
+  templateId: z.string().trim().min(1).optional(),
 });
 export type CreateRunInput = z.infer<typeof createRunInputSchema>;
 
@@ -314,3 +328,91 @@ export const regenerateVideoInputSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 });
 export type RegenerateVideoInput = z.infer<typeof regenerateVideoInputSchema>;
+
+// ── Template pipeline: auto-discovered slots + the run's template snapshot ───
+// The user uploads a template BEFORE any run exists; we register it with
+// Nexrender and introspect it via its v3 API, classifying its layers into
+// SLOTS. See `apps/api/src/agents/template/introspect.ts`.
+
+/** One slot discovered by introspection (a fill-in point in the template). */
+export const templateSlotSchema = z.object({
+  /** Which kind of content this layer expects / Nexrender asset family. */
+  asset: z.enum(["VIDEO", "IMAGE", "AUDIO", "TEXT"]),
+  /** The composition the target layer lives in (asset `composition`). */
+  composition: z.string(),
+  /** Display label — the discovered layer/placeholder name. */
+  layerName: z.string(),
+  /** The exact string to send as the render job's `layerName`. */
+  jobLayerName: z.string(),
+  /** TEXT only: the layer's current words (= its name), used as an AI hint. */
+  currentText: z.string().optional(),
+  /** VIDEO only: a placeholder precomp with no introspectable inner layer. */
+  empty: z.boolean().optional(),
+  /** How to inject: a normal asset, or an `nx:text-params-set` function asset. */
+  injectVia: z.enum(["asset", "function"]),
+});
+export type TemplateSlot = z.infer<typeof templateSlotSchema>;
+
+/**
+ * `POST /templates/register` response — no run required, registration is a
+ * standalone step that happens before the ad brief is even filled in.
+ */
+export const templateRegisterResultSchema = z.object({
+  nexrenderTemplateId: z.string(),
+});
+export type TemplateRegisterResult = z.infer<
+  typeof templateRegisterResultSchema
+>;
+
+/** `GET /templates/:nexrenderTemplateId/structure` — polled while Nexrender introspects. */
+export const templateStructureSchema = z.object({
+  status: z.enum(["processing", "ready", "failed"]),
+  /** The composition to render (put in the job's `template.composition`). */
+  mainComposition: z.string().nullable(),
+  /** Root/renderable comp names — informational only in v1 (no comp picker). */
+  renderCompositions: z.array(z.string()).default([]),
+  slots: z.array(templateSlotSchema),
+  /** Pixel size of `mainComposition`, when Nexrender reports it. */
+  mainCompositionWidth: z.number().nullable().default(null),
+  mainCompositionHeight: z.number().nullable().default(null),
+  /**
+   * Derived from the composition's pixel dimensions (`deriveAspectRatio`),
+   * server-computed so the frontend never re-implements the ratio logic. Null
+   * when the dimensions are unknown — the run-creation form falls back to a
+   * manual aspect-ratio pick in that case.
+   */
+  suggestedAspectRatio: aspectRatioSchema.nullable().default(null),
+  /** Counts of ignored structure/control layers (shapes, solids, nulls…). */
+  ignored: z.record(z.string(), z.number()).optional(),
+  error: z.string().optional(),
+});
+export type TemplateStructure = z.infer<typeof templateStructureSchema>;
+
+/**
+ * The template snapshot stored on the run (`runs.template`) at creation time —
+ * an immutable copy of the introspected structure, resolved server-side from
+ * `templateId` the moment the run is created. This is what `template_fill`/
+ * `template_render` consume; the run never re-queries Nexrender for it.
+ */
+export const runTemplateSchema = z.object({
+  nexrenderTemplateId: z.string(),
+  mainComposition: z.string(),
+  renderCompositions: z.array(z.string()).default([]),
+  slots: z.array(templateSlotSchema),
+  compositionWidth: z.number().nullable(),
+  compositionHeight: z.number().nullable(),
+  displayName: z.string().optional(),
+});
+export type RunTemplate = z.infer<typeof runTemplateSchema>;
+
+/**
+ * One `template_fill`-resolved text value (`runs.template_text_fill`) — maps
+ * back onto a `TemplateSlot` by `jobLayerName`.
+ */
+export const templateTextFillEntrySchema = z.object({
+  jobLayerName: z.string(),
+  value: z.string(),
+});
+export type TemplateTextFillEntry = z.infer<
+  typeof templateTextFillEntrySchema
+>;

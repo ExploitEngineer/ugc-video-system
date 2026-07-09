@@ -12,9 +12,10 @@ import {
   feedbackInputSchema,
   isMultiSegment,
   regenerateVideoInputSchema,
+  runTemplateSchema,
   segmentCountFor,
 } from "@ugc/shared";
-import type { Run, RunDetail } from "@ugc/shared";
+import type { Run, RunDetail, RunTemplate } from "@ugc/shared";
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -28,8 +29,11 @@ import {
   resumeStepForVideoRegen,
 } from "../agents/creative-direction/index.js";
 import { getAdType } from "../agents/ad-types/registry.js";
+import { buildStructure, deriveAspectRatio } from "../agents/template/introspect.js";
+import { createTemplateRenderProvider } from "../providers/index.js";
 import { closeInFlightStepsOnCancel } from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
+import { env } from "../config/index.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
 import { normalizePersonImage } from "../lib/image/normalize.js";
@@ -156,6 +160,7 @@ async function loadRunList(): Promise<Run[]> {
       mode: schema.runs.mode,
       aspectRatio: schema.runs.aspectRatio,
       duration: schema.runs.duration,
+      pipeline: schema.runs.pipeline,
       criticEnabled: schema.runs.criticEnabled,
       characterEnabled: schema.runs.characterEnabled,
       status: schema.runs.status,
@@ -313,6 +318,10 @@ runs.post(
     ...(body.adType ? { adType: body.adType } : {}),
     // Optional user-typed brand guidelines (multipart text field).
     ...(body.brandText ? { brandText: body.brandText } : {}),
+    // Which pipeline this run uses (Chunk: template pipeline redesign).
+    // FormData omits it on legacy clients → schema default "video".
+    ...(body.pipeline ? { pipeline: body.pipeline } : {}),
+    ...(body.templateId ? { templateId: body.templateId } : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -320,8 +329,63 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, duration, criticEnabled, adType, brandText } =
+  const { prompt, mode, criticEnabled, adType, brandText, pipeline, templateId } =
     parsed.data;
+  let aspectRatio = parsed.data.aspectRatio;
+  let duration = parsed.data.duration;
+
+  // ── Template pipeline cost-safety gate ──────────────────────────────
+  // The template was already registered + introspected client-side via
+  // POST /templates/register + GET /templates/:id/structure, BEFORE the ad
+  // brief was even filled in. Re-fetch fresh here (the server, never the
+  // client's cached poll, is the source of truth) and reject immediately if
+  // it isn't ready or has nowhere to put the generated clip — BEFORE any
+  // image upload, DB insert, or AI call, so a bad template costs nothing.
+  let runTemplate: RunTemplate | null = null;
+  if (pipeline === "template") {
+    // Same master switch that gated the old mid-pipeline template step — the
+    // whole pipeline stays dark until it's been smoke-tested end to end.
+    if (!env.TEMPLATE_STEP_ENABLED) {
+      throw unprocessable("The template pipeline isn't enabled yet.");
+    }
+    if (!templateId) {
+      throw badRequest("A templateId is required for the template pipeline.");
+    }
+    const provider = createTemplateRenderProvider();
+    const raw = await provider
+      .getTemplateStructure(templateId)
+      .catch(() => null);
+    if (!raw || raw.status !== "uploaded") {
+      throw unprocessable(
+        "This template isn't ready yet. Wait for it to finish processing, or upload a different file.",
+      );
+    }
+    const structure = buildStructure(raw.compositions, raw.layers);
+    if (!structure.slots.some((s) => s.asset === "VIDEO")) {
+      throw unprocessable(
+        "This template has no spot for a video — upload a different template.",
+      );
+    }
+    runTemplate = runTemplateSchema.parse({
+      nexrenderTemplateId: templateId,
+      mainComposition: structure.mainComposition ?? "",
+      renderCompositions: structure.renderCompositions,
+      slots: structure.slots,
+      compositionWidth: structure.mainCompositionWidth,
+      compositionHeight: structure.mainCompositionHeight,
+    });
+    // The template's composition dictates the output shape — never let a
+    // mismatched pick letterbox/stretch inside it. Fall back to the client's
+    // pick only when the template's dimensions are unknown.
+    const derived = deriveAspectRatio(
+      structure.mainCompositionWidth,
+      structure.mainCompositionHeight,
+    );
+    if (derived) aspectRatio = derived;
+    // v1 scope: the template pipeline is 15s-only (no multi-segment merge).
+    duration = "15s";
+  }
+
   // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
   // they surface immediately in detector_meta (the worker re-derives + enriches
   // this with any invented values once the detector runs).
@@ -392,9 +456,11 @@ runs.post(
       mode,
       aspectRatio,
       duration,
+      pipeline,
       criticEnabled,
       characterEnabled,
       ...(brandText ? { brandText } : {}),
+      ...(runTemplate ? { template: runTemplate } : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
         : {}),
@@ -838,6 +904,48 @@ runs.post("/:id/regenerate-video", async (c) => {
       })
       .where(eq(schema.runs.id, id));
   });
+
+  notifyRunChanged(id);
+  return c.json(await loadRunDetail(id));
+});
+
+// ── POST /runs/:id/regenerate-template — retry a failed template_fill/
+// template_render step. The template pipeline never gates mid-run (the
+// template was already validated at creation, and text-fill/render are fully
+// automatic — see plan.ts), so a failure here is a hard `failed` with no
+// recovery gate to fall back into. This route is the recovery path: rewind
+// to the pre-fill checkpoint and let the driver re-enter template_fill →
+// template_render, re-running the LLM fill too (cheap, and self-healing if
+// bad text caused the failure). Mirrors `POST /runs/:id/regenerate-video`.
+runs.post("/:id/regenerate-template", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  if (run.pipeline !== "template") {
+    throw badRequest("This run does not use the template pipeline.");
+  }
+  assertStatus(run, ["failed"], "Run is not in a failed state.");
+  if (
+    run.errorCode !== "TEMPLATE_RENDER_FAILED" &&
+    run.errorCode !== "TEMPLATE_FILL_FAILED"
+  ) {
+    throw badRequest("This run's failure isn't a template step failure.");
+  }
+
+  log.info("regenerate-template", { run: id, errorCode: run.errorCode });
+
+  await db
+    .update(schema.runs)
+    .set({
+      status: "running",
+      currentStep: "video",
+      error: null,
+      errorCode: null,
+      nexrenderJobId: null,
+      lockedAt: null,
+      lockedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.runs.id, id));
 
   notifyRunChanged(id);
   return c.json(await loadRunDetail(id));

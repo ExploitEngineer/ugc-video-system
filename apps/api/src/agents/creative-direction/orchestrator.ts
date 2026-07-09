@@ -44,6 +44,7 @@ import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
+import { templateAgent } from "../template/index.js";
 import { videoAgent } from "../video/index.js";
 import { dispositionAfterLadder } from "../video/retry.js";
 import type { SkillContext } from "../types.js";
@@ -634,6 +635,32 @@ async function executeStep(
       await mergeAgent.mergeSegments(ctx);
       return {};
     }
+
+    case "template_fill": {
+      // pipeline:"template" only, automatic (never gated): an LLM writes every
+      // discovered TEXT slot's value from the run's prompt/brand text. Writes
+      // its own started/passed/failed events and persists the result to
+      // `runs.template_text_fill`, which template_render then consumes.
+      await writeStepEvent({ runId, step, status: "started" });
+      const fills = await templateAgent.fillTemplateText(ctx);
+      await setRun(runId, { templateTextFill: fills });
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { fields: fills.length },
+      });
+      return {};
+    }
+
+    case "template_render": {
+      // pipeline:"template" only, automatic (never gated): composite the
+      // final_video + the template_fill text into the template registered at
+      // run creation. Writes its own started/passed/failed events and
+      // persists the templated_video alongside the final_video.
+      await templateAgent.applyTemplate(ctx);
+      return {};
+    }
   }
 }
 
@@ -1063,6 +1090,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         personUploaded,
         run.criticEnabled,
         run.duration,
+        run.pipeline,
       );
       if (!step) {
         await setRun(runId, { status: "completed" });
@@ -1100,9 +1128,18 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       return;
     }
 
-    // Success — advance the checkpoint, then decide the next state. The pipeline
-    // terminates at `video` (15s) or `merge` (60s).
-    if (step === "video" || step === "merge") {
+    // Success — advance the checkpoint, then decide the next state.
+
+    // ── Completion. `template_render` is always terminal (pipeline:"template").
+    // The plain final clip is ready at `video` (15s) or `merge` (multi) for the
+    // normal `video` pipeline; a `template` run instead falls through below to
+    // advance into `template_fill` (nextStep maps video → template_fill →
+    // template_render — never gated, per the "full auto" design).
+    const finalClipStep: Step = isMultiSegment(run.duration) ? "merge" : "video";
+    if (
+      step === "template_render" ||
+      (step === finalClipStep && run.pipeline === "video")
+    ) {
       logRun(runId, "✓ run completed — final video ready", tag);
       await setRunIfActive(runId, { status: "completed", currentStep: step });
       return;
@@ -1111,7 +1148,13 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // boundary (next step is storyboard/outline or video/segment_video).
     // Independent of the Critic — gateForNext works whether or not inspection
     // steps run.
-    const next = nextStep(step, personUploaded, run.criticEnabled, run.duration);
+    const next = nextStep(
+      step,
+      personUploaded,
+      run.criticEnabled,
+      run.duration,
+      run.pipeline,
+    );
     const gate = gateForNext(next, referenceExists);
     if (run.mode === "confirm" && gate) {
       logRun(
@@ -1154,6 +1197,12 @@ export async function failRun(
 ): Promise<void> {
   const failure = classifyRunError(err);
   const raw = err instanceof Error ? err.message : String(err);
+
+  // `template_fill`/`template_render` (pipeline:"template" only) hard-fail like
+  // any other non-video step — `dispositionAfterLadder` already returns
+  // `hard_fail` for anything outside `VIDEO_STEPS`. There is no recovery gate
+  // to park at (the template was validated at run creation, before any AI cost
+  // was spent); `POST /runs/:id/regenerate-template` is the recovery path.
   const soft = dispositionAfterLadder(failure.code, step) === "soft_fail";
   const finalStatus: RunStatus = soft ? "awaiting_regen" : "failed";
   logRunError(

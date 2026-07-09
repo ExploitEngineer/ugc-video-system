@@ -5,6 +5,7 @@ import {
   type RunDetail,
   type RunStatus,
   type Step,
+  type StepEventStatus,
   segmentCountFor,
 } from "@ugc/shared";
 
@@ -30,9 +31,19 @@ export const STEP_ORDER_MULTI: Step[] = [
   "merge",
 ];
 
-/** The timeline steps for a run, by its duration. */
-export function stepOrderFor(duration: RunDetail["duration"]): Step[] {
-  return isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
+/**
+ * The timeline steps for a run, by its duration + pipeline. A `template`
+ * pipeline run (15s-only in v1) appends the automatic text-fill + render
+ * steps after `video`.
+ */
+export function stepOrderFor(
+  duration: RunDetail["duration"],
+  pipeline: RunDetail["pipeline"] = "video",
+): Step[] {
+  const base = isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
+  return pipeline === "template"
+    ? [...base, "template_fill", "template_render"]
+    : base;
 }
 
 /**
@@ -57,6 +68,9 @@ export const STEP_LABEL: Record<Step, string> = {
   segment_storyboard: "Storyboard sheets",
   segment_video: "Segment videos",
   merge: "Final merged video",
+  // pipeline:"template" only — automatic, never gated (see plan.ts)
+  template_fill: "Filling in your template",
+  template_render: "Template render",
 };
 
 /** The skill + agent responsible for each step — surfaced live in the UI. */
@@ -87,6 +101,9 @@ export const STEP_AGENT: Record<Step, StepAgent> = {
   segment_storyboard: { skill: "Storyboard", agent: "Image Agent" },
   segment_video: { skill: "Video Builder", agent: "Video Agent" },
   merge: { skill: "Merge", agent: "Video Agent" },
+  // pipeline:"template" only — automatic, never gated (see plan.ts)
+  template_fill: { skill: "Template Field Writer", agent: "Template Agent" },
+  template_render: { skill: "Template Render", agent: "Template Agent" },
 };
 
 /** `"<skill> · <agent>"` — the timeline sublabel for a step. */
@@ -151,37 +168,69 @@ export type StepState =
   | "skipped";
 
 /**
- * The steps currently executing — each with a `started` event but no terminal
- * (`passed`/`failed`) event yet. `currentStep` on the run is the LAST COMPLETED
- * step, so it can't tell us what's running; step events can. Returns MULTIPLE
- * steps when they run concurrently (the product + person reference sheets are
- * generated in parallel). Empty when the run isn't actively working a step.
+ * The latest status of each segment of the `segment_video` fan-out, keyed by
+ * `segmentIndex`. All N clips write their events under the SAME `step:
+ * "segment_video"`, discriminated only by `payload.segmentIndex`. Step events
+ * are append-only and ordered oldest→newest, so walking them and letting the
+ * later write win yields each segment's CURRENT status — which is what a regen
+ * (that appends a fresh `started` after an old terminal event) needs.
+ */
+function latestPerSegment(run: RunDetail): Map<number, StepEventStatus> {
+  const per = new Map<number, StepEventStatus>();
+  for (const e of run.stepEvents) {
+    if (e.step !== "segment_video") continue;
+    const idx = Number(
+      (e.payload as { segmentIndex?: number } | null)?.segmentIndex,
+    );
+    if (Number.isNaN(idx)) continue;
+    per.set(idx, e.status); // oldest→newest ⇒ last write wins = newest
+  }
+  return per;
+}
+
+/** How many segments of a multi-segment run are currently done (latest = passed),
+ *  counting each segment ONCE by its newest event (not raw passed events, which a
+ *  regen would double-count). */
+export function passedSegmentCount(run: RunDetail): number {
+  return [...latestPerSegment(run).values()].filter((s) => s === "passed")
+    .length;
+}
+
+/**
+ * The steps currently executing — those whose LATEST event is non-terminal
+ * (`started`, or `regenerated` between in-clip retry-ladder attempts).
+ * `currentStep` on the run is the LAST COMPLETED step, so it can't tell us
+ * what's running; step events can. Returns MULTIPLE steps when they run
+ * concurrently (the product + person reference sheets are generated in
+ * parallel). Empty when the run isn't actively working a step.
+ *
+ * Step events are APPEND-ONLY, so a regenerate appends a fresh `started` AFTER
+ * the prior attempt's `failed`/`passed`. We therefore key off the LATEST event,
+ * never `.some(passed||failed)` — the stale terminal event would otherwise mark
+ * a genuinely-re-running step as finished forever (the regenerate bug: no
+ * spinner, stuck "Failed").
  */
 export function activeSteps(run: RunDetail): Step[] {
   if (run.status !== "running" && run.status !== "regenerating") return [];
   const segCount = segmentCountFor(run.duration);
   const active: Step[] = [];
-  for (const step of stepOrderFor(run.duration)) {
+  for (const step of stepOrderFor(run.duration, run.pipeline)) {
     const events = run.stepEvents.filter((e) => e.step === step);
     if (events.length === 0) continue;
-    const started = events.some((e) => e.status === "started");
     if (step === "segment_video") {
-      // Parallel fan-out: N segment clips render concurrently, each writing its
-      // own started→passed/failed pair under this same step. The step is in
-      // flight until ALL N have settled — NOT the moment the first one does
-      // (the bug that flipped the pill back to "Pending" mid-render). A failed
-      // segment fails the whole run only after runBounded waits for every
-      // segment, so we keep showing "Generating" while the rest finish; the
-      // run-status flip then resolves it to Failed.
-      const settled = events.filter(
-        (e) => e.status === "passed" || e.status === "failed",
+      // Parallel fan-out: in flight until all N segments have a TERMINAL latest
+      // status. A re-run of one segment appends a fresh `started`, dropping it
+      // back out of the settled count so the pill returns to "Generating".
+      const per = latestPerSegment(run);
+      const settled = [...per.values()].filter(
+        (s) => s === "passed" || s === "failed",
       ).length;
-      if (started && settled < segCount) active.push(step);
+      if (per.size > 0 && settled < segCount) active.push(step);
     } else {
-      const ended = events.some(
-        (e) => e.status === "passed" || e.status === "failed",
-      );
-      if (started && !ended) active.push(step);
+      const last = events[events.length - 1];
+      if (last.status === "started" || last.status === "regenerated") {
+        active.push(step);
+      }
     }
   }
   return active;
@@ -189,13 +238,12 @@ export function activeSteps(run: RunDetail): Step[] {
 
 /** Resolve the display state of a single step from the run detail. */
 export function stepState(run: RunDetail, step: Step): StepState {
-  const order = stepOrderFor(run.duration);
+  const order = stepOrderFor(run.duration, run.pipeline);
   const idx = order.indexOf(step);
   // `currentStep` is null before the first step completes (and during the
   // parallel reference phase) → -1, so no step reads as "behind currentStep".
   const currentIdx = run.currentStep ? order.indexOf(run.currentStep) : -1;
   const events = run.stepEvents.filter((e) => e.step === step);
-  const hasPassed = events.some((e) => e.status === "passed");
 
   // Skipped reference steps are known up front from the run's asset plan (the
   // backend resolves them from the ad type's asset policy + uploads). Render
@@ -244,14 +292,23 @@ export function stepState(run: RunDetail, step: Step): StepState {
   // with its artifact even after the run is later cancelled/failed; a step closed
   // out as failed (a genuine failure, or an in-flight step a cancel terminated)
   // reads "failed" — never inheriting a neighbour's run-level state.
-  const hasFailed = events.some((e) => e.status === "failed");
+  //
+  // Use the LATEST terminal event, not `.some()`: step events are append-only,
+  // so a regenerate leaves the prior attempt's `failed` in history behind the
+  // new attempt's `passed`. `.some(failed)` would pin the step to "Failed"
+  // forever (the regenerate bug — including after a SUCCESSFUL regen). A
+  // genuinely re-running step is already caught by `activeSteps` above, so by
+  // here the latest terminal event is the real resting state.
+  const lastTerminal = [...events]
+    .reverse()
+    .find((e) => e.status === "passed" || e.status === "failed");
   // At a confirm-mode gate the current (passed) step carries the gate state.
   if (idx === currentIdx && run.status === "awaiting_confirmation")
     return "awaiting";
   if (idx === currentIdx && run.status === "regenerating")
     return "regenerating";
-  if (hasFailed) return "failed";
-  if (hasPassed) return "done";
+  if (lastTerminal?.status === "failed") return "failed";
+  if (lastTerminal?.status === "passed") return "done";
 
   // No terminal event for this step → fall back to run-level position/status.
   // `currentStep` is the LAST COMPLETED step, so the checkpoint reads done while
@@ -273,8 +330,6 @@ export function stepState(run: RunDetail, step: Step): StepState {
  */
 export function isTerminal(status: RunStatus) {
   return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "awaiting_regen"
+    status === "completed" || status === "failed" || status === "awaiting_regen"
   );
 }

@@ -12,7 +12,7 @@ import { apiUrl } from "@/lib/api";
 
 async function mutateRun(
   runId: string,
-  action: "cancel",
+  action: "cancel" | "regenerate-template",
 ): Promise<RunDetail | null> {
   try {
     const res = await fetch(apiUrl(`/runs/${runId}/${action}`), {
@@ -68,6 +68,19 @@ export async function cancelRunAction(
 }
 
 /**
+ * Retry a `pipeline: "template"` run that failed on the automatic
+ * text-fill/render step (`TEMPLATE_FILL_FAILED`/`TEMPLATE_RENDER_FAILED`).
+ * Rewinds to the pre-fill checkpoint and flips back to `running`; the driver
+ * re-enters `template_fill` → `template_render` (re-running the LLM fill too —
+ * cheap, and self-healing if bad text caused the failure).
+ */
+export async function regenerateTemplateAction(
+  runId: string,
+): Promise<RunDetail | null> {
+  return mutateRun(runId, "regenerate-template");
+}
+
+/**
  * Re-render the video clip(s) of a finished or soft-failed run, reusing the
  * existing storyboard + reference sheets. `segmentIndex` targets one clip of a
  * multi-segment run (omit for the 15s clip / all segments); `note` is an
@@ -82,7 +95,9 @@ export async function regenerateVideoAction(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...(opts.segmentIndex != null ? { segmentIndex: opts.segmentIndex } : {}),
+        ...(opts.segmentIndex != null
+          ? { segmentIndex: opts.segmentIndex }
+          : {}),
         ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
       }),
     });

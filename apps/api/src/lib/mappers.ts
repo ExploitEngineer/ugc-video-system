@@ -92,6 +92,7 @@ export type RunListRow = Pick<
   | "mode"
   | "aspectRatio"
   | "duration"
+  | "pipeline"
   | "criticEnabled"
   | "characterEnabled"
   | "status"
@@ -119,6 +120,7 @@ export function toRunDto(row: RunListRow): Run {
     mode: row.mode,
     aspectRatio: row.aspectRatio,
     duration: row.duration,
+    pipeline: row.pipeline,
     criticEnabled: row.criticEnabled,
     characterEnabled: row.characterEnabled,
     status: row.status,
@@ -188,6 +190,11 @@ export function toRunDetailDto(
   if (run.adType !== "service") skippedSteps.push("creative_brief");
   if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
   if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
+  // template_fill/template_render run ONLY for pipeline:"template" runs — mark
+  // them skipped (not stuck "pending") in a normal video-pipeline run's timeline.
+  if (run.pipeline !== "template") {
+    skippedSteps.push("template_fill", "template_render");
+  }
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),

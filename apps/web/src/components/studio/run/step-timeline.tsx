@@ -20,6 +20,7 @@ import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import {
   gateOf,
   gateStartsStep,
+  passedSegmentCount,
   STEP_LABEL,
   type StepState,
   stepOrderFor,
@@ -39,6 +40,8 @@ const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
   // shown in their own gallery in the run view.
   segment_storyboard: "storyboard_master",
   merge: "final_video",
+  // The Nexrender template output (optional final step).
+  template_render: "templated_video",
 };
 
 /** Compact status pill — a colored dot + label, far lighter than a chip. */
@@ -214,7 +217,9 @@ export function StepTimeline({ run }: { run: RunDetail }) {
   // `creative_brief` belongs only to the service path; drop it from the timeline
   // for the product types (where it's skipped) so they don't show a confusing
   // "Skipped" row for a step that isn't part of their pipeline at all.
-  const order = stepOrderFor(run.duration).filter(
+  // `stepOrderFor` already appends template_fill/template_render only for
+  // pipeline:"template" runs.
+  const order = stepOrderFor(run.duration, run.pipeline).filter(
     (s) =>
       s !== "creative_brief" || !run.skippedSteps.includes("creative_brief"),
   );
@@ -244,7 +249,7 @@ export function StepTimeline({ run }: { run: RunDetail }) {
           step === "segment_video" &&
           isMultiSegment(run.duration) &&
           (state === "active" || state === "regenerating")
-            ? `${run.stepEvents.filter((e) => e.step === "segment_video" && e.status === "passed").length}/${segmentCountFor(run.duration)}`
+            ? `${passedSegmentCount(run)}/${segmentCountFor(run.duration)}`
             : undefined;
         const last = i === order.length - 1;
         const dim = (state === "pending" || state === "skipped") && !upNext;

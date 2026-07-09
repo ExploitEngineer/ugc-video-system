@@ -18,9 +18,10 @@ import {
  * Hidden when no step is actively in flight.
  */
 export function NowRunning({ run }: { run: RunDetail }) {
-  // Use the run's REAL step order (15s vs multi-segment) — otherwise a 60s run's
-  // in-flight steps (segment_storyboard / segment_video / merge) are never named.
-  const steps = stepOrderFor(run.duration).filter((step) => {
+  // Use the run's REAL step order (15s vs multi-segment, + the template
+  // pipeline's template_fill/template_render) — otherwise those in-flight steps
+  // are never named in the banner.
+  const steps = stepOrderFor(run.duration, run.pipeline).filter((step) => {
     const state = stepState(run, step);
     return state === "active" || state === "regenerating";
   });

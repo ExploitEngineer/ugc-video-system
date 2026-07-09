@@ -70,6 +70,37 @@ const serverEnvSchema = z.object({
   BYTEPLUS_ASSET_SERVICE: z.string().default("ark"),
   BYTEPLUS_ASSET_API_VERSION: z.string().default("2024-01-01"),
 
+  // Nexrender Cloud — After Effects template rendering, the `pipeline:
+  // "template"` run kind. Cloud is the only viable host on this Linux stack
+  // (self-host needs AE on Windows/macOS). The user registers a template
+  // BEFORE the run exists (`POST /templates/register`); once the ad clip
+  // generates, `template_fill` (LLM text) → `template_render` (Nexrender
+  // composite) run automatically. All keys OPTIONAL so the server boots
+  // without them; when the key is absent (or NEXRENDER_STUB=true) the provider
+  // falls back to a STUB that echoes the input clip as the "render", so the
+  // whole flow is testable without credits.
+  // Master switch for the whole template pipeline. OFF by default — `POST
+  // /runs` rejects `pipeline: "template"` until this is flipped, so the
+  // pipeline stays dark until it's been smoke-tested end to end.
+  TEMPLATE_STEP_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  NEXRENDER_API_KEY: z.string().optional(),
+  NEXRENDER_BASE_URL: z.string().url().default("https://api.nexrender.com"),
+  NEXRENDER_STUB: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  NEXRENDER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  // Dead-man's switch for one stuck Nexrender job (NOT a network timeout).
+  // AE renders can take minutes; 30 min mirrors the BytePlus poll timeout.
+  NEXRENDER_POLL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1800000),
+
   // Supabase — Postgres (Drizzle), Storage, Auth (F8)
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),

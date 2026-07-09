@@ -24,9 +24,18 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
+  "image/gif": "gif",
   "video/mp4": "mp4",
+  "video/quicktime": "mov",
   "audio/mp4": "m4a", // audio track extracted from the final video (AAC in MP4)
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
   "application/json": "json", // serialized CE.SDK editor scene
+  // User-uploaded template projects (kept for retention; registered to Nexrender
+  // from the raw bytes). Custom mimes set by the template-register/asset routes.
+  "application/zip": "zip",
+  "application/x-aep": "aep",
+  "application/x-mogrt": "mogrt",
 };
 
 function extFor(contentType: string): string {

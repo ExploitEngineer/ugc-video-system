@@ -13,6 +13,11 @@ import { z } from "zod";
  * tweak the clip via `POST /runs/:id/regenerate-video`. `failed` is reserved for
  * truly unrecoverable errors. Like `awaiting_confirmation`, it is terminal for
  * the worker (not in CLAIMABLE); the regenerate route flips it back to `running`.
+ *
+ * There is no mid-pipeline template choice gate: a `pipeline: "template"` run
+ * (see `pipelineSchema`) has its Nexrender template registered and introspected
+ * BEFORE the run is even created, so it flows straight through to `completed`
+ * like a normal run — see `template_fill`/`template_render` in `stepSchema`.
  */
 export const runStatusSchema = z.enum([
   "queued",
@@ -49,6 +54,13 @@ export const stepSchema = z.enum([
   "segment_storyboard",
   "segment_video",
   "merge",
+  // `pipeline: "template"` only (15s-only in v1), automatic, never gated: once
+  // the final clip exists, an LLM writes every discovered TEXT slot's value
+  // from the run's prompt/brand text (`runs.template_text_fill`)...
+  "template_fill",
+  // ...then the clip + those text values are composited into the template
+  // registered at run creation (`runs.template`), persisting a `templated_video`.
+  "template_render",
 ]);
 export type Step = z.infer<typeof stepSchema>;
 
@@ -79,12 +91,31 @@ export const assetKindSchema = z.enum([
   "edited_video",
   "editor_scene",
   "final_audio",
+  // The Nexrender output: the `pipeline: "template"` run's clip composited into
+  // the template registered at run creation, re-hosted from Nexrender Cloud to
+  // Supabase. The sole deliverable a template-pipeline run shows once completed.
+  "templated_video",
+  // The MODIFIED .aep Nexrender returns from a render — the editable project,
+  // re-hosted from Nexrender Cloud to Supabase alongside the `templated_video`.
+  "template_aep",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 
 /** Run mode — controls step gating, not the Critic auto-checks. */
 export const modeSchema = z.enum(["automatic", "confirm"]);
 export type Mode = z.infer<typeof modeSchema>;
+
+/**
+ * Which generation pipeline a run uses (`runs.pipeline`), picked up front via
+ * the studio sidebar switch — NOT a mid-run choice. `video` (default) is the
+ * unchanged product/person/storyboard/video pipeline. `template` registers +
+ * introspects a Nexrender After Effects template BEFORE the run is created
+ * (so a bad template file fails fast, before any AI cost is spent), then runs
+ * the same agent pipeline and automatically composites the clip + AI-written
+ * text into the template (`template_fill` → `template_render`).
+ */
+export const pipelineSchema = z.enum(["video", "template"]);
+export type Pipeline = z.infer<typeof pipelineSchema>;
 
 /**
  * Output aspect ratio, chosen by the user at run creation. Propagated to the
@@ -168,6 +199,12 @@ export const runErrorCodeSchema = z.enum([
   // the generic content block so the video ladder can retry it with neutralized,
   // brand-safe spoken lines before parking the run.
   "PROVIDER_AUDIO_BLOCKED",
+  // The Nexrender template render failed or timed out (provider error, bad
+  // template/layer mapping, or output never reached a terminal status).
+  "TEMPLATE_RENDER_FAILED",
+  // The `template_fill` LLM step failed (provider error / unparseable reply)
+  // after its retry.
+  "TEMPLATE_FILL_FAILED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_CONTENT_BLOCKED",
   "RUN_CANCELLED",

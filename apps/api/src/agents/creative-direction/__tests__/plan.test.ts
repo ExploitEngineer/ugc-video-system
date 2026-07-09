@@ -90,6 +90,39 @@ describe("nextStep unchanged for the post-reference sequence", () => {
   });
 });
 
+describe("nextStep — template pipeline branching (video → template_fill → template_render)", () => {
+  it("15s video: complete for the normal video pipeline (default / explicit)", () => {
+    expect(nextStep("video", false, false, "15s")).toBeNull();
+    expect(nextStep("video", false, false, "15s", "video")).toBeNull();
+  });
+  it("15s video: a template-pipeline run continues into template_fill", () => {
+    expect(nextStep("video", false, false, "15s", "template")).toBe(
+      "template_fill",
+    );
+  });
+  it("template_fill always continues into template_render", () => {
+    expect(nextStep("template_fill", false, false, "15s", "template")).toBe(
+      "template_render",
+    );
+  });
+  it("template_render is always terminal", () => {
+    expect(nextStep("template_render", false, false, "15s", "template")).toBeNull();
+  });
+  it("multi merge: always complete — the template pipeline is 15s-only in v1", () => {
+    expect(nextStep("merge", false, false, "60s")).toBeNull();
+    expect(nextStep("merge", false, false, "60s", "video")).toBeNull();
+    expect(nextStep("merge", false, false, "60s", "template")).toBeNull();
+  });
+  it("segment_video still → merge regardless of pipeline", () => {
+    expect(nextStep("segment_video", false, false, "60s", "template")).toBe(
+      "merge",
+    );
+    expect(nextStep("segment_video", false, false, "60s", "video")).toBe(
+      "merge",
+    );
+  });
+});
+
 describe("resumeStepForVideoRegen — lands directly on the video step", () => {
   it("15s → storyboard_inspection, whose nextStep is video (critic on OR off)", () => {
     expect(resumeStepForVideoRegen("15s")).toBe("storyboard_inspection");

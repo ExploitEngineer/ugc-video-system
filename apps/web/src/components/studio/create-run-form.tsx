@@ -18,6 +18,7 @@ import {
   UserIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
@@ -57,16 +58,28 @@ const SHOW_MODE_CONTROL = false;
 export function CreateRunForm({
   initialPrompt = "",
   autoFocus = false,
+  template,
 }: {
   initialPrompt?: string;
   autoFocus?: boolean;
+  /** Present only for a template-pipeline brief (see /studio/template-new) —
+   *  adds the template-info line above the composer and wires `pipeline` +
+   *  `templateId` into the submitted FormData. Every other control/behavior
+   *  is identical to the normal pipeline's composer. */
+  template?: {
+    templateId: string;
+    suggestedAspectRatio: AspectRatio | null;
+    infoLabel: string;
+  };
 }) {
   const router = useRouter();
   const [productFile, setProductFile] = useState<File | null>(null);
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [mode, setMode] = useState<Mode>("automatic");
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(
+    template?.suggestedAspectRatio ?? "16:9",
+  );
   const [duration, setDuration] = useState<Duration>("15s");
   // Default to auto — the LLM detector selects the ad type from the prompt + the
   // attached assets (product/person). A manual dropdown pick still overrides and
@@ -174,6 +187,10 @@ export function CreateRunForm({
     // pick sends the toggle as chosen, honoring that type's default/override.
     if (adType !== "auto") fd.set("characterEnabled", String(characterEnabled));
     if (brandText.trim()) fd.set("brandText", brandText.trim());
+    if (template) {
+      fd.set("pipeline", "template");
+      fd.set("templateId", template.templateId);
+    }
 
     startTransition(async () => {
       try {
@@ -182,6 +199,7 @@ export function CreateRunForm({
           id: detail.id,
           prompt: prompt.trim(),
           createdAt: detail.createdAt,
+          pipeline: template ? "template" : "video",
         });
         router.push(`/studio/${detail.id}`);
       } catch (err) {
@@ -194,6 +212,18 @@ export function CreateRunForm({
 
   return (
     <div className="flex flex-col gap-3">
+      {template && (
+        <div className="text-muted-foreground flex items-center justify-between px-1 text-xs">
+          <span>Template: {template.infoLabel}</span>
+          <Link
+            href="/studio/template-new"
+            className="hover:text-foreground underline"
+          >
+            Change template
+          </Link>
+        </div>
+      )}
+
       <div className="ring-glow bg-card/80 focus-within:border-brand/50 relative flex flex-col gap-2 rounded-3xl border border-border/60 p-2.5 shadow-xl backdrop-blur transition-shadow">
         <textarea
           ref={taRef}

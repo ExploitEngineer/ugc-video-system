@@ -4,16 +4,34 @@
 //
 // Opens an EventSource to the same-origin proxy and writes each pushed
 // `RunDetail` into the ["run", runId] query cache — the SAME key the run view
-// (and sidebar) read — so the UI updates with no re-fetch. The browser
-// auto-reconnects on a dropped connection; the server closes the stream with a
-// terminal `done` event once the final video has landed. Pass `enabled=false`
-// (e.g. once a run is confirmed missing) to stop a 404 reconnect loop.
+// (and sidebar) read — so the UI updates with no re-fetch. The server closes
+// the stream with a terminal `done` event once a run settles (`failed`, or
+// `completed` with its final video landed) and we close our end too, so a
+// finished run's tab doesn't poll forever.
+//
+// That close is permanent, though — nothing here would ever reopen it. A
+// regenerate action (regenerate-video / regenerate-template) flips a settled
+// run back to `running` via a one-shot mutation response, which briefly shows
+// the new status, but with the stream dead no further progress (step events,
+// the eventual re-completion or re-failure) ever arrives — the UI looks stuck
+// exactly where the one-shot update left it. `settled` is the caller's OWN
+// read of the run's current status (same query, so it flips the instant a
+// regenerate mutation writes the cache); including it in the effect's deps
+// tears down the dead connection and opens a fresh one the moment it flips
+// back to false.
+//
+// Pass `enabled=false` (e.g. once a run is confirmed missing) to stop a 404
+// reconnect loop.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { RunDetail } from "@ugc/shared";
 import { useEffect } from "react";
 
-export function useRunStream(runId: string, enabled = true): void {
+export function useRunStream(
+  runId: string,
+  enabled = true,
+  settled = false,
+): void {
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -43,5 +61,5 @@ export function useRunStream(runId: string, enabled = true): void {
     };
 
     return () => es.close();
-  }, [runId, enabled, queryClient]);
+  }, [runId, enabled, queryClient, settled]);
 }

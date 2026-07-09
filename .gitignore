@@ -42,3 +42,7 @@ coverage/
 # local research inputs (kept on the author's machine, not committed)
 # research/
 # research-prompts/
+
+# generated dumps (scripts/dump-prompt.ts, tree snapshots)
+apps/api/docs/prompt-dump.txt
+project-tree.txt

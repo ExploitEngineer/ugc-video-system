@@ -45,6 +45,10 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
     "The generation service is busy right now. Please try again in a few minutes.",
   VIDEO_MERGE_FAILED:
     "We couldn't assemble the final video from its segments. Please try the run again.",
+  TEMPLATE_RENDER_FAILED:
+    "We couldn't render your video into that template. Try a different template, or skip the template step.",
+  TEMPLATE_FILL_FAILED:
+    "We couldn't write the text for your template. Please try again.",
   VIDEO_GENERATION_FAILED: "Video generation failed. Please try the run again.",
   VIDEO_GENERATION_TIMEOUT:
     "Video generation took too long and timed out. Please try the run again.",
@@ -68,8 +72,7 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
   // wins): the video ladder retries this specific code with brand-safe speech.
   // The generic row below would otherwise swallow it via "sensitive information".
   {
-    pattern:
-      /output\s*audio.*(sensitive|moderation|blocked)|audio may contain sensitive/i,
+    pattern: /output\s*audio.*(sensitive|moderation|blocked)|audio may contain sensitive/i,
     code: "PROVIDER_AUDIO_BLOCKED",
   },
   {

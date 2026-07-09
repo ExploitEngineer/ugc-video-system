@@ -8,6 +8,7 @@ import { onError } from "./lib/errors.js";
 import { createLogger } from "./lib/log.js";
 import { adTypeMenuList } from "./agents/ad-types/menu.js";
 import { runs } from "./routes/runs.js";
+import { templates } from "./routes/templates.js";
 
 export function createApp() {
   const app = new Hono();
@@ -39,6 +40,10 @@ export function createApp() {
   // Ad-type menu for the create-form dropdown (Chunk J). Registry-driven, so it
   // grows automatically as new ad types are registered.
   app.get("/ad-types", (c) => c.json(adTypeMenuList()));
+
+  // Template pipeline: register + introspect a Nexrender template BEFORE any
+  // run exists (cost-safety — a bad file fails fast, before any AI is spent).
+  app.route("/templates", templates);
 
   app.route("/runs", runs);
 

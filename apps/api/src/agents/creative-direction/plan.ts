@@ -5,7 +5,12 @@
 // modes; confirm-mode gating pauses after each VALIDATED stage — i.e. after
 // `product_inspection` and after `storyboard_inspection` (SPEC §4 mermaid).
 
-import { type Duration, isMultiSegment, type Step } from "@ugc/shared";
+import {
+  type Duration,
+  isMultiSegment,
+  type Pipeline,
+  type Step,
+} from "@ugc/shared";
 
 /**
  * Ground-truth asset signals for a run (Chunk G): the registry asset policy for
@@ -76,6 +81,7 @@ export function nextStep(
   _personUploaded: boolean,
   criticEnabled: boolean,
   duration: Duration = "15s",
+  pipeline: Pipeline = "video",
 ): Step | null {
   const multi = isMultiSegment(duration);
   // What follows the reference phase: inspection (critic on), else the
@@ -106,7 +112,15 @@ export function nextStep(
       return criticEnabled ? "storyboard_inspection" : "video";
     case "storyboard_inspection":
       return "video";
+    // Once the 15s final clip exists, a `pipeline: "template"` run continues
+    // straight into the automatic text-fill + render (never gated — the
+    // template was already validated at run creation, before this run
+    // existed); a normal `video`-pipeline run is complete.
     case "video":
+      return pipeline === "template" ? "template_fill" : null;
+    case "template_fill":
+      return "template_render";
+    case "template_render":
       return null;
     // Multi-segment pipeline: master storyboard (+ row crops) → N videos → merge.
     // `narrative_outline` is dormant (never sequenced) but kept in the enum.
@@ -116,6 +130,8 @@ export function nextStep(
       return "segment_video";
     case "segment_video":
       return "merge";
+    // The template pipeline is 15s-only in v1 — a multi-segment run is always
+    // complete at `merge` regardless of `pipeline`.
     case "merge":
       return null;
   }

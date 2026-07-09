@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Template flow + storage policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg: oklch(0.15 0.008 235); --bg-2: oklch(0.13 0.008 235);
+    --fg: oklch(0.96 0.004 230); --card: oklch(0.185 0.009 235); --card-2: oklch(0.21 0.01 235);
+    --primary: oklch(0.8 0.13 205); --primary-fg: oklch(0.2 0.04 220);
+    --muted: oklch(0.215 0.01 235); --muted-fg: oklch(0.68 0.013 235);
+    --accent: oklch(0.26 0.03 215); --accent-fg: oklch(0.9 0.06 205);
+    --border: oklch(1 0 0 / 8%); --border-2: oklch(1 0 0 / 14%);
+    --success: oklch(0.75 0.15 155); --warning: oklch(0.8 0.14 78); --danger: oklch(0.66 0.2 25);
+    --brand-grad: linear-gradient(135deg, oklch(0.8 0.13 205), oklch(0.74 0.14 225), oklch(0.68 0.14 250));
+    --radius: 0.7rem; --shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 16px 50px -22px oklch(0 0 0 / 0.7);
+    --sans: "Geist", system-ui, sans-serif; --display: "Space Grotesk", var(--sans); --mono: "Geist Mono", monospace;
+  }
+  *{ box-sizing:border-box; min-width:0; }
+  html,body{ margin:0; }
+  body{ background: radial-gradient(1200px 600px at 82% -10%, oklch(0.8 0.13 205 / 0.06), transparent 60%), var(--bg); color:var(--fg); font-family:var(--sans); line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width: 1000px; margin:0 auto; padding:40px 22px 96px; }
+  h1,h2,h3{ font-family:var(--display); font-weight:600; letter-spacing:-0.01em; margin:0; }
+  h1{ font-size: clamp(1.7rem,3.4vw,2.3rem); line-height:1.18; padding-bottom:0.06em; }
+  h2{ font-size:1.2rem; }
+  p{ margin:0; } .muted{ color:var(--muted-fg); }
+  .lead{ font-size:1.05rem; color: oklch(0.88 0.01 230); max-width:64ch; }
+  .mono{ font-family:var(--mono); font-size:0.85em; background:var(--muted); padding:1px 6px; border-radius:5px; border:1px solid var(--border); }
+  .eyebrow{ font-family:var(--mono); font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--primary); }
+  .section{ margin-top:44px; }
+  .section > h2{ display:flex; align-items:center; gap:11px; margin-bottom:14px; }
+  .section > h2 .n{ font-family:var(--mono); font-size:0.8rem; color:var(--primary-fg); background:var(--brand-grad); width:26px;height:26px;border-radius:8px; display:grid;place-items:center; font-weight:700; flex:0 0 auto; }
+  .card{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+  .pad{ padding:20px; }
+  .mermaid{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px; overflow-x:auto; }
+  .badge{ display:inline-flex; align-items:center; gap:6px; font-size:0.68rem; font-weight:600; letter-spacing:0.03em; padding:3px 9px; border-radius:6px; text-transform:uppercase; }
+  .b-keep{ background: oklch(0.75 0.15 155 / 0.16); color:var(--success); }
+  .b-no{ background: oklch(0.66 0.2 25 / 0.16); color:var(--danger); }
+  .b-tmp{ background: oklch(0.8 0.14 78 / 0.16); color:var(--warning); }
+  .scroller{ overflow-x:auto; border-radius:var(--radius); border:1px solid var(--border); }
+  table{ width:100%; border-collapse:collapse; font-size:0.9rem; }
+  th,td{ text-align:left; padding:11px 13px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th{ font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted-fg); font-weight:600; }
+  tr:last-child td{ border-bottom:none; }
+  .cols{ display:grid; grid-template-columns:1fr; gap:16px; }
+  @media(min-width:760px){ .cols.two{ grid-template-columns:1fr 1fr; } }
+  .opt{ border:1px solid var(--border-2); border-radius:var(--radius); padding:18px; background:var(--card); }
+  .opt.rec{ border-color: oklch(0.75 0.15 155 / 0.5); background: linear-gradient(180deg, oklch(0.75 0.15 155 / 0.05), var(--card)); }
+  .opt h3{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .opt p{ color:var(--muted-fg); font-size:0.9rem; }
+  .opt ul{ margin:10px 0 0; padding-left:18px; color:var(--muted-fg); font-size:0.86rem; }
+  .opt li{ margin:3px 0; }
+  .note{ display:flex; gap:12px; padding:14px 16px; border-radius:var(--radius); border:1px solid oklch(0.8 0.13 205 / 0.3); background: oklch(0.8 0.13 205 / 0.05); }
+  .note .ic{ flex:0 0 auto; }
+  .foot{ margin-top:44px; padding-top:18px; border-top:1px solid var(--border); color:var(--muted-fg); font-size:0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card"><div class="pad">
+    <div class="eyebrow">Nexrender template flow &middot; for your confirm</div>
+    <h1 style="margin-top:10px;">The full flow &mdash; and exactly what we store</h1>
+    <p class="lead" style="margin-top:12px;">You upload a template, we render your clip into it via Nexrender, and you get a finished video. This maps every step and marks <b style="color:var(--success)">what we keep</b> vs <b style="color:var(--danger)">what we don't</b>. Per your call: the uploaded <span class="mono">.aep</span> goes <b>straight to Nexrender</b> (never our Supabase); we only keep the outputs. Confirm and I build.</p>
+  </div></div>
+
+  <!-- FLOW -->
+  <div class="section">
+    <h2><span class="n">1</span> The flow, end to end</h2>
+    <div class="mermaid">
+flowchart TD
+    U["You upload a .aep / .zip / .mogrt"] --> REG["Uploaded STRAIGHT to Nexrender cloud<br/>(never touches our Supabase)"]
+    REG --> NX["Nexrender template id (instant)"]
+    NX --> INTRO["Nexrender introspects:<br/>compositions + layers"]
+    INTRO -->|"we poll until ready"| FORM["Builder form:<br/>pick layers + fill values"]
+    CLIP[("Your generated clip<br/>already on Supabase")] -."URL used as a slot".-> FORM
+    FORM --> APPLY["Apply → build render job"]
+    APPLY --> REND["Nexrender renders your clip<br/>into the template"]
+    REND --> MP4["Output .mp4"]
+    REND --> AEP["Modified .aep"]
+    MP4 --> KEEP[("Supabase — KEPT")]
+    AEP --> KEEP
+    classDef keep fill:#12281f,stroke:#4ec98a,color:#dff;
+    classDef nx fill:#12303a,stroke:#2bbbd6,color:#dff;
+    class KEEP,CLIP keep;
+    class REG nx;
+    </div>
+    <p class="muted" style="font-size:0.82rem; margin-top:8px;">Register &amp; introspection are async &mdash; the editor shows a loading line and polls until Nexrender is done (there's no webhook for introspection, only for render jobs).</p>
+  </div>
+
+  <!-- STORAGE -->
+  <div class="section">
+    <h2><span class="n">2</span> What we store &mdash; your policy</h2>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>File</th><th>Kept?</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Your uploaded project <span class="mono">.aep/.zip</span></td><td><span class="badge b-no">Never on Supabase</span></td><td><b style="color:var(--fg)">Uploaded straight to Nexrender's cloud.</b> Our Supabase never sees it. (Your point &mdash; correct.)</td></tr>
+          <tr><td>Per-layer files you upload for a slot (image/video/audio)</td><td><span class="badge b-tmp">Transient on Supabase</span></td><td>Only these need a public URL for Nexrender to fetch during render; small, cleaned up after. Rare &mdash; most slots use text or your generated clip.</td></tr>
+          <tr><td>The rendered <span class="mono">.mp4</span> (<span class="mono">templated_video</span>)</td><td><span class="badge b-keep">Kept</span></td><td>Your finished ad video &mdash; the deliverable.</td></tr>
+          <tr><td>The modified <span class="mono">.aep</span> Nexrender returns</td><td><span class="badge b-keep">Kept</span> <span class="badge b-tmp">new</span></td><td>Your request &mdash; the editable project with your assets baked in. We'll ask Nexrender to output it, then store it.</td></tr>
+          <tr><td>Your generated Seedance clip (<span class="mono">final_video</span>)</td><td><span class="badge b-keep">Kept</span></td><td>Already the run's output; it's what "use generated clip" drops into a slot.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note" style="margin-top:16px;">
+      <span class="ic">&#9888;</span>
+      <div style="font-size:0.9rem;"><b>The modified <span class="mono">.aep</span> is new work.</b> Today we only fetch the <span class="mono">.mp4</span>. To store the returned <span class="mono">.aep</span> we add an <span class="mono">.aep</span> output to the render job, then fetch + save it as a new <span class="mono">template_aep</span> asset. Included in the plan.</div>
+    </div>
+  </div>
+
+  <!-- CONFIRMED -->
+  <div class="section">
+    <h2><span class="n">3</span> Confirmed: the <span class="mono" style="font-size:0.85em;">.aep</span> goes straight to Nexrender</h2>
+    <div class="opt rec">
+      <h3><span class="badge b-keep">Your call</span> Direct upload to Nexrender's cloud</h3>
+      <p>You upload → our server hands the bytes straight to Nexrender's storage (its presigned upload) → Nexrender introspects + renders. <b style="color:var(--fg)">Our Supabase never stores the input project.</b> Exactly as you said.</p>
+      <ul>
+        <li>The only Supabase writes for this feature = the OUTPUTS (<span class="mono">.mp4</span> + modified <span class="mono">.aep</span>) + any per-layer media you upload (transient).</li>
+        <li>Your generated clip is already on Supabase &mdash; we just pass its URL as a render slot. No copy.</li>
+      </ul>
+    </div>
+    <div class="note" style="margin-top:16px; border-color: oklch(0.75 0.15 155 / 0.4); background: oklch(0.75 0.15 155 / 0.07);">
+      <span class="ic">&#10003;</span>
+      <div style="font-size:0.92rem;"><b>You're right &mdash; a bigger timeout is a band-aid. The real prod fix is to remove the hop that times out.</b>
+        <ul style="margin:8px 0 0; padding-left:18px;">
+          <li><b>What timed out:</b> <i>our API server</i> pushing the <span class="mono">.aep</span> bytes up to Google Cloud (Nexrender's storage). That server-in-the-middle hop is the fragile part &mdash; it also buffers the whole file through our server's RAM, which doesn't scale for big projects.</li>
+          <li><b>The fix:</b> <b>the browser uploads straight to Nexrender's storage.</b> Our API just asks Nexrender for the one-time upload URL and hands it to your browser; your browser PUTs the file directly. Our server never touches the bytes at all &mdash; not Supabase, not even API memory.</li>
+          <li><b>Why it's the prod-grade answer:</b> browser uploads use the browser's own networking (long, adaptive timeouts + progress bar + resume), not a fixed server cap. It's the same direct-to-storage pattern we already use elsewhere. Big <span class="mono">.aep</span> files stop flowing through our server.</li>
+          <li><b>One thing I verify while building:</b> that Nexrender's storage allows a browser upload (CORS). If it doesn't, the automatic fallback is a hardened server-side upload (stream, no flat timeout, retry) &mdash; which works everywhere prod runs regardless.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px;">
+      <span class="ic">&#9989;</span>
+      <div style="font-size:0.92rem;"><b>So I'll:</b> (1) move the upload to <b>browser &rarr; Nexrender direct</b> (API only brokers the upload URL; no bytes through our server or Supabase), (2) <b>drop</b> storing the input, (3) <b>add</b> fetching + storing the modified <span class="mono">.aep</span> Nexrender returns. Confirm and I build.</div>
+    </div>
+  </div>
+
+  <div class="foot">Shown in the studio's dark theme. Annotate anything, or just reply with A or B + any tweaks to the storage policy.</div>
+
+</div>
+<script>
+  try{ mermaid.initialize({ startOnLoad:true, theme:"dark", themeVariables:{ fontFamily:"Space Grotesk, sans-serif", primaryColor:"#182a33", primaryTextColor:"#dfeff5", lineColor:"#6b8794", primaryBorderColor:"#2bbbd6" }}); }catch(e){}
+</script>
+</body>
+</html>
