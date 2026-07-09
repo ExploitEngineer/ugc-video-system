@@ -114,7 +114,9 @@ export function TemplateUploadView() {
               )}
             </span>
             <div>
-              <h2 className="font-semibold">Upload your After Effects template</h2>
+              <h2 className="font-semibold">
+                Upload your After Effects template
+              </h2>
               <p className="text-muted-foreground mt-1 max-w-sm text-sm text-pretty">
                 {registerMutation.isPending
                   ? "Uploading and registering with Nexrender…"
@@ -132,7 +134,10 @@ export function TemplateUploadView() {
                   className="sr-only"
                   onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
                 />
-                <Button variant="brand" onClick={() => inputRef.current?.click()}>
+                <Button
+                  variant="brand"
+                  onClick={() => inputRef.current?.click()}
+                >
                   <UploadIcon className="size-4" />
                   Choose a file
                 </Button>

@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Template Library Pipeline — plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, dd, td, th, .badge) { overflow-wrap: anywhere; }
+  :where(img, svg, video) { max-width: 100%; height: auto; }
+
+  :root {
+    /* Lifted verbatim from apps/web/src/app/globals.css (.dark) */
+    --bg:        oklch(0.15 0.008 235);
+    --bg-2:      oklch(0.128 0.008 235);
+    --card:      oklch(0.185 0.009 235);
+    --fg:        oklch(0.96 0.004 230);
+    --muted:     oklch(0.66 0.013 235);
+    --border:    oklch(1 0 0 / 9%);
+    --border-2:  oklch(1 0 0 / 14%);
+    --brand:     oklch(0.8 0.13 205);
+    --brand-2:   oklch(0.74 0.14 225);
+    --brand-3:   oklch(0.68 0.14 250);
+    --success:   oklch(0.75 0.15 155);
+    --warning:   oklch(0.8 0.14 78);
+    --danger:    oklch(0.66 0.2 25);
+    --radius:    0.7rem;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: "Space Grotesk", system-ui, sans-serif;
+  }
+
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 620px at 12% -8%, oklch(0.8 0.13 205 / 0.10), transparent 62%),
+      radial-gradient(900px 520px at 92% 4%, oklch(0.68 0.14 250 / 0.09), transparent 60%),
+      var(--bg);
+    color: var(--fg);
+    font-family: "Geist", system-ui, -apple-system, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px 120px; }
+
+  /* ---------- header ---------- */
+  header.hero { padding: 60px 0 30px; border-bottom: 1px solid var(--border); margin-bottom: 40px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--brand); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--display); font-weight: 700; font-size: clamp(30px, 5vw, 46px);
+    /* 1.1 clipped descenders; the gradient span also needs right bearing. */
+    line-height: 1.18; margin: 0 0 16px; letter-spacing: -0.02em;
+    padding-bottom: 4px;
+  }
+  .grad {
+    background: linear-gradient(100deg, var(--brand), var(--brand-3));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    /* An inline-block's box is sized by line-height, so the glyph ink of a
+       700-weight descender ("p") plus the last letter's side bearing both spill
+       out of it. Grow the box on every clipping edge, then pull the layout back
+       with matching negative margins so nothing shifts. */
+    display: inline-block;
+    line-height: 1.28;
+    padding: 0.06em 0.14em 0.1em 0;
+    margin: -0.06em -0.14em -0.1em 0;
+  }
+  .lede { font-size: 18px; color: var(--muted); max-width: 68ch; margin: 0; }
+
+  /* ---------- structure ---------- */
+  section { margin: 56px 0; scroll-margin-top: 24px; }
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: 25px; letter-spacing: -0.01em;
+    margin: 0 0 8px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  h2 .num { font-family: var(--mono); font-size: 12px; color: var(--brand); letter-spacing: .1em; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 17px; margin: 30px 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 24px; max-width: 74ch; }
+  p { max-width: 76ch; }
+
+  /* ---------- cards ---------- */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 22px;
+  }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+
+  /* ---------- status banner ---------- */
+  .done {
+    display: flex; gap: 16px; align-items: flex-start;
+    background: linear-gradient(100deg, oklch(0.75 0.15 155 / 0.11), transparent 70%);
+    border: 1px solid oklch(0.75 0.15 155 / 0.32);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .done .tick {
+    flex: none; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--success); color: #06231a; font-weight: 700;
+    display: grid; place-items: center; font-size: 15px; margin-top: 2px;
+  }
+  .done h3 { margin: 0 0 4px; font-size: 16px; }
+  .done p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  /* ---------- badges ---------- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+    padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2);
+    color: var(--muted); background: oklch(1 0 0 / 3%); white-space: nowrap;
+  }
+  .badge.b   { color: var(--brand);   border-color: oklch(0.8 0.13 205 / 0.35); background: oklch(0.8 0.13 205 / 0.10); }
+  .badge.ok  { color: var(--success); border-color: oklch(0.75 0.15 155 / 0.35); background: oklch(0.75 0.15 155 / 0.10); }
+  .badge.w   { color: var(--warning); border-color: oklch(0.8 0.14 78 / 0.35);  background: oklch(0.8 0.14 78 / 0.10); }
+  .badge.d   { color: var(--danger);  border-color: oklch(0.66 0.2 25 / 0.35);  background: oklch(0.66 0.2 25 / 0.10); }
+  .badge.new { color: var(--brand-3); border-color: oklch(0.68 0.14 250 / 0.35); background: oklch(0.68 0.14 250 / 0.10); }
+
+  /* ---------- code ---------- */
+  code { font-family: var(--mono); font-size: 0.875em; background: oklch(1 0 0 / 6%); padding: 1px 5px; border-radius: 4px; }
+  pre {
+    font-family: var(--mono); font-size: 12.8px; line-height: 1.72;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px; overflow-x: auto; margin: 0;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .c-key { color: var(--brand-3); } .c-str { color: var(--success); }
+  .c-com { color: oklch(0.52 0.012 235); font-style: italic; } .c-fn { color: var(--brand); }
+  .c-num { color: var(--warning); }
+
+  /* ---------- tables ---------- */
+  .tbl-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 540px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+    padding: 12px 16px; background: oklch(1 0 0 / 3%); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: oklch(1 0 0 / 2.5%); }
+  td.mono, th.mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- mermaid ---------- */
+  .dgm {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 26px 18px; overflow-x: auto; text-align: center;
+  }
+  .dgm .mermaid { display: inline-block; min-width: 0; }
+  .cap { color: var(--muted); font-size: 13px; margin: 10px 0 0; text-align: center; }
+
+  /* ---------- compare ---------- */
+  .cmp { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .cmp .card { border-top: 3px solid var(--border-2); }
+  .cmp .now { border-top-color: var(--danger); }
+  .cmp .next { border-top-color: var(--success); }
+  .cmp h3 { margin: 0 0 12px; font-size: 15px; display: flex; gap: 9px; align-items: center; }
+  .cmp ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .cmp li { margin-bottom: 7px; }
+  .cmp li strong { color: var(--fg); font-weight: 500; }
+
+  /* ---------- callout ---------- */
+  .note {
+    border-left: 3px solid var(--brand); background: oklch(0.8 0.13 205 / 0.055);
+    padding: 14px 18px; border-radius: 0 var(--radius) var(--radius) 0; margin: 20px 0;
+  }
+  .note.warn   { border-left-color: var(--warning); background: oklch(0.8 0.14 78 / 0.06); }
+  .note.danger { border-left-color: var(--danger);  background: oklch(0.66 0.2 25 / 0.06); }
+  .note p:last-child { margin-bottom: 0; }
+  .note p:first-child { margin-top: 0; }
+  .note strong { color: var(--fg); }
+
+  /* ---------- steps ---------- */
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; }
+  ol.steps li {
+    counter-increment: s; position: relative; padding: 11px 0 11px 46px;
+    border-bottom: 1px solid var(--border); color: var(--muted); font-size: 14.5px;
+  }
+  ol.steps li:last-child { border-bottom: none; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 0; top: 11px;
+    width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+    font-family: var(--mono); font-size: 11.5px; color: var(--brand);
+    background: oklch(0.8 0.13 205 / 0.10); border: 1px solid oklch(0.8 0.13 205 / 0.28);
+  }
+  ol.steps li.ok::before { content: "✓"; color: var(--success); background: oklch(0.75 0.15 155 / 0.12); border-color: oklch(0.75 0.15 155 / 0.32); }
+  ol.steps li strong { color: var(--fg); font-weight: 550; }
+
+  /* ---------- input / decisions ---------- */
+  .ask { border: 1px solid var(--border-2); border-radius: var(--radius); background: var(--card); padding: 20px 22px; margin-bottom: 16px; }
+  .ask > h3 { margin: 0 0 6px; font-size: 16px; }
+  .ask > p.q { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .opt { display: block; margin-bottom: 9px; cursor: pointer; }
+  .opt input { display: none; }
+  .opt .box {
+    border: 1px solid var(--border); border-radius: 9px; padding: 11px 14px;
+    display: flex; gap: 11px; align-items: flex-start; transition: all .13s ease;
+    background: oklch(1 0 0 / 2%);
+  }
+  .opt:hover .box { border-color: var(--border-2); background: oklch(1 0 0 / 4%); }
+  .opt input:checked + .box { border-color: var(--brand); background: oklch(0.8 0.13 205 / 0.09); }
+  .opt .dot {
+    flex: none; width: 15px; height: 15px; border-radius: 50%; margin-top: 3px;
+    border: 1.5px solid var(--border-2); transition: all .13s ease;
+  }
+  .opt input:checked + .box .dot { border-color: var(--brand); border-width: 4.5px; }
+  .opt .lbl { font-size: 14px; font-weight: 500; }
+  .opt .desc { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .btn {
+    font: inherit; font-size: 13.5px; font-weight: 550; cursor: pointer;
+    border-radius: 8px; padding: 9px 16px; border: 1px solid var(--border-2);
+    background: oklch(1 0 0 / 5%); color: var(--fg); transition: all .13s ease;
+  }
+  .btn:hover { background: oklch(1 0 0 / 9%); border-color: var(--brand); }
+  .btn.primary {
+    background: linear-gradient(100deg, var(--brand), var(--brand-2));
+    color: oklch(0.2 0.04 220); border-color: transparent; font-weight: 650;
+  }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.big { padding: 13px 26px; font-size: 15px; }
+  .sent { color: var(--success); font-size: 13px; margin-left: 10px; display: none; }
+  .sent.on { display: inline; }
+
+  .final {
+    text-align: center; padding: 40px 24px; margin-top: 56px;
+    border: 1px solid var(--border-2); border-radius: var(--radius);
+    background: linear-gradient(160deg, oklch(0.8 0.13 205 / 0.07), transparent 65%), var(--card);
+  }
+  .final h2 { justify-content: center; }
+  .final p { margin: 0 auto 22px; color: var(--muted); }
+
+  footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Revonix Studio · implementation plan</p>
+  <h1>Template Library <span class="grad">Pipeline</span></h1>
+  <p class="lede">
+    An admin curates a library of After Effects templates. A user browses it with a real video
+    preview, picks one, and writes an ad brief. The backend then reads that template's metadata
+    and generates <em>everything it asks for</em> — copy, images, and a clip of the template's own
+    length — from a single plan, so the pieces describe the same ad instead of looking randomly assembled.
+  </p>
+</header>
+
+<!-- ============ STATUS ============ -->
+<div class="done">
+  <div class="tick">✓</div>
+  <div>
+    <h3>Phase 0 is already done — <code>refactor/all-phases</code> is ready for <code>main</code></h3>
+    <p>
+      Local and remote both sat at <code>325af3e</code> with zero nexrender code committed. The tangled
+      <code>PROVIDER_AUDIO_BLOCKED</code> fix has been split onto its own branch and merged. Typecheck passes
+      on all three packages; 99 tests green. Nothing has been pushed.
+    </p>
+  </div>
+</div>
+
+<!-- ============ 1. BRANCHES ============ -->
+<section id="branches">
+  <h2><span class="num">01</span> Where the branches stand</h2>
+  <p class="sub">
+    Your working tree held two unrelated workstreams sharing hunks in <code>enums.ts</code> and
+    <code>run-failure.ts</code>. They are now separated.
+  </p>
+
+  <div class="dgm">
+    <pre class="mermaid">
+gitGraph
+  commit id: "e8315f8"
+  commit id: "325af3e"
+  branch audio-fix
+  commit id: "cd985d3"
+  checkout all-phases
+  merge audio-fix id: "7ec2a1f"
+  branch template-library
+  commit id: "f6670f1"
+    </pre>
+  </div>
+  <p class="cap">
+    <code>7ec2a1f</code> is yours to merge into <code>main</code>. <code>f6670f1</code> carries the v1 template
+    work as a labelled baseline. A throwaway snapshot of your original tree sits at <code>1d3bdfc</code>.
+  </p>
+
+  <div class="note">
+    <p>
+      <strong>One thing worth knowing.</strong> <code>fragment-regression.test.ts</code> pins the prompt builders
+      byte-for-byte, and the audio fix adds a brand-safe-speech block to the storyboard prompt, so four golden keys
+      had to move. Rather than trust the blob from your tree, I regenerated the fixture from source with
+      <code>scripts/regen-legacy-fixtures.ts</code> — it came out byte-identical, and only the four
+      <code>storyboard.*</code> keys changed. The <code>video.*</code> keys did not move at all, which independently
+      confirms the <code>audioSafe</code> refactor left the full-mode prompt untouched, exactly as its comment claims.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 2. NOW vs NEXT ============ -->
+<section id="shape">
+  <h2><span class="num">02</span> What changes</h2>
+  <p class="sub">The v1 template code is uncommitted and was never released, so it is free to reshape in place.</p>
+
+  <div class="cmp">
+    <div class="card now">
+      <h3><span class="badge d">v1 · as built</span></h3>
+      <ul>
+        <li>The <strong>end user uploads their own <code>.aep</code></strong>. No library, no admin, no preview.</li>
+        <li>Only <strong>TEXT slots</strong> are filled. IMAGE slots keep the template's placeholder art.</li>
+        <li>Template <strong>duration is ignored</strong> — every run is forced to 15s.</li>
+        <li>Chain is <code>video → template_fill → template_render</code>. The copy is written from the raw prompt, after the clip already cost money.</li>
+        <li>Nothing tells the user what a template will look like before they commit to it.</li>
+      </ul>
+    </div>
+    <div class="card next">
+      <h3><span class="badge ok">v2 · target</span></h3>
+      <ul>
+        <li>An <strong>admin curates a global library</strong>; users pick from it.</li>
+        <li>Every template carries an <strong>auto-generated preview video</strong> and poster frame.</li>
+        <li>A <strong><code>template_plan</code> step runs first</strong> and drives every downstream agent.</li>
+        <li><strong>Content IMAGE slots are generated</strong> with gpt-image-2, conditioned on the product sheet and the storyboard look. Logos and backgrounds are left alone.</li>
+        <li>The clip <strong>matches the template's own composition duration</strong>, capped at 15s.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. CONSTRAINTS ============ -->
+<section id="constraints">
+  <h2><span class="num">03</span> Two facts that constrain everything</h2>
+  <p class="sub">Both were established during research. Both change the design rather than decorate it.</p>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3 style="margin-top:0">Seedance durations are a discrete set</h3>
+      <p style="color:var(--muted);font-size:14px">
+        Allowed: <code>4, 5, 6, 8, 10, 12, 15</code> seconds. Not a range — <code>7</code>, <code>9</code>,
+        <code>11</code> are rejected.
+      </p>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:0">
+        So "match the template" means snapping <strong>up</strong>, never down. A clip shorter than its layer
+        ends on a freeze frame; a longer one is simply trimmed by After Effects.
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Nexrender has no thumbnails, no custom metadata</h3>
+      <p style="color:var(--muted);font-size:14px">
+        There is no template-thumbnail endpoint and no way to attach our own fields to a template.
+      </p>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:0">
+        But a render job accepts <code>preview: true</code> — a fast, cheap, low-res render, mutually exclusive
+        with <code>settings</code>. That is the <em>only</em> preview mechanism, so we generate previews ourselves
+        and own all template metadata in our own table.
+      </p>
+    </div>
+  </div>
+
+  <h3>Duration snapping, worked through</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th class="mono">comp duration</th><th class="mono">clip generated</th><th class="mono">comp trimmed?</th><th>result</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">3.0s</td><td class="mono">4s</td><td class="mono">no</td><td>4s is Seedance's floor; AE trims 1s</td></tr>
+        <tr><td class="mono">7.0s</td><td class="mono">8s</td><td class="mono">no</td><td>snap up, AE trims the surplus second</td></tr>
+        <tr><td class="mono">10.0s</td><td class="mono">10s</td><td class="mono">no</td><td>exact hit</td></tr>
+        <tr><td class="mono">12.5s</td><td class="mono">15s</td><td class="mono">no</td><td>snap up past 12 → 15</td></tr>
+        <tr><td class="mono">25.0s</td><td class="mono">15s</td><td class="mono"><span class="badge w">yes → 15s</span></td><td><code>nx:comp-duration-set</code> cuts the comp; the designer's tail past 15s is lost</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 4. RUN CHAIN ============ -->
+<section id="chain">
+  <h2><span class="num">04</span> The run chain</h2>
+  <p class="sub">Eight steps. The ordering is deliberate, not incidental.</p>
+
+  <div class="dgm">
+    <pre class="mermaid">
+flowchart TD
+  A["template_plan<br/><small>one plan, drives everything</small>"]:::new
+  subgraph REF ["parallel reference phase (existing)"]
+    direction LR
+    B["product_sheet"]:::old
+    C["person_sheet"]:::old
+  end
+  D["storyboard"]:::old
+  E["template_fill<br/><small>copy, small model</small>"]:::mod
+  F["template_images<br/><small>gpt-image-2, content slots only</small>"]:::new
+  G["video<br/><small>Seedance, clipSeconds</small>"]:::old
+  H["template_render<br/><small>Nexrender composite</small>"]:::mod
+  I(["templated_video"]):::done
+
+  A --> REF --> D --> E --> F --> G --> H --> I
+
+  classDef new fill:#123039,stroke:#5cd3e8,stroke-width:2px,color:#eef5f7
+  classDef mod fill:#1b2733,stroke:#6f9ff0,stroke-width:1.5px,color:#eef5f7
+  classDef old fill:#1a1f23,stroke:#3d474e,color:#aeb8bd
+  classDef done fill:#102b22,stroke:#52dfa0,stroke-width:2px,color:#dff7ec
+    </pre>
+  </div>
+  <p class="cap">
+    <span class="badge b">new step</span>
+    <span class="badge new">reshaped</span>
+    <span class="badge">unchanged</span>
+  </p>
+
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card">
+      <h3 style="margin-top:0;font-size:14.5px">Why <code>template_plan</code> is first</h3>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Its per-slot output shapes every downstream agent. This is the "metadata and prompts for every agent,
+        according to the template" requirement: one plan, read by the storyboard, the copywriter, the image
+        agent and the video agent.
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;font-size:14.5px">Why <code>template_fill</code> is late</h3>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Placed after the storyboard, the copy can draw on the product brief and the scene transcript instead of
+        guessing from the raw prompt. It is cheap and re-runnable, and template validity was already proven at
+        run creation, so there is nothing left to fail fast on.
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;font-size:14.5px">Why <code>video</code> is second-to-last</h3>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Seedance is the most expensive call in the pipeline, so it belongs as late as possible. Everything that
+        can fail cheaply fails before it.
+      </p>
+    </div>
+  </div>
+
+  <h3>The orchestrator refactor this needs</h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    The parallel reference phase is hard-wired to <code>currentStep === null</code>, so any step placed before it
+    creates a "re-enter the parallel phase from a non-null step" problem. Rather than special-case that, make
+    <code>person_sheet</code>-as-a-forward-step <em>mean</em> the reference phase:
+  </p>
+<pre><code><span class="c-key">const</span> step = run.currentStep === <span class="c-key">null</span>
+  ? (run.pipeline === <span class="c-str">"template"</span> ? <span class="c-str">"template_plan"</span>
+     : run.adType === <span class="c-str">"service"</span>  ? <span class="c-str">"creative_brief"</span>
+     : <span class="c-str">"person_sheet"</span>)
+  : <span class="c-fn">nextStep</span>(run.currentStep, personUploaded, run.criticEnabled, run.duration, run.pipeline);
+
+<span class="c-key">if</span> (step === <span class="c-str">"person_sheet"</span>) <span class="c-key">await</span> <span class="c-fn">runReferencePhase</span>(ctx, tag);  <span class="c-com">// product ∥ person</span>
+<span class="c-key">else</span>                         <span class="c-key">await</span> <span class="c-fn">executeStep</span>(ctx, step);</code></pre>
+  <p style="color:var(--muted);font-size:14px">
+    Safe because <code>person_sheet</code> is only ever reachable as a <em>forward</em> step at the reference-phase
+    entry. <code>product_sheet</code> is never a forward <code>currentStep</code> at all — it is generated inside
+    <code>runReferencePhase</code> and checkpointed as <code>person_sheet</code>. The refactor also deletes the
+    existing null-branch duplication, so it is a net simplification.
+  </p>
+</section>
+
+<!-- ============ 5. FAILURE MATRIX ============ -->
+<section id="failure">
+  <h2><span class="num">05</span> Failure &amp; recovery</h2>
+  <p class="sub">The single most dangerous thing in this plan lives here.</p>
+
+  <div class="note danger">
+    <p>
+      <strong><code>regenerate-template</code> must be rewritten, not reused.</strong> v1 rewinds
+      <code>currentStep</code> to <code>"video"</code> and re-enters <code>fill → render</code>. Under the new chain
+      <code>video → template_render</code>, that same rewind would <strong>re-run the paid Seedance call</strong>
+      on every single render retry.
+    </p>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>step</th><th class="mono">error code</th><th>disposition</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">template_plan</td><td class="mono">TEMPLATE_PLAN_FAILED</td><td>hard fail — nothing downstream ran</td></tr>
+        <tr><td class="mono">template_fill</td><td class="mono">TEMPLATE_FILL_FAILED</td><td>hard fail — images and video had not run</td></tr>
+        <tr><td class="mono">template_images</td><td class="mono">—</td><td><span class="badge ok">never hard-fails</span> a failed slot falls back to the template's own art</td></tr>
+        <tr><td class="mono">video</td><td class="mono">VIDEO_*</td><td>soft-fail to <code>awaiting_regen</code> via the existing ladder</td></tr>
+        <tr><td class="mono">template_render</td><td class="mono">TEMPLATE_RENDER_FAILED</td><td>hard fail — recovery re-runs the render only</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Rewind checkpoints, chosen by error code</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th class="mono">errorCode</th><th class="mono">rewind currentStep to</th><th>re-runs</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">TEMPLATE_PLAN_FAILED</td><td class="mono">null</td><td>everything</td></tr>
+        <tr><td class="mono">TEMPLATE_FILL_FAILED</td><td class="mono">"storyboard"</td><td>fill → images → video → render</td></tr>
+        <tr><td class="mono">TEMPLATE_RENDER_FAILED</td><td class="mono">"video"</td><td><strong>render only</strong> — no re-paid video</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--muted);font-size:14px">
+    For the render-only case, also clear <code>nexrenderJobId</code> and delete any partial <code>templated_video</code>
+    row, so the retry submits a fresh job and the newest output surfaces.
+  </p>
+
+  <p style="color:var(--muted);font-size:14px">
+    Partial image failure is non-fatal <em>by design</em>: one bad image must not destroy a run that has already
+    paid for a video.
+  </p>
+</section>
+
+<!-- ============ 6. TEMPLATE LIFECYCLE ============ -->
+<section id="lifecycle">
+  <h2><span class="num">06</span> The template lifecycle</h2>
+  <p class="sub">
+    Templates are not runs, so <code>driveRun</code> does not apply. They get their own worker, modelled on the
+    existing one: poll by status, claim by DB lock with a stale timeout, advance one stage, release.
+  </p>
+
+  <div class="dgm">
+    <pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> registering: "admin uploads .aep/.zip/.mogrt"
+  registering --> introspecting: "registered + bytes uploaded"
+  introspecting --> previewing: "v3 status = uploaded<br/>structure + metadata built"
+  previewing --> ready: "preview rendered,<br/>re-hosted, poster extracted"
+  ready --> [*]: "visible in the picker"
+
+  registering --> failed
+  introspecting --> failed: "no VIDEO slot,<br/>or more than one"
+  previewing --> failed: "render failed or timed out"
+  failed --> introspecting: "admin retry"
+  failed --> previewing: "admin regenerates preview"
+    </pre>
+  </div>
+  <p class="cap">
+    <code>preview_job_id</code> is persisted <em>before</em> polling, so a crashed process never resubmits a paid render —
+    exactly as <code>runs.nexrender_job_id</code> already does for <code>applyTemplate</code>.
+  </p>
+
+  <div class="note">
+    <p>
+      <strong>Previews are cheap and automatic.</strong> We submit one <code>preview: true</code> job with
+      <em>no assets</em>, so Nexrender renders the template's own placeholder content. That mp4 is re-hosted to
+      Supabase and a poster frame is pulled with the ffmpeg already wired up in <code>lib/video/merge.ts</code>.
+      If a template's placeholders are grey boxes and Lorem Ipsum, the admin can upload a hand-picked preview instead.
+    </p>
+  </div>
+
+  <h3>Why previews cannot be <code>assets</code> rows</h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    <code>assets.run_id</code> is <code>NOT NULL</code> with an FK to <code>runs</code>. A template preview belongs to no
+    run. So previews get their own storage prefix, <code>templates/{id}/…</code>, and their URLs live as columns on the
+    template row.
+  </p>
+</section>
+
+<!-- ============ 7. DATA MODEL ============ -->
+<section id="data">
+  <h2><span class="num">07</span> The <code>templates</code> table</h2>
+  <p class="sub">Global scope for now; per-user when F8 auth lands.</p>
+
+<pre><code><span class="c-fn">templates</span>
+  id                    <span class="c-key">uuid</span> pk           <span class="c-com">-- clients pick by THIS, never the nexrender id</span>
+  nexrender_template_id <span class="c-key">text</span> not null
+  content_hash          <span class="c-key">text</span> not null     <span class="c-com">-- sha256 of bytes; dedupes re-uploads</span>
+  display_name          <span class="c-key">text</span> not null
+  description           <span class="c-key">text</span>
+  tags                  <span class="c-key">text[]</span>
+  status                <span class="c-key">text</span>              <span class="c-com">-- registering|introspecting|previewing|ready|failed</span>
+  structure             <span class="c-key">jsonb</span>             <span class="c-com">-- slots, comps, dims</span>
+  metadata              <span class="c-key">jsonb</span>             <span class="c-com">-- durationSec, frameRate, aspectRatio, clipSeconds, slotCounts</span>
+  preview_video_url     <span class="c-key">text</span>
+  preview_poster_url    <span class="c-key">text</span>
+  preview_job_id        <span class="c-key">text</span>              <span class="c-com">-- persisted before polling → idempotent resume</span>
+  preview_source        <span class="c-key">text</span>              <span class="c-com">-- 'auto' | 'admin'</span>
+  use_count             <span class="c-key">integer</span>
+  locked_at, locked_by                    <span class="c-com">-- mirrors runs, for the preview worker</span>
+  archived_at           <span class="c-key">timestamptz</span>       <span class="c-com">-- soft delete</span></code></pre>
+
+  <p style="color:var(--muted);font-size:14px;margin-top:16px">
+    <strong style="color:var(--fg)">Indexes.</strong> <code>status</code> (the worker polls it); a <em>partial unique</em>
+    index on <code>content_hash WHERE archived_at IS NULL</code> so archiving frees the hash for re-upload; a partial index on
+    <code>status='ready' AND archived_at IS NULL</code> for the hot public list; a GIN index on <code>tags</code>.
+    <code>status</code> is <code>text</code> + CHECK, not a pg enum — matching the existing convention for
+    <code>adType</code> and <code>errorCode</code>, so lifecycle values never need a migration.
+  </p>
+
+  <h3>Migration mechanics</h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    <code>0023_workable_loki.sql</code> is the only template migration, it is uncommitted and unreleased, and v2 reshapes
+    the very columns it introduced. So delete it with its journal entry and snapshot, regenerate a single fresh
+    <code>0023</code>, and <code>db:reset</code> the local dev DB. Safe here, and already the established practice on this branch.
+  </p>
+</section>
+
+<!-- ============ 8. SLOT MODEL ============ -->
+<section id="slots">
+  <h2><span class="num">08</span> The Nexrender slot model</h2>
+  <p class="sub">What we currently extract, what we throw away, and what we do with each kind.</p>
+
+  <div class="note warn">
+    <p>
+      <strong>Two live bugs in the current introspection.</strong> It classifies <em>every</em> placeholder precomp as
+      <code>VIDEO</code>, so image placeholders are silently misread. And it drops <code>duration</code>,
+      <code>frame_rate</code> and per-layer geometry on the floor — all three are already in the v3 responses today.
+    </p>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>slot</th><th>detected from</th><th>filled with</th><th>status</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">VIDEO</td>
+          <td><code>av/file</code> with a video extension, or a placeholder precomp</td>
+          <td>the Seedance clip, at <code>clipSeconds</code></td>
+          <td><span class="badge ok">exactly one, enforced at upload</span></td>
+        </tr>
+        <tr>
+          <td class="mono">IMAGE<br><span style="font-size:11px;color:var(--muted)">content</span></td>
+          <td><code>av/file</code> with an image extension, or a precomp whose inner layer is an image</td>
+          <td>gpt-image-2, from the plan's subject + slot geometry</td>
+          <td><span class="badge b">new in v2</span></td>
+        </tr>
+        <tr>
+          <td class="mono">IMAGE<br><span style="font-size:11px;color:var(--muted)">brand / decorative</span></td>
+          <td>same, then classified out (see below)</td>
+          <td>nothing — template's own logo, background, texture</td>
+          <td><span class="badge w">never AI-filled</span></td>
+        </tr>
+        <tr>
+          <td class="mono">TEXT</td>
+          <td><code>text</code> layer — its <em>name</em> is its current words</td>
+          <td>the small model, within a derived <code>charBudget</code></td>
+          <td><span class="badge new">reshaped</span></td>
+        </tr>
+        <tr>
+          <td class="mono">AUDIO</td>
+          <td><code>av/file</code> with an audio extension</td>
+          <td>nothing — template's own default</td>
+          <td><span class="badge">v1 scope</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Which IMAGE slots actually get filled <span class="badge b">revised</span></h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    Not all of them. A generated product photo dropped into a logo layer is wrong every time, no matter how well the
+    library is curated. So every IMAGE slot is classified first, and only <strong style="color:var(--fg)">content</strong>
+    slots are generated.
+  </p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>class</th><th>signals</th><th>action</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono" style="color:var(--success)">content</td>
+          <td>name matches <code>photo|image|product|hero|shot|still|media|feature</code>, or the LLM judges it a photographic content slot; sensible area (roughly 2–95% of the comp)</td>
+          <td><strong>generate</strong> with gpt-image-2</td>
+        </tr>
+        <tr>
+          <td class="mono" style="color:var(--warning)">brand</td>
+          <td>name matches <code>logo|brandmark|wordmark|icon|badge</code>, or the slot is tiny (≲2% of comp area)</td>
+          <td><strong>never</strong> generate — hard rule, the LLM cannot override it</td>
+        </tr>
+        <tr>
+          <td class="mono" style="color:var(--muted)">decorative</td>
+          <td>name matches <code>bg|background|texture|gradient|overlay|shadow|vignette|grain|mask|frame|pattern</code>, or the slot is full-bleed (≳95% of comp area) with no content-ish name</td>
+          <td><strong>never</strong> generate — keep the designer's art</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="color:var(--muted);font-size:14.5px;margin-top:16px">
+    <strong style="color:var(--fg)">The deterministic heuristic runs first and is a guard, not a suggestion.</strong>
+    Anything it calls <code>brand</code> or <code>decorative</code> is off the table. Only genuinely ambiguous slots —
+    the ones named <code>PH_2</code> or <code>Media_3</code>, which is most real templates — get passed to
+    <code>template_plan</code>, where the model sees the slot's name, pixel size and area ratio and decides whether it is
+    a photographic content slot and, if so, what it should depict.
+  </p>
+  <p style="color:var(--muted);font-size:14.5px">
+    This costs the admin nothing at upload time, which is what you wanted. The admin console still <em>shows</em> the
+    verdict per slot in the table it already renders, with an override toggle for the rare template that defeats both the
+    heuristic and the model. Skipped slots reuse the same code path as a failed slot: the template keeps its own asset.
+  </p>
+
+  <h3>Asset order is load-bearing</h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    Nexrender applies job assets in array order. Each <code>nx:layer-autoscale</code> must be pushed <em>after</em> the
+    media asset it scales, or it scales the placeholder that is about to be replaced.
+  </p>
+
+  <h3>A caveat that bites</h3>
+  <p style="color:var(--muted);font-size:14.5px">
+    <code>IMAGE_SIZE_FALLBACK</code> in <code>providers/openai/constants.ts</code> is a lookup keyed by four hardcoded 4K
+    sizes. An arbitrary per-slot size has <strong>no fallback entry</strong>, so a size-attributable failure would simply
+    throw. We add a generic shrink tier: when the map has no entry, retry at
+    <code>round16(w × 0.7) × round16(h × 0.7)</code>. Small, isolated, and it hardens the existing paths too.
+  </p>
+</section>
+
+<!-- ============ 9. FRONTEND ============ -->
+<section id="frontend">
+  <h2><span class="num">09</span> Frontend surfaces</h2>
+  <p class="sub">Cyan/dark, Geist + Space Grotesk, "chat" not "run". Three new surfaces.</p>
+
+  <div class="grid g3">
+    <div class="card">
+      <h3 style="margin-top:0;font-size:15px">Template picker <span class="badge b">/studio/templates</span></h3>
+      <p style="color:var(--muted);font-size:13.5px">
+        A grid of cards. Each shows a muted, looping preview that holds its poster frame until the card is hovered
+        <em>and</em> in view. <code>useReducedMotion()</code> disables autoplay outright, and a shared counter caps how
+        many previews decode at once so a long scroll doesn't melt the tab.
+      </p>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Name, duration chip, aspect chip, slot summary (<code>1 video · 3 images · 4 text</code>), tags. Filter by
+        aspect and tags; sort by popular, newest, or name.
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;font-size:15px">Brief <span class="badge b">/studio/templates/[id]/brief</span></h3>
+      <p style="color:var(--muted);font-size:13.5px">
+        A Server Component reading <code>templateId</code> from the URL path, so the selection survives refresh, SSR and
+        sidebar tab switches with no localStorage hydration flash.
+      </p>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Reuses <code>create-run-form.tsx</code>. Aspect ratio becomes a read-only
+        "<code>16:9 · from template</code>" row.
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;font-size:15px">Admin console <span class="badge w">key-gated</span></h3>
+      <p style="color:var(--muted);font-size:13.5px">
+        Upload via <code>XMLHttpRequest</code>, not <code>fetch</code> — <code>fetch</code> cannot report upload progress
+        and these are 200MB files.
+      </p>
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:0">
+        Status pill, preview player, introspected slot table, inline name/tag editing, regenerate preview, archive.
+        Polls every 3s while any row is non-terminal.
+      </p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <strong>The admin gate is a soft guard, not real auth.</strong> F8 is not started and the API is otherwise
+      unauthenticated. <code>ADMIN_API_KEY</code> + an <code>x-admin-key</code> header stops a stranger who finds the URL
+      from burning Nexrender credits. It fails closed in <em>every</em> environment when the key is unset, because a
+      misread <code>NODE_ENV</code> in a deploy would silently open template upload to the internet. When F8 lands, only the
+      middleware body changes.
+    </p>
+  </div>
+
+  <p style="color:var(--muted);font-size:14px">
+    Three shadcn primitives are missing and must be added: <code>input</code>, <code>progress</code>, <code>table</code>.
+    Do <strong>not</strong> add <code>select</code> — the codebase deliberately uses themed <code>DropdownMenu</code>
+    instead of native selects.
+  </p>
+</section>
+
+<!-- ============ 10. DECISIONS ============ -->
+<section id="decisions">
+  <h2><span class="num">10</span> Decisions already locked</h2>
+  <p class="sub">Answered by you earlier in the session. Listed so they are annotatable, not re-litigated.</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>question</th><th>decision</th></tr></thead>
+      <tbody>
+        <tr><td>Audio fix</td><td>Split onto its own branch, merged into <code>all-phases</code> before <code>main</code> <span class="badge ok">done</span></td></tr>
+        <tr><td>Video slots</td><td>Admin uploads single-video-slot templates only; validated at upload</td></tr>
+        <tr><td>Clip length</td><td>Follows the template, capped at 15s</td></tr>
+        <tr><td>Over-15s templates</td><td>Trim the composition with <code>nx:comp-duration-set</code></td></tr>
+        <tr><td>Admin gate</td><td><code>ADMIN_API_KEY</code> + <code>x-admin-key</code> header middleware</td></tr>
+        <tr><td>Image slots</td><td>Generate only the <em>content</em> IMAGE slots. Logos, backgrounds and textures are classified out and never AI-filled <span class="badge b">revised in review</span></td></tr>
+        <tr><td>Previews</td><td>Auto <code>preview: true</code> render, with an admin-uploaded override</td></tr>
+        <tr><td>Text model</td><td>New <code>OPENROUTER_SMALL_MODEL</code>, default <code>anthropic/claude-haiku-4.5</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 11. SKILLS ============ -->
+<section id="skills">
+  <h2><span class="num">11</span> Skills strategy</h2>
+  <p class="sub">
+    Durable knowledge moves out of memory files and into skills, authored with <code>skill-creator</code>.
+    Ten memory files get deleted as superseded.
+  </p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>skill</th><th>kind</th><th>what it holds</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">seedance-prompt</td><td><span class="badge w">rename fix</span></td>
+          <td>Directory says <code>seedance-prompt</code>, frontmatter says <code>name: sd2-pe</code>. The Skill tool and skill-creator's tooling disagree about what it is called.</td>
+        </tr>
+        <tr>
+          <td class="mono">nexrender-templates</td><td><span class="badge b">new</span></td>
+          <td>Cloud REST surface, the presigned-upload header trap (<code>X-Amz-SignedHeaders=host</code> → only <code>Content-Type</code>, else GCS <code>400 MalformedSecurityHeader</code>), AE has no Linux build, outputs expire ~14d, the <code>nx:*</code> functions, <code>preview: true</code>. Absorbs all three <code>plainly-*</code> memories.</td>
+        </tr>
+        <tr>
+          <td class="mono">ugc-pipeline-architecture</td><td><span class="badge b">new</span></td>
+          <td>Adding a step end to end: shared Zod enum → pg enum → <code>plan.ts</code> → <code>executeStep</code> → <code>mappers.skippedSteps</code> → <code>run-meta.ts</code>. Worker claiming, idempotent resume, soft-fail vs hard fail.</td>
+        </tr>
+        <tr>
+          <td class="mono">ugc-smoke-testing</td><td><span class="badge b">new</span></td>
+          <td>"Unit tests are the floor, not the bar." The psql queries, the restart-after-migration rule, and the trap that a running <code>tsx watch</code> hot-reloads code but <em>not</em> env vars — so a stub override silently hits the real paid API.</td>
+        </tr>
+        <tr>
+          <td class="mono">seedance-2.0-prompting</td><td><span class="badge new">extend</span></td>
+          <td>More context makes the video worse. Fix realism in the still, not the video prompt. Naming a failure summons it. Audio moderation, voice cloning is impossible, the 30-min timeout, WebP → JPEG at the boundary.</td>
+        </tr>
+        <tr>
+          <td class="mono">gpt-image-2-prompting</td><td><span class="badge new">extend</span></td>
+          <td>Dims divisible by 16, ≤8.29 MP, <code>input_fidelity</code> is a hard 400. Skin and redness calibration. The new template-image-slot use case.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 12. BUILD ORDER ============ -->
+<section id="order">
+  <h2><span class="num">12</span> Build order</h2>
+  <p class="sub">Ascending risk. Each step independently verifiable.</p>
+
+  <div class="card">
+    <ol class="steps">
+      <li class="ok"><strong>Phase 0 branch split</strong> — done. <code>all-phases</code> ready for <code>main</code>.</li>
+      <li><strong>Shared enums and DTOs</strong>, <code>schema.ts</code>, regenerated <code>0023</code>, <code>db:reset</code>.</li>
+      <li><strong>Introspection enrichment + <code>geometry.ts</code> + the data-bag probe</strong>, with unit tests. No runtime risk.</li>
+      <li><strong><code>templates</code> CRUD</strong> — admin routes, <code>adminAuth</code>, storage helpers, public DTO. No pipeline changes yet.</li>
+      <li><strong>Preview worker</strong> + <code>extractPoster</code> + the provider <code>preview</code> flag. Validate against the stub.</li>
+      <li><strong>Small-model backend</strong>, <code>template/plan</code>, reshaped <code>fill-text</code>.</li>
+      <li><strong><code>template/images</code></strong> + the generic image-shrink fallback.</li>
+      <li><strong>Render extensions</strong> — pure <code>buildRenderInput</code>, autoscale + comp-duration mapping, with tests.</li>
+      <li><strong>Orchestrator dispatch refactor</strong>, <code>nextStep</code> chain, <code>mappers.ts</code>, rewritten <code>regenerate-template</code>, <code>POST /runs</code> gate.</li>
+      <li><strong>Flip <code>TEMPLATE_STEP_ENABLED</code></strong>; build the web picker and admin console.</li>
+      <li><strong>Author the skills.</strong></li>
+    </ol>
+  </div>
+
+  <div class="note">
+    <p>
+      <strong>Verification is not the test suite.</strong> This project has a history of green tests hiding runtime
+      failures. The free path (<code>NEXRENDER_STUB=true</code>) exercises the whole admin → introspect → preview state
+      machine at zero cost. The paid path runs once, deliberately, and is inspected in psql — confirming the clip's
+      duration really equals <code>clipSeconds</code>, that every image slot got a generated image matching the ad, and
+      that the copy reads as deliberate rather than as filled-in Lorem Ipsum.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 13. OPEN ITEMS ============ -->
+<section id="open">
+  <h2><span class="num">13</span> Open items <span class="badge w">need your answer</span></h2>
+  <p class="sub">Two things I could not settle from the codebase or the docs alone. The third is now closed.</p>
+
+  <div class="ask" data-lavish-question="seedance-durations">
+    <h3>1. The Seedance duration set is unverified</h3>
+    <p class="q">
+      <code>{4, 5, 6, 8, 10, 12, 15}</code> comes from two independent secondary sources. The official BytePlus
+      parameter table would not render when fetched. The whole <code>snapUp</code> design rests on it.
+    </p>
+    <form onsubmit="return lq(event,'seedance-durations','Seedance duration verification')">
+      <label class="opt"><input type="radio" name="d1" value="assert-and-snap">
+        <span class="box"><span class="dot"></span><span><span class="lbl">Trust it, but assert + snap in the provider</span>
+        <span class="desc">Ship the set, and have byteplus/index.ts snap any out-of-set value rather than letting ModelArk reject a request mid-run. Zero cost.</span></span></span></label>
+      <label class="opt"><input type="radio" name="d1" value="probe-live">
+        <span class="box"><span class="dot"></span><span><span class="lbl">Probe the live API first</span>
+        <span class="desc">I submit a few cheap test generations at 7s and 9s to see what is actually rejected. Costs a little real money.</span></span></span></label>
+      <label class="opt"><input type="radio" name="d1" value="user-confirms">
+        <span class="box"><span class="dot"></span><span><span class="lbl">You confirm from the Ark console</span>
+        <span class="desc">You have the dashboard open; paste me the allowed values and I'll hardcode them.</span></span></span></label>
+      <button class="btn" type="submit">Queue this answer</button><span class="sent" id="s-d1">queued ✓</span>
+    </form>
+  </div>
+
+  <div class="ask" data-lavish-question="aep-probe">
+    <h3>2. The <code>data</code> bag needs a real <code>.aep</code></h3>
+    <p class="q">
+      Nexrender's v3 layers response has an opaque <code>data</code> object (<code>additionalProperties: true</code>).
+      Fonts and layer timing may or may not live in it. The probe is easy to write; running it needs a real template file.
+    </p>
+    <form onsubmit="return lq(event,'aep-probe','.aep probe')">
+      <label class="opt"><input type="radio" name="d2" value="have-aep">
+        <span class="box"><span class="dot"></span><span><span class="lbl">I have an .aep — I'll point you at it</span>
+        <span class="desc">Best outcome. We learn the real key names before writing any font-dependent code.</span></span></span></label>
+      <label class="opt"><input type="radio" name="d2" value="build-only">
+        <span class="box"><span class="dot"></span><span><span class="lbl">Build the probe, I'll run it later</span>
+        <span class="desc">I write the multi-path probe + debug logging and never send `font`. The designer's typography survives untouched, which is arguably the better outcome regardless.</span></span></span></label>
+      <button class="btn" type="submit">Queue this answer</button><span class="sent" id="s-d2">queued ✓</span>
+    </form>
+  </div>
+
+  <div class="ask" style="border-color:oklch(0.75 0.15 155 / 0.35)">
+    <h3>3. Image slots <span class="badge ok">resolved in review</span></h3>
+    <p class="q" style="margin-bottom:0">
+      You called it: only the main useful template images get generated, not logos or backgrounds. The design now
+      classifies every IMAGE slot as <code>content</code> / <code>brand</code> / <code>decorative</code> before generating —
+      see <a href="#slots" style="color:var(--brand)">section 08</a>. The heuristic is a hard guard; the plan agent only
+      arbitrates the genuinely ambiguous slots. No extra admin step.
+    </p>
+  </div>
+</section>
+
+<!-- ============ FINAL ============ -->
+<div class="final">
+  <h2 style="border:0">Ready to execute?</h2>
+  <p>
+    Phase 0 is already on disk. Answering the two remaining open items above is optional — I have a sensible default for each.
+    Next up is step 2: shared enums, schema, the regenerated migration, and a local <code>db:reset</code>.
+  </p>
+  <button class="btn primary big" data-lavish-action
+    onclick="window.lavish?.queuePrompt('Approved. Execute the Template Library Pipeline plan starting at build step 2 (shared enums + DTOs + schema.ts + regenerated 0023 + db:reset), then continue through the build order, pausing after each step for review.', {tag:'approve', text:'Execute the plan'}); window.lavish?.sendQueuedPrompts?.();">
+    Execute the plan →
+  </button>
+  <button class="btn big" data-lavish-action style="margin-left:10px"
+    onclick="window.lavish?.queuePrompt('Hold on the plan — I have changes. See my annotations.', {tag:'hold', text:'Hold, I have changes'}); window.lavish?.sendQueuedPrompts?.();">
+    Hold, I have changes
+  </button>
+</div>
+
+<footer>
+  Verified against the codebase at <code>f6670f1</code> · line refs from <code>orchestrator.ts</code>,
+  <code>plan.ts</code>, <code>introspect.ts</code>, <code>constants.ts</code>, <code>schema.ts</code> ·
+  Nexrender + Seedance facts from vendor docs, with the duration set flagged as unverified above.
+</footer>
+
+</div>
+
+<script>
+  // Queue a single prompt per question, only on explicit submit.
+  function lq(ev, key, label) {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const fd = new FormData(form);
+    const answer = [...fd.values()][0];
+    if (!answer) return false;
+    window.lavish?.queuePrompt(
+      'For "' + label + '", I choose: ' + answer,
+      { tag: 'choice', text: label + ': ' + answer, element: form, queueKey: key, data: { question: key, answer } }
+    );
+    const s = document.getElementById('s-' + form.querySelector('input').name);
+    if (s) s.classList.add('on');
+    return false;
+  }
+</script>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "strict",
+    gitGraph: { mainBranchName: "all-phases", showCommitLabel: true },
+    themeVariables: {
+      background:            "#12171a",
+      fontFamily:            "Geist, system-ui, sans-serif",
+      fontSize:              "14px",
+      primaryColor:          "#16303a",
+      primaryTextColor:      "#eef5f7",
+      primaryBorderColor:    "#5cd3e8",
+      secondaryColor:        "#1b2733",
+      tertiaryColor:         "#1a1f23",
+      lineColor:             "#5b686f",
+      textColor:             "#dfe6e9",
+      mainBkg:               "#1a1f23",
+      nodeBorder:            "#4a565d",
+      clusterBkg:            "#151a1e",
+      clusterBorder:         "#3a444a",
+      titleColor:            "#5cd3e8",
+      edgeLabelBackground:   "#12171a",
+      // gitGraph
+      git0: "#5cd3e8", git1: "#f0c15c", git2: "#6f9ff0",
+      gitBranchLabel0: "#0d1114", gitBranchLabel1: "#0d1114", gitBranchLabel2: "#0d1114",
+      commitLabelColor: "#dfe6e9", commitLabelBackground: "#1a1f23",
+      // stateDiagram
+      labelColor: "#eef5f7",
+      transitionColor: "#5b686f", transitionLabelColor: "#aeb8bd",
+      stateBkg: "#1a1f23", stateBorder: "#4a565d",
+      altBackground: "#151a1e", compositeBackground: "#151a1e",
+      specialStateColor: "#5cd3e8"
+    }
+  });
+</script>
+</body>
+</html>

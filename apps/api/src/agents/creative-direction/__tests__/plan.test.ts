@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { Step } from "@ugc/shared";
 
 import {
   type AssetCtx,
@@ -90,29 +91,65 @@ describe("nextStep unchanged for the post-reference sequence", () => {
   });
 });
 
-describe("nextStep — template pipeline branching (video → template_fill → template_render)", () => {
-  it("15s video: complete for the normal video pipeline (default / explicit)", () => {
+// The v2 chain, end to end:
+//   template_plan → [product_sheet ∥ person_sheet] → storyboard
+//     → template_fill → template_images → video → template_render
+describe("nextStep — template pipeline chain", () => {
+  it("template_plan hands off to the parallel reference phase", () => {
+    // `driveRun` treats a forward `person_sheet` as the product ∥ person phase.
+    expect(nextStep("template_plan", false, false, "15s", "template")).toBe(
+      "person_sheet",
+    );
+  });
+
+  it("storyboard → template_fill, so the copy sees the product brief + script", () => {
+    expect(nextStep("storyboard", false, false, "15s", "template")).toBe(
+      "template_fill",
+    );
+    // ...and still → video on the normal pipeline.
+    expect(nextStep("storyboard", false, false, "15s", "video")).toBe("video");
+  });
+
+  it("storyboard_inspection also routes to template_fill on a template run", () => {
+    // Template runs force criticEnabled:false so this never fires in practice,
+    // but the two flags must stay independent.
+    expect(
+      nextStep("storyboard_inspection", false, true, "15s", "template"),
+    ).toBe("template_fill");
+    expect(nextStep("storyboard_inspection", false, true, "15s", "video")).toBe(
+      "video",
+    );
+  });
+
+  it("template_fill → template_images → video (Seedance last, it costs most)", () => {
+    expect(nextStep("template_fill", false, false, "15s", "template")).toBe(
+      "template_images",
+    );
+    expect(nextStep("template_images", false, false, "15s", "template")).toBe(
+      "video",
+    );
+  });
+
+  it("video → template_render on a template run, terminal on a normal one", () => {
+    expect(nextStep("video", false, false, "15s", "template")).toBe(
+      "template_render",
+    );
     expect(nextStep("video", false, false, "15s")).toBeNull();
     expect(nextStep("video", false, false, "15s", "video")).toBeNull();
   });
-  it("15s video: a template-pipeline run continues into template_fill", () => {
-    expect(nextStep("video", false, false, "15s", "template")).toBe(
-      "template_fill",
-    );
-  });
-  it("template_fill always continues into template_render", () => {
-    expect(nextStep("template_fill", false, false, "15s", "template")).toBe(
-      "template_render",
-    );
-  });
+
   it("template_render is always terminal", () => {
-    expect(nextStep("template_render", false, false, "15s", "template")).toBeNull();
+    expect(
+      nextStep("template_render", false, false, "15s", "template"),
+    ).toBeNull();
   });
-  it("multi merge: always complete — the template pipeline is 15s-only in v1", () => {
+
+  it("multi merge: always complete — the template pipeline is single-clip", () => {
     expect(nextStep("merge", false, false, "60s")).toBeNull();
     expect(nextStep("merge", false, false, "60s", "video")).toBeNull();
     expect(nextStep("merge", false, false, "60s", "template")).toBeNull();
   });
+
   it("segment_video still → merge regardless of pipeline", () => {
     expect(nextStep("segment_video", false, false, "60s", "template")).toBe(
       "merge",
@@ -120,6 +157,38 @@ describe("nextStep — template pipeline branching (video → template_fill → 
     expect(nextStep("segment_video", false, false, "60s", "video")).toBe(
       "merge",
     );
+  });
+
+  it("the full template chain has no cycles and ends at template_render", () => {
+    const seen: Step[] = [];
+    let step: Step | null = firstStep(undefined, "template");
+    while (step && seen.length < 20) {
+      expect(seen).not.toContain(step); // no cycles
+      seen.push(step);
+      step = nextStep(step, false, false, "15s", "template");
+    }
+    expect(seen).toEqual([
+      "template_plan",
+      "person_sheet",
+      "storyboard",
+      "template_fill",
+      "template_images",
+      "video",
+      "template_render",
+    ]);
+  });
+});
+
+describe("firstStep — pipeline aware", () => {
+  it("a template run always opens with template_plan, before any AI spend", () => {
+    expect(firstStep(undefined, "template")).toBe("template_plan");
+    // ...regardless of what assets were uploaded.
+    expect(firstStep(personUploaded, "template")).toBe("template_plan");
+    expect(firstStep(neither, "template")).toBe("template_plan");
+  });
+  it("a normal run is unaffected by the new parameter", () => {
+    expect(firstStep(undefined, "video")).toBe("product_sheet");
+    expect(firstStep(neither, "video")).toBe("storyboard");
   });
 });
 

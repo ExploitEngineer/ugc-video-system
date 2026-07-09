@@ -329,9 +329,7 @@ export function RunView({ runId }: { runId: string }) {
           <Chip icon={run.mode === "automatic" ? GaugeIcon : ListChecksIcon}>
             {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
           </Chip>
-          {isTemplateRun && (
-            <Chip icon={LayoutTemplateIcon}>Template</Chip>
-          )}
+          {isTemplateRun && <Chip icon={LayoutTemplateIcon}>Template</Chip>}
         </div>
       </UserMessage>
 

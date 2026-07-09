@@ -126,6 +126,8 @@ export function buildStructure(
         jobLayerName: l.name,
         currentText: l.name,
         injectVia: comp === mainName ? "asset" : "function",
+        width: null,
+        height: null,
       });
       continue;
     }
@@ -139,6 +141,8 @@ export function buildStructure(
           layerName: l.name,
           jobLayerName: l.name,
           injectVia: "asset",
+          width: null,
+          height: null,
         });
       } else {
         ignore("av/file(no-ext)");
@@ -166,6 +170,8 @@ export function buildStructure(
         jobLayerName: target ? target.name : childComp,
         empty: !target,
         injectVia: "asset",
+        width: null,
+        height: null,
       });
       continue;
     }
@@ -185,6 +191,10 @@ export function buildStructure(
     slots,
     mainCompositionWidth: main?.width ?? null,
     mainCompositionHeight: main?.height ?? null,
+    // Populated for real once `NexComposition` is widened to carry them
+    // (build step 3) — the v3 compositions response already returns both.
+    mainCompositionDurationSec: null,
+    mainCompositionFrameRate: null,
     suggestedAspectRatio: deriveAspectRatio(main?.width, main?.height),
     ignored,
   };

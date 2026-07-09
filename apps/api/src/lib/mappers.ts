@@ -6,7 +6,14 @@
 // null), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
-import type { Asset, RunDetail, Scene, Step, StepEvent } from "@ugc/shared";
+import type {
+  Asset,
+  RunDetail,
+  RunTemplate,
+  Scene,
+  Step,
+  StepEvent,
+} from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
   hookSelectionSchema,
@@ -190,10 +197,30 @@ export function toRunDetailDto(
   if (run.adType !== "service") skippedSteps.push("creative_brief");
   if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
   if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
-  // template_fill/template_render run ONLY for pipeline:"template" runs — mark
-  // them skipped (not stuck "pending") in a normal video-pipeline run's timeline.
-  if (run.pipeline !== "template") {
-    skippedSteps.push("template_fill", "template_render");
+  // Every step must be classified for SOME pipeline, or the timeline renders it
+  // as a stuck "pending" row forever. This cuts BOTH ways.
+  if (run.pipeline === "template") {
+    // Template runs are single-clip, so the multi-segment chain never runs.
+    skippedSteps.push(
+      "narrative_outline",
+      "segment_storyboard",
+      "segment_video",
+      "merge",
+    );
+    // A template whose IMAGE slots are all logos/backgrounds (or which has none)
+    // has nothing for the Image Agent to generate.
+    const slots = (run.template as RunTemplate | null)?.slots ?? [];
+    const fillable = slots.filter(
+      (s) => s.asset === "IMAGE" && s.imageClass === "content",
+    ).length;
+    if (fillable === 0) skippedSteps.push("template_images");
+  } else {
+    skippedSteps.push(
+      "template_plan",
+      "template_fill",
+      "template_images",
+      "template_render",
+    );
   }
   return {
     ...toRunDto(run),

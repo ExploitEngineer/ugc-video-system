@@ -47,6 +47,7 @@ import {
   real,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -99,6 +100,87 @@ export const projects = pgTable("projects", {
     .defaultNow(),
 }).enableRLS();
 
+/**
+ * The admin-curated template library. One row per After Effects template
+ * uploaded to Nexrender Cloud.
+ *
+ * Users never upload here — they PICK from this table (`GET /templates`), which
+ * is why every row carries a rendered `preview_video_url`: Nexrender exposes no
+ * thumbnail endpoint, so a cheap `preview: true` render of the template's own
+ * placeholder content is the only way to show a user what they are choosing.
+ * A preview belongs to no run, and `assets.run_id` is NOT NULL, so preview
+ * files live under their own `templates/{id}/…` storage prefix and their URLs
+ * are columns here rather than `assets` rows.
+ *
+ * `status`/`locked_at`/`locked_by` deliberately mirror `runs` so the preview
+ * worker reuses the same claim / heartbeat / stale-reclaim pattern as the run
+ * worker. Advanced by `registering → introspecting → previewing → ready`.
+ */
+export const templates = pgTable(
+  "templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(), // clients pick by THIS, never the nexrender id
+    nexrenderTemplateId: text("nexrender_template_id"), // null until registration succeeds
+    contentHash: text("content_hash").notNull(), // sha256 of the uploaded bytes — dedupes a re-upload of the same file
+    sourceType: text("source_type").notNull(), // aep | zip | mogrt
+    sourceFilename: text("source_filename").notNull(),
+
+    displayName: text("display_name").notNull(),
+    description: text("description"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+
+    status: text("status").notNull().default("registering"), // TemplateStatus — text + CHECK so new values need no enum migration
+    structure: jsonb("structure"), // TemplateStructure — slots[], comps, dims, duration, frame rate
+    metadata: jsonb("metadata"), // TemplateMetadata — durationSec, frameRate, aspectRatio, clipSeconds, trimComp, slotCounts
+
+    previewVideoUrl: text("preview_video_url"),
+    previewVideoPath: text("preview_video_path"), // Supabase Storage object path (internal)
+    previewPosterUrl: text("preview_poster_url"),
+    previewPosterPath: text("preview_poster_path"),
+    previewJobId: text("preview_job_id"), // persisted BEFORE polling so a crash never resubmits a paid render
+    previewSource: text("preview_source"), // "auto" (nexrender preview render) | "admin" (hand-uploaded override)
+
+    error: text("error"), // failure reason, surfaced in the admin console
+    useCount: integer("use_count").notNull().default(0), // incremented at run creation; powers "popular" sort
+
+    lockedAt: timestamp("locked_at", { withTimezone: true }), // preview-worker lock
+    lockedBy: text("locked_by"), // preview-worker fencing token
+    archivedAt: timestamp("archived_at", { withTimezone: true }), // soft delete — hides from the picker, frees the content hash
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Dedupe re-uploads of an identical file, but only among LIVE rows: archiving
+    // a template must free its hash so the same file can be re-added later.
+    uniqueIndex("templates_content_hash_uq")
+      .on(t.contentHash)
+      .where(sql`${t.archivedAt} is null`),
+    index("templates_status_idx").on(t.status), // the preview worker polls by status
+    // The picker's hot path: every listed template is ready + unarchived.
+    index("templates_ready_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} = 'ready' and ${t.archivedAt} is null`),
+    index("templates_tags_idx").using("gin", t.tags),
+    check(
+      "templates_status_check",
+      sql`${t.status} in ('registering', 'introspecting', 'previewing', 'ready', 'failed')`,
+    ),
+    check(
+      "templates_source_type_check",
+      sql`${t.sourceType} in ('aep', 'zip', 'mogrt')`,
+    ),
+    check(
+      "templates_preview_source_check",
+      sql`${t.previewSource} is null or ${t.previewSource} in ('auto', 'admin')`,
+    ),
+  ],
+).enableRLS();
+
 /** One generation job — the authoritative state machine for the pipeline. */
 export const runs = pgTable(
   "runs",
@@ -134,7 +216,11 @@ export const runs = pgTable(
     error: text("error"), // user-facing failure sentence (raw detail stays in logs/step_events)
     errorCode: text("error_code"), // RunErrorCode — plain text so new codes need no enum migration; Zod-validated at the mapper
     feedback: text("feedback"), // pending step-by-step feedback, consumed by next regen
-    template: jsonb("template"), // pipeline:"template" only — immutable snapshot resolved server-side at run creation: RunTemplate { nexrenderTemplateId, mainComposition, renderCompositions, slots[], compositionWidth, compositionHeight, displayName? }
+    templateId: uuid("template_id").references(() => templates.id, {
+      onDelete: "set null",
+    }), // pipeline:"template" only — the library row this run picked. SET NULL (not cascade): archiving/deleting a template must never delete the ads made with it.
+    template: jsonb("template"), // pipeline:"template" only — immutable snapshot resolved server-side at run creation: RunTemplate { templateId, nexrenderTemplateId, mainComposition, renderCompositions, slots[], compositionWidth, compositionHeight, metadata, displayName? }
+    templatePlan: jsonb("template_plan"), // TemplatePlan { conceptSummary, slots[] } — written by the template_plan step, read by the storyboard, copywriter, image and video agents so all four describe the same ad
     templateTextFill: jsonb("template_text_fill"), // TemplateTextFillEntry[] { jobLayerName, value } — written by the template_fill step (LLM), consumed by template_render
     nexrenderJobId: text("nexrender_job_id"), // Nexrender Cloud job id — persisted on submit for idempotent resume/poll of template_render
     lockedAt: timestamp("locked_at", { withTimezone: true }), // worker lock — one driver per run

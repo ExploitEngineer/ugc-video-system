@@ -34,6 +34,12 @@ export function useRunStream(
 ): void {
   const queryClient = useQueryClient();
 
+  // `settled` is a deliberate RE-SUBSCRIBE TRIGGER, not a value this effect
+  // reads. The server closes the SSE stream once a run settles; when a
+  // regenerate flips it back to `running`, this dep tears down the dead
+  // connection and opens a fresh one (see the header note). Biome's autofix
+  // would drop it and silently restore the "UI looks stuck after regenerate" bug.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `settled` is a re-subscribe trigger, not a read value — see above.
   useEffect(() => {
     if (!enabled || !runId) return;
 

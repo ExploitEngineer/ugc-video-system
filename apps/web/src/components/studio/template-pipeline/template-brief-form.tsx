@@ -30,7 +30,9 @@ export function TemplateBriefForm({ templateId }: { templateId: string }) {
       <Card className="ring-glow">
         <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
           <Loader2Icon className="text-muted-foreground size-6 animate-spin" />
-          <p className="text-muted-foreground text-sm">Loading your template…</p>
+          <p className="text-muted-foreground text-sm">
+            Loading your template…
+          </p>
         </CardContent>
       </Card>
     );

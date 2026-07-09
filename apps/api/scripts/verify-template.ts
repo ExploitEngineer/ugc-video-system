@@ -37,6 +37,7 @@ if (!run) {
 // structure (one video slot + one text slot) — normally resolved server-side
 // at run creation (`POST /runs`), set here directly for the smoke test.
 const template: RunTemplate = {
+  templateId: "00000000-0000-0000-0000-000000000000",
   nexrenderTemplateId: "stub-template",
   mainComposition: "main",
   renderCompositions: ["main"],
@@ -47,6 +48,8 @@ const template: RunTemplate = {
       layerName: "MAIN_CLIP",
       jobLayerName: "MAIN_CLIP",
       injectVia: "asset",
+      width: 1920,
+      height: 1080,
     },
     {
       asset: "TEXT",
@@ -55,10 +58,23 @@ const template: RunTemplate = {
       jobLayerName: "Headline",
       currentText: "Your Headline Here",
       injectVia: "asset",
+      width: 1200,
+      height: 120,
+      charBudget: 18,
     },
   ],
   compositionWidth: 1920,
   compositionHeight: 1080,
+  metadata: {
+    durationSec: 15,
+    frameRate: 30,
+    width: 1920,
+    height: 1080,
+    aspectRatio: "16:9",
+    clipSeconds: 15,
+    trimComp: false,
+    slotCounts: { video: 1, image: 0, text: 1, audio: 0 },
+  },
 };
 
 await db

@@ -38,7 +38,12 @@ import { cropRowsAs2x2 } from "../../lib/image/crop.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { logRun, logRunError } from "../../lib/log.js";
 import { notifyRunChanged } from "../../lib/run-events.js";
-import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
+import {
+  classifyRunError,
+  RunFailure,
+  RUN_ERROR_MESSAGES,
+  truncateDetail,
+} from "../../lib/run-failure.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
@@ -634,6 +639,21 @@ async function executeStep(
       // started/passed/failed events and persists the merged final_video.
       await mergeAgent.mergeSegments(ctx);
       return {};
+    }
+
+    // The template pipeline's plan + image steps land in build steps 6-7 of the
+    // Template Library Pipeline plan, along with the agents they call. They are
+    // UNREACHABLE today: `TEMPLATE_STEP_ENABLED` defaults false and `POST /runs`
+    // rejects `pipeline: "template"` outright, so no run can ever be sequenced
+    // into them. Fail loudly rather than silently no-op, so a premature flag
+    // flip surfaces as a clear error instead of a run that quietly skips work.
+    case "template_plan":
+    case "template_images": {
+      throw new RunFailure(
+        "INTERNAL",
+        RUN_ERROR_MESSAGES.INTERNAL,
+        `${step} is not implemented yet (template pipeline v2, build steps 6-7)`,
+      );
     }
 
     case "template_fill": {

@@ -54,12 +54,31 @@ export const stepSchema = z.enum([
   "segment_storyboard",
   "segment_video",
   "merge",
-  // `pipeline: "template"` only (15s-only in v1), automatic, never gated: once
-  // the final clip exists, an LLM writes every discovered TEXT slot's value
-  // from the run's prompt/brand text (`runs.template_text_fill`)...
+  // ── `pipeline: "template"` steps. Automatic, never gated (template runs are
+  // forced `mode: "automatic"`, `criticEnabled: false` at the create route).
+  // Full chain:
+  //   template_plan → [product_sheet ∥ person_sheet] → storyboard
+  //     → template_fill → template_images → video → template_render
+  //
+  // Runs FIRST, before any image/video spend: one cheap LLM call reads the
+  // template's slot inventory (kinds, geometry, placeholder text, clipSeconds)
+  // and the ad brief, then emits a per-slot plan (`runs.template_plan`). Every
+  // downstream agent reads it, which is what keeps the copy, the images and the
+  // clip describing the SAME ad instead of three unrelated ones.
+  "template_plan",
+  // Writes every TEXT slot's value from the plan + the storyboard scenes
+  // (`runs.template_text_fill`). Placed after the storyboard so the copy can
+  // draw on the product brief and the spoken script, not just the raw prompt.
   "template_fill",
-  // ...then the clip + those text values are composited into the template
-  // registered at run creation (`runs.template`), persisting a `templated_video`.
+  // Generates the CONTENT image slots with gpt-image-2 (`template_image`
+  // assets), conditioned on the plan + product sheet + storyboard look. Slots
+  // classified `brand` (logo/icon) or `decorative` (background/texture) are
+  // never generated — the template keeps its own art. Never hard-fails: a
+  // failed slot falls back to the template's default asset.
+  "template_images",
+  // ...then the clip + those text values + those images are composited into the
+  // template picked at run creation (`runs.template`), persisting a
+  // `templated_video`.
   "template_render",
 ]);
 export type Step = z.infer<typeof stepSchema>;
@@ -91,6 +110,10 @@ export const assetKindSchema = z.enum([
   "edited_video",
   "editor_scene",
   "final_audio",
+  // One gpt-image-2 still generated for a CONTENT image slot of the run's
+  // template (`template_images`). `meta.jobLayerName` maps it back to its slot
+  // at render time. N per run, one per fillable slot.
+  "template_image",
   // The Nexrender output: the `pipeline: "template"` run's clip composited into
   // the template registered at run creation, re-hosted from Nexrender Cloud to
   // Supabase. The sole deliverable a template-pipeline run shows once completed.
@@ -199,6 +222,9 @@ export const runErrorCodeSchema = z.enum([
   // the generic content block so the video ladder can retry it with neutralized,
   // brand-safe spoken lines before parking the run.
   "PROVIDER_AUDIO_BLOCKED",
+  // The `template_plan` LLM step failed (provider error / unparseable reply)
+  // after its retry. Nothing downstream has run, so recovery restarts the run.
+  "TEMPLATE_PLAN_FAILED",
   // The Nexrender template render failed or timed out (provider error, bad
   // template/layer mapping, or output never reached a terminal status).
   "TEMPLATE_RENDER_FAILED",

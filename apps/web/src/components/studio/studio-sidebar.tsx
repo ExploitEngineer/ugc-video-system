@@ -187,9 +187,9 @@ function SidebarInner({
           createdAt: r.createdAt,
           pipeline: r.pipeline,
         })),
-      // Legacy entries recorded before the pipeline switch shipped carry no
-      // `pipeline` field — default them to "video" so they stay visible on
-      // the Normal tab instead of vanishing from both.
+        // Legacy entries recorded before the pipeline switch shipped carry no
+        // `pipeline` field — default them to "video" so they stay visible on
+        // the Normal tab instead of vanishing from both.
       ).filter((r) => (r.pipeline ?? "video") === tab),
     [localRuns, dbRuns, tab],
   );
@@ -253,13 +253,12 @@ function SidebarInner({
 
       {/* Pipeline switch — Normal video vs Template. Also filters the recent
           chats list below (each tab shows only its own pipeline's runs). */}
-      <div
-        className={cn(
-          "px-3 pt-3",
-          collapsed && "flex justify-center px-0",
-        )}
-      >
-        <PipelineTabSwitch collapsed={collapsed} value={tab} onChange={setPipelineTab} />
+      <div className={cn("px-3 pt-3", collapsed && "flex justify-center px-0")}>
+        <PipelineTabSwitch
+          collapsed={collapsed}
+          value={tab}
+          onChange={setPipelineTab}
+        />
       </div>
 
       {/* New chat */}
@@ -283,7 +282,8 @@ function SidebarInner({
             title={tab === "template" ? "New template ad" : "New chat"}
           >
             <PlusIcon className="size-4" />
-            {!collapsed && (tab === "template" ? "New template ad" : "New chat")}
+            {!collapsed &&
+              (tab === "template" ? "New template ad" : "New chat")}
           </Link>
         </Button>
       </div>
@@ -359,7 +359,11 @@ function PipelineTabSwitch({
   value: PipelineTab;
   onChange: (tab: PipelineTab) => void;
 }) {
-  const opts: Array<{ value: PipelineTab; label: string; icon: typeof VideoIcon }> = [
+  const opts: Array<{
+    value: PipelineTab;
+    label: string;
+    icon: typeof VideoIcon;
+  }> = [
     { value: "video", label: "Normal", icon: VideoIcon },
     { value: "template", label: "Template", icon: LayoutTemplateIcon },
   ];

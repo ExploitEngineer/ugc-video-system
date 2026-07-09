@@ -60,8 +60,13 @@ export function hasAnyReference(a: AssetCtx): boolean {
  * The first step of a run. With no asset context (legacy callers) it is always
  * `product_sheet`. Asset-aware: skip straight to `person_sheet` when no product
  * is generated, or to `storyboard` when neither reference sheet is generated.
+ *
+ * A `pipeline: "template"` run always opens with `template_plan` — one cheap
+ * LLM call that reads the template's slots and the ad brief, before any image
+ * or video spend. Everything downstream reads its output.
  */
-export function firstStep(asset?: AssetCtx): Step {
+export function firstStep(asset?: AssetCtx, pipeline: Pipeline = "video"): Step {
+  if (pipeline === "template") return "template_plan";
   if (!asset || willGenerateProduct(asset)) return "product_sheet";
   if (willGeneratePerson(asset)) return "person_sheet";
   return "storyboard";
@@ -108,18 +113,38 @@ export function nextStep(
       return afterReference;
     case "product_inspection":
       return afterProductInspection;
+    // A `pipeline: "template"` run writes its on-screen copy AFTER the
+    // storyboard, so the copywriter can draw on the product brief and the
+    // spoken script instead of guessing from the raw prompt. Template runs
+    // force `criticEnabled: false`, so the inspection branch never applies to
+    // them — the guard is kept anyway so the two flags stay independent.
     case "storyboard":
-      return criticEnabled ? "storyboard_inspection" : "video";
+      return pipeline === "template"
+        ? "template_fill"
+        : criticEnabled
+          ? "storyboard_inspection"
+          : "video";
     case "storyboard_inspection":
-      return "video";
-    // Once the 15s final clip exists, a `pipeline: "template"` run continues
-    // straight into the automatic text-fill + render (never gated — the
-    // template was already validated at run creation, before this run
-    // existed); a normal `video`-pipeline run is complete.
-    case "video":
-      return pipeline === "template" ? "template_fill" : null;
+      return pipeline === "template" ? "template_fill" : "video";
+    // `template_plan` runs FIRST (see `firstStep`), before any image or video
+    // spend, because its per-slot output shapes every downstream agent. The
+    // reference phase follows it: `driveRun` treats a forward `person_sheet`
+    // as the parallel product ∥ person phase.
+    case "template_plan":
+      return "person_sheet";
     case "template_fill":
-      return "template_render";
+      return "template_images";
+    // Images before video: Seedance is the most expensive call in the pipeline
+    // and belongs as late as possible, so everything that can fail cheaply
+    // fails before it.
+    case "template_images":
+      return "video";
+    // Once the final clip exists, a template run composites it (plus the AI
+    // copy + images) into the template picked at run creation — never gated,
+    // since the template was validated before the run existed. A normal
+    // `video`-pipeline run is complete here.
+    case "video":
+      return pipeline === "template" ? "template_render" : null;
     case "template_render":
       return null;
     // Multi-segment pipeline: master storyboard (+ row crops) → N videos → merge.

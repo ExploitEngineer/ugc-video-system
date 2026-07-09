@@ -5,7 +5,8 @@ import { TemplateBriefForm } from "@/components/studio/template-pipeline/templat
 
 export const metadata: Metadata = {
   title: "New template ad",
-  description: "Describe your ad — the AI fills in your template automatically.",
+  description:
+    "Describe your ad — the AI fills in your template automatically.",
 };
 
 export default async function TemplateBriefPage({
@@ -27,7 +28,10 @@ export default async function TemplateBriefPage({
         ) : (
           <p className="text-muted-foreground text-center text-sm">
             No template selected.{" "}
-            <Link href="/studio/template-new" className="text-foreground underline">
+            <Link
+              href="/studio/template-new"
+              className="text-foreground underline"
+            >
               Upload one
             </Link>
             .

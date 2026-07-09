@@ -32,18 +32,29 @@ export const STEP_ORDER_MULTI: Step[] = [
 ];
 
 /**
- * The timeline steps for a run, by its duration + pipeline. A `template`
- * pipeline run (15s-only in v1) appends the automatic text-fill + render
- * steps after `video`.
+ * The `template` pipeline timeline. NOT the base order with steps appended —
+ * `template_plan` runs FIRST (before any image or video spend), and the copy +
+ * images are written between the storyboard and the clip. Single-clip only, so
+ * there is no multi-segment variant.
  */
+export const STEP_ORDER_TEMPLATE: Step[] = [
+  "template_plan",
+  "product_sheet",
+  "person_sheet",
+  "storyboard",
+  "template_fill",
+  "template_images",
+  "video",
+  "template_render",
+];
+
+/** The timeline steps for a run, by its duration + pipeline. */
 export function stepOrderFor(
   duration: RunDetail["duration"],
   pipeline: RunDetail["pipeline"] = "video",
 ): Step[] {
-  const base = isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
-  return pipeline === "template"
-    ? [...base, "template_fill", "template_render"]
-    : base;
+  if (pipeline === "template") return STEP_ORDER_TEMPLATE;
+  return isMultiSegment(duration) ? STEP_ORDER_MULTI : STEP_ORDER;
 }
 
 /**
@@ -69,8 +80,10 @@ export const STEP_LABEL: Record<Step, string> = {
   segment_video: "Segment videos",
   merge: "Final merged video",
   // pipeline:"template" only — automatic, never gated (see plan.ts)
-  template_fill: "Filling in your template",
-  template_render: "Template render",
+  template_plan: "Planning your template ad",
+  template_fill: "Writing your on-screen copy",
+  template_images: "Designing your template images",
+  template_render: "Assembling your template ad",
 };
 
 /** The skill + agent responsible for each step — surfaced live in the UI. */
@@ -102,8 +115,10 @@ export const STEP_AGENT: Record<Step, StepAgent> = {
   segment_video: { skill: "Video Builder", agent: "Video Agent" },
   merge: { skill: "Merge", agent: "Video Agent" },
   // pipeline:"template" only — automatic, never gated (see plan.ts)
-  template_fill: { skill: "Template Field Writer", agent: "Template Agent" },
-  template_render: { skill: "Template Render", agent: "Template Agent" },
+  template_plan: { skill: "Template Planner", agent: "Template Agent" },
+  template_fill: { skill: "Template Copywriter", agent: "Template Agent" },
+  template_images: { skill: "Template Image Designer", agent: "Image Agent" },
+  template_render: { skill: "Template Compositor", agent: "Template Agent" },
 };
 
 /** `"<skill> · <agent>"` — the timeline sublabel for a step. */

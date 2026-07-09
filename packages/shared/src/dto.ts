@@ -330,9 +330,24 @@ export const regenerateVideoInputSchema = z.object({
 export type RegenerateVideoInput = z.infer<typeof regenerateVideoInputSchema>;
 
 // ── Template pipeline: auto-discovered slots + the run's template snapshot ───
-// The user uploads a template BEFORE any run exists; we register it with
-// Nexrender and introspect it via its v3 API, classifying its layers into
-// SLOTS. See `apps/api/src/agents/template/introspect.ts`.
+// An ADMIN uploads a template into a global library; we register it with
+// Nexrender, introspect it via its v3 API, classify its layers into SLOTS, and
+// render a cheap `preview: true` clip so users can see it before picking it.
+// See `apps/api/src/agents/template/introspect.ts`.
+
+/**
+ * What an IMAGE slot is FOR, which decides whether the Image Agent may fill it.
+ * A generated product photo dropped into a logo layer is wrong every time, so
+ * this is computed by a deterministic name+geometry heuristic that acts as a
+ * HARD GUARD — the plan LLM may only arbitrate slots left `content` by it, and
+ * can never promote a `brand`/`decorative` slot.
+ *
+ *  - `content`    — a photographic slot the ad should fill (generate it)
+ *  - `brand`      — logo / wordmark / icon / badge (never generate)
+ *  - `decorative` — background / texture / gradient / overlay (never generate)
+ */
+export const imageSlotClassSchema = z.enum(["content", "brand", "decorative"]);
+export type ImageSlotClass = z.infer<typeof imageSlotClassSchema>;
 
 /** One slot discovered by introspection (a fill-in point in the template). */
 export const templateSlotSchema = z.object({
@@ -350,6 +365,31 @@ export const templateSlotSchema = z.object({
   empty: z.boolean().optional(),
   /** How to inject: a normal asset, or an `nx:text-params-set` function asset. */
   injectVia: z.enum(["asset", "function"]),
+
+  // ── Geometry, from the v3 layers response (previously discarded) ──
+  /** Layer box width in px, when Nexrender reports it. */
+  width: z.number().nullable().default(null),
+  /** Layer box height in px, when Nexrender reports it. */
+  height: z.number().nullable().default(null),
+  /**
+   * IMAGE only: whether the Image Agent may fill this slot. See
+   * `imageSlotClassSchema`. Absent on non-image slots.
+   */
+  imageClass: imageSlotClassSchema.optional(),
+  /**
+   * TEXT only: how many characters this box can hold before it overflows the
+   * designer's layout. Derived from the placeholder's own length and, when
+   * geometry + font size are known, the box width. The copywriter treats this
+   * as a hard ceiling rather than a vague "match the rough length".
+   */
+  charBudget: z.number().int().positive().optional(),
+  /**
+   * TEXT only: the layer's font family, IF Nexrender's opaque `data` bag
+   * carries it (undocumented — probed defensively). We never SEND this back;
+   * it exists so the plan agent knows how wide the copy will render. The
+   * designer's own typography is always preserved.
+   */
+  font: z.string().optional(),
 });
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
 
@@ -364,7 +404,42 @@ export type TemplateRegisterResult = z.infer<
   typeof templateRegisterResultSchema
 >;
 
-/** `GET /templates/:nexrenderTemplateId/structure` — polled while Nexrender introspects. */
+/** How many fillable slots of each kind a template has — drives the picker card. */
+export const slotCountsSchema = z.object({
+  video: z.number().int().nonnegative(),
+  image: z.number().int().nonnegative(),
+  text: z.number().int().nonnegative(),
+  audio: z.number().int().nonnegative(),
+});
+export type SlotCounts = z.infer<typeof slotCountsSchema>;
+
+/**
+ * Composition-level facts derived from the introspected structure. This is the
+ * surface the picker card, the run gate and the video agent all read.
+ *
+ * `clipSeconds` is the whole point of the v2 pipeline: the generated clip must
+ * be as long as the template's video slot, not a fixed 15s. Seedance accepts
+ * only `{4,5,6,8,10,12,15}`, so it is the smallest allowed value >= the comp's
+ * duration, capped at 15 — snapping UP, never down, because a clip shorter than
+ * its layer ends on a freeze frame while a longer one is simply trimmed by AE.
+ */
+export const templateMetadataSchema = z.object({
+  /** Main composition duration in seconds, from the v3 compositions response. */
+  durationSec: z.number().nullable().default(null),
+  frameRate: z.number().nullable().default(null),
+  width: z.number().nullable().default(null),
+  height: z.number().nullable().default(null),
+  /** Nearest Seedance-supported ratio for the composition (16:9 / 9:16). */
+  aspectRatio: aspectRatioSchema.nullable().default(null),
+  /** The Seedance clip length for this template. See the note above. */
+  clipSeconds: z.number().int().min(4).max(15),
+  /** True when the comp is longer than 15s → `nx:comp-duration-set` trims it. */
+  trimComp: z.boolean().default(false),
+  slotCounts: slotCountsSchema,
+});
+export type TemplateMetadata = z.infer<typeof templateMetadataSchema>;
+
+/** The introspected structure of a registered template. */
 export const templateStructureSchema = z.object({
   status: z.enum(["processing", "ready", "failed"]),
   /** The composition to render (put in the job's `template.composition`). */
@@ -375,6 +450,9 @@ export const templateStructureSchema = z.object({
   /** Pixel size of `mainComposition`, when Nexrender reports it. */
   mainCompositionWidth: z.number().nullable().default(null),
   mainCompositionHeight: z.number().nullable().default(null),
+  /** Duration + frame rate of `mainComposition`, when Nexrender reports them. */
+  mainCompositionDurationSec: z.number().nullable().default(null),
+  mainCompositionFrameRate: z.number().nullable().default(null),
   /**
    * Derived from the composition's pixel dimensions (`deriveAspectRatio`),
    * server-computed so the frontend never re-implements the ratio logic. Null
@@ -390,17 +468,22 @@ export type TemplateStructure = z.infer<typeof templateStructureSchema>;
 
 /**
  * The template snapshot stored on the run (`runs.template`) at creation time —
- * an immutable copy of the introspected structure, resolved server-side from
- * `templateId` the moment the run is created. This is what `template_fill`/
- * `template_render` consume; the run never re-queries Nexrender for it.
+ * an immutable copy of the library row's structure + metadata, resolved
+ * server-side from our `templateId` (a `templates.id` uuid, NOT the Nexrender
+ * id) the moment the run is created. Every template step consumes this; the run
+ * never re-queries Nexrender or the library for it.
  */
 export const runTemplateSchema = z.object({
+  /** Our library row id — what the client sends and what `use_count` tracks. */
+  templateId: z.string(),
+  /** Nexrender's own id — only the render provider ever sees this. */
   nexrenderTemplateId: z.string(),
   mainComposition: z.string(),
   renderCompositions: z.array(z.string()).default([]),
   slots: z.array(templateSlotSchema),
   compositionWidth: z.number().nullable(),
   compositionHeight: z.number().nullable(),
+  metadata: templateMetadataSchema,
   displayName: z.string().optional(),
 });
 export type RunTemplate = z.infer<typeof runTemplateSchema>;
@@ -416,3 +499,95 @@ export const templateTextFillEntrySchema = z.object({
 export type TemplateTextFillEntry = z.infer<
   typeof templateTextFillEntrySchema
 >;
+
+// ── `template_plan` — the one plan every downstream agent reads ──────────────
+
+/** What the plan decides for a single slot. */
+export const templateSlotPlanSchema = z.object({
+  jobLayerName: z.string().catch(""),
+  asset: z.enum(["VIDEO", "IMAGE", "AUDIO", "TEXT"]),
+  /** What this slot is FOR, in the ad's terms ("the headline", "the hero shot"). */
+  role: z.string().catch(""),
+  /** TEXT: what the copy should say, and why. */
+  copyIntent: z.string().optional(),
+  /** IMAGE: what the generated still should depict. Absent when `fill` is false. */
+  imageSubject: z.string().optional(),
+  /**
+   * IMAGE: whether to generate this slot at all. The deterministic
+   * `imageClass` heuristic already removed `brand`/`decorative` slots before
+   * the model ever saw them, so this only arbitrates ambiguous `content` slots
+   * (the `PH_2` / `Media_3` names that most real templates use).
+   */
+  fill: z.boolean().optional(),
+  /** VIDEO: the hero scene the clip should show. */
+  videoScene: z.string().optional(),
+});
+export type TemplateSlotPlan = z.infer<typeof templateSlotPlanSchema>;
+
+/**
+ * `runs.template_plan` — written by the `template_plan` step, read by the
+ * storyboard, the copywriter, the image agent and the video agent. Its whole
+ * job is to make those four describe the same ad.
+ */
+export const templatePlanSchema = z.object({
+  conceptSummary: z.string().catch(""),
+  slots: z.array(templateSlotPlanSchema).catch([]),
+});
+export type TemplatePlan = z.infer<typeof templatePlanSchema>;
+
+// ── The template library (admin-curated, user-picked) ────────────────────────
+
+/**
+ * Lifecycle of a `templates` row, advanced by the preview worker. Text + CHECK
+ * in the DB (not a pg enum), matching the `adType` / `errorCode` convention, so
+ * new values never need a migration.
+ */
+export const templateStatusSchema = z.enum([
+  "registering", // row inserted; registering with Nexrender + uploading bytes
+  "introspecting", // polling v3 until `uploaded`, then building structure
+  "previewing", // rendering the `preview: true` clip + poster frame
+  "ready", // visible in the picker
+  "failed", // see `error`; the admin can retry
+]);
+export type TemplateStatus = z.infer<typeof templateStatusSchema>;
+
+/** `GET /templates` and `GET /templates/:id` — what the picker renders. */
+export const templateSummarySchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  description: z.string().nullable(),
+  tags: z.array(z.string()).default([]),
+  status: templateStatusSchema,
+  durationSec: z.number().nullable(),
+  clipSeconds: z.number().int().nullable(),
+  aspectRatio: aspectRatioSchema.nullable(),
+  slotCounts: slotCountsSchema.nullable(),
+  previewVideoUrl: z.string().nullable(),
+  previewPosterUrl: z.string().nullable(),
+  useCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+});
+export type TemplateSummary = z.infer<typeof templateSummarySchema>;
+
+/**
+ * The admin view. Adds the introspected slots + the failure reason. NEVER
+ * returned from the public routes — `nexrenderTemplateId` and storage paths
+ * stay server-side.
+ */
+export const templateAdminSchema = templateSummarySchema.extend({
+  nexrenderTemplateId: z.string(),
+  slots: z.array(templateSlotSchema).default([]),
+  metadata: templateMetadataSchema.nullable(),
+  previewSource: z.enum(["auto", "admin"]).nullable(),
+  error: z.string().nullable(),
+  archivedAt: z.string().nullable(),
+});
+export type TemplateAdmin = z.infer<typeof templateAdminSchema>;
+
+/** `PATCH /admin/templates/:id`. */
+export const templateUpdateInputSchema = z.object({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(12).optional(),
+});
+export type TemplateUpdateInput = z.infer<typeof templateUpdateInputSchema>;

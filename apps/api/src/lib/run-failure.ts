@@ -45,6 +45,8 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
     "The generation service is busy right now. Please try again in a few minutes.",
   VIDEO_MERGE_FAILED:
     "We couldn't assemble the final video from its segments. Please try the run again.",
+  TEMPLATE_PLAN_FAILED:
+    "We couldn't work out how to fill in that template. Please try again.",
   TEMPLATE_RENDER_FAILED:
     "We couldn't render your video into that template. Try a different template, or skip the template step.",
   TEMPLATE_FILL_FAILED:

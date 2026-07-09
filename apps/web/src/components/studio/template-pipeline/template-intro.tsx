@@ -22,8 +22,8 @@ export function TemplateIntro() {
         </h1>
         <p className="text-muted-foreground mx-auto mt-4 max-w-md text-pretty">
           Upload an After Effects template first — we check it's renderable
-          before you spend anything on ad generation. Once it's ready,
-          describe your ad and the agents fill the template in automatically.
+          before you spend anything on ad generation. Once it's ready, describe
+          your ad and the agents fill the template in automatically.
         </p>
       </Reveal>
 
