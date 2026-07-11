@@ -13,7 +13,7 @@
 // or NEXRENDER_STUB=true.
 
 import { env } from "../../config/index.js";
-import { fetchWithRetry } from "../../lib/http.js";
+import { fetchWithRetry, putFile } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
 import { redactUrls } from "../../lib/run-failure.js";
 import { STUB_PREVIEW_MP4_DATA_URL } from "./stub-preview.js";
@@ -28,6 +28,7 @@ import type {
   TemplateRenderState,
   TemplateRenderTask,
   TemplateStructureRaw,
+  TemplateUploadFile,
   TemplateUploadTarget,
 } from "../template-render.js";
 
@@ -84,6 +85,51 @@ async function nexrenderFetch(
     );
   }
   return text ? JSON.parse(text) : {};
+}
+
+/**
+ * `DELETE /api/v2/templates/{id}` — give a template's bytes back to Nexrender.
+ *
+ * NOT routed through `nexrenderFetch`: that throws on every non-2xx, and here a
+ * `404` is precisely the outcome we want. Nexrender answers `204` when it
+ * deletes, `404` when the template is already gone, and `409` when an active
+ * render job still holds it.
+ *
+ * `retryOnNetworkError: false` because Nexrender documents DELETE as
+ * non-idempotent. A retried request whose first attempt actually landed would
+ * answer `404` on the second, which we would read as success and so hide a real
+ * failure. Retryable STATUSES (429/5xx) still retry, as everywhere else.
+ *
+ * Exported so it can be tested without a Nexrender account.
+ */
+export async function deleteNexrenderTemplate(templateId: string): Promise<void> {
+  // A stub row has nothing on the real API. Return rather than throw (unlike
+  // `assertNotStubTemplate`): this is cleanup, and cleanup that fails loudly
+  // would mask the reason the template was being thrown away in the first place.
+  if (isStubTemplateId(templateId)) {
+    log.warn("skipping remote delete of a stub template", { templateId });
+    return;
+  }
+
+  const res = await fetchWithRetry(
+    `${env.NEXRENDER_BASE_URL}/api/v2/templates/${encodeURIComponent(templateId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${env.NEXRENDER_API_KEY ?? ""}` },
+    },
+    { label: "nexrender template delete", retryOnNetworkError: false, attempts: 2 },
+  );
+
+  if (res.status === 204 || res.status === 404) {
+    log.info("remote template deleted", { templateId, status: res.status });
+    return;
+  }
+  const text = await res.text().catch(() => "");
+  // 409 → an active job still holds it. Throwing keeps the caller's id, so the
+  // orphan stays discoverable and a later sweep can retry.
+  throw new Error(
+    `Nexrender template delete failed: ${res.status} ${redactUrls(text).slice(0, 300)}`,
+  );
 }
 
 /** Paginated v3 GET (limit max 1000; most templates fit one page). */
@@ -162,9 +208,9 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
       return { templateId, upload };
     },
 
-    async uploadTemplateBytes(
+    async uploadTemplateFile(
       target: TemplateUploadTarget,
-      bytes: Uint8Array,
+      file: TemplateUploadFile,
     ): Promise<void> {
       // Nexrender's documented upload: a RAW-body PUT sending ONLY `Content-Type`.
       // The presigned URL signs `host` only, so its other `fields` entries (e.g.
@@ -172,31 +218,37 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
       // unsigned `x-amz-*` header (`MalformedSecurityHeader`). The object is a
       // single idempotent target, so a dropped socket is safe to retry; a large
       // .aep transfer gets a generous overall timeout.
-      const res = await fetchWithRetry(
+      //
+      // `putFile`, not `fetchWithRetry`: the body is streamed off disk with an
+      // explicit `Content-Length`, because the store rejects the chunked encoding
+      // `fetch` would use for a stream, and a stream cannot be retried.
+      if (target.method !== "PUT") {
+        throw new Error(
+          `Nexrender upload target asked for ${target.method}; only PUT is supported.`,
+        );
+      }
+      const res = await putFile(
         target.url,
         {
-          method: target.method,
-          headers: {
-            "Content-Type": target.fields["Content-Type"] ?? "application/octet-stream",
-          },
-          // fetch accepts a Uint8Array body at runtime; the cast sidesteps the
-          // TS 5.7 `Uint8Array<ArrayBufferLike>` vs `BodyInit` generic mismatch.
-          body: bytes as unknown as BodyInit,
+          path: file.path,
+          size: file.size,
+          contentType:
+            target.fields["Content-Type"] ?? file.contentType,
         },
         {
           label: "nexrender template upload",
-          retryOnNetworkError: true,
           attempts: 4,
           timeoutMs: 300_000,
         },
       );
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
         throw new Error(
-          `Nexrender template upload failed: ${res.status} ${redactUrls(text).slice(0, 300)}`,
+          `Nexrender template upload failed: ${res.status} ${redactUrls(res.body).slice(0, 300)}`,
         );
       }
     },
+
+    deleteTemplate: deleteNexrenderTemplate,
 
     async getTemplateStructure(templateId: string): Promise<TemplateStructureRaw> {
       assertNotStubTemplate(templateId, "introspect against");
@@ -224,7 +276,7 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
         template: input.nexrenderTemplateId,
         composition: input.composition,
         assets: "assets" in body ? body.assets.length : 0,
-        preview: Boolean(input.preview),
+        libraryPreview: Boolean(input.libraryPreview),
       });
       const json = (await nexrenderFetch("/jobs", {
         method: "POST",
@@ -248,6 +300,12 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
         aepUrl?: string;
         project?: { url?: string } | string;
         error?: { message?: string } | string;
+        // The real After Effects failure reason lives HERE, not in `error` (which
+        // the job object never carries). A failed job is `{id, templateId, status,
+        // progress, stats}` and `stats.error` holds e.g. "Error: nexrender:
+        // Couldn't find any layers by provided name (dynamic) inside a
+        // composition: *". Read it so the failure is diagnosable + self-healable.
+        stats?: { error?: string };
       };
       const status = json.status ?? "queued";
       const state = mapState(status);
@@ -272,8 +330,11 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
         return { state, status, videoUrl: json.outputUrl, projectUrl };
       }
       if (state === "failed") {
+        // `stats.error` is where After Effects' real reason lands; the top-level
+        // `error` field is a documented-but-unpopulated fallback.
         const providerMsg =
-          typeof json.error === "string" ? json.error : (json.error?.message ?? "");
+          json.stats?.error ??
+          (typeof json.error === "string" ? json.error : (json.error?.message ?? ""));
         return {
           state,
           status,
@@ -288,38 +349,41 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
 // Stub jobId carries the clip URL so pollRender is restart-safe.
 /** One entry of a Nexrender job's `assets` array. */
 type NexJobAsset =
-  | { type: string; composition: string; layerName: string; src: string }
+  | {
+      type: string;
+      composition: string;
+      /** Exactly one of these two is sent. See `buildRenderJobBody`. */
+      layerName?: string;
+      layerIndex?: number;
+      src: string;
+    }
   | {
       type: "function";
       name: string;
       params: Record<string, unknown>;
     };
 
-export type NexJobBody =
-  | {
-      template: { id: string; composition: string };
-      preview: true;
-    }
-  | {
-      template: { id: string; composition: string };
-      assets: NexJobAsset[];
-      settings: { type: string; quality: string; codec: string };
-    };
+export type NexJobBody = {
+  template: { id: string; composition: string };
+  assets: NexJobAsset[];
+  settings: { type: string; quality: string; codec: string };
+};
 
 /**
  * Build the `POST /api/v2/jobs` body. Pure, so the payload shape is pinned by a
  * test rather than discovered in production.
  *
- * `preview` and `settings` are MUTUALLY EXCLUSIVE in the Nexrender API — sending
- * both is rejected. A preview job also carries NO assets, so the template
- * renders its own placeholder content at low resolution.
+ * A LIBRARY PREVIEW is an ordinary render with an empty `assets` array: the
+ * template composites its own placeholder content, at full length and full
+ * quality. Nexrender's `preview: true` flag is deliberately NOT used — it
+ * truncates the output (a 12.03s template previewed as 3.7 seconds), which makes
+ * the library card lie about how long the template runs.
  */
 export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
   const template = {
     id: input.nexrenderTemplateId,
     composition: input.composition,
   };
-  if (input.preview) return { template, preview: true };
 
   // The array order is PRESERVED: Nexrender applies assets in sequence, and an
   // `nx:layer-autoscale` must land after the media asset it scales.
@@ -329,7 +393,13 @@ export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
         return {
           type: a.mediaType,
           composition: a.composition,
-          layerName: a.layerName,
+          // Exactly one of the two. `layerName` matches the name STORED in the
+          // project, and a designer's footage placeholder has none — After
+          // Effects only displays its source's name, which is what introspection
+          // reports. Such a layer is addressable by stacking index alone.
+          ...(a.layerIndex != null
+            ? { layerIndex: a.layerIndex }
+            : { layerName: a.layerName }),
           src: a.src,
         };
       case "text":
@@ -408,66 +478,79 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
       // be recognisable as one by `assertNotStubTemplate` in the cloud provider.
       return { templateId: `${STUB_TEMPLATE_ID_PREFIX}${input.type}` };
     },
-    async uploadTemplateBytes(): Promise<void> {
+    async uploadTemplateFile(): Promise<void> {
       log.warn("STUB — skipping template upload (no real target)");
+    },
+    async deleteTemplate(templateId: string): Promise<void> {
+      log.warn("STUB — skipping remote template delete", { templateId });
     },
     async getTemplateStructure(): Promise<TemplateStructureRaw> {
       // A REPRESENTATIVE template, not a minimal one: the stub is the only thing
       // that exercises `buildStructure` in local dev + the free smoke test, so
       // it deliberately contains every slot shape the classifier must get right.
+      // It is modelled on a real Mixkit project, because the fixture it replaced
+      // was too tidy to reproduce a single one of that project's failures.
       //
-      //  - a 30s main comp, LONGER than the 15s master. Nothing gets trimmed:
-      //    the graphics simply fill the timeline the footage does not cover.
-      //  - THREE video slots as placeholder precomps whose child comps declare
-      //    7s, 2s and 2s. This is the case the slice planner exists for.
-      //  - an audio layer, so the master's voiceover has somewhere to live and
-      //    the slices can be muted.
+      //  - a 12s main comp, SHORTER than the 15s master. Nothing is trimmed or
+      //    stretched; the ad simply runs for as long as the design does.
+      //  - video slots buried two comps deep (`Final → Scene_1 → PH_HERO`), the
+      //    normal way a designer nests footage. Only the CHAIN of in/out points
+      //    says when each one is on screen.
+      //  - placeholder comps that are EMPTY — no layer to replace, so the outer
+      //    `av/comp` layer is the injection target. This is the shape that made
+      //    the first real render come back with no video in it at all.
+      //  - one placeholder that DOES hold footage, so the inner-layer branch
+      //    stays covered.
+      //  - an audio layer, so the AUDIO slot path stays covered. Real templates
+      //    rarely have one, which is why the voiceover is normally muxed over
+      //    the finished render instead.
       //  - a logo image       → imageClass "brand"       → never AI-filled
       //  - a background image → imageClass "decorative"  → never AI-filled
       //  - a product still    → imageClass "content"     → generated
       //  - a placeholder precomp holding a STILL, which v1 misread as VIDEO
-      //  - a text layer whose `data` bag carries a font, to exercise the probe
       return {
         status: "uploaded",
         compositions: [
-          {
-            aeid: 1,
-            name: "main",
-            width: 1920,
-            height: 1080,
-            duration: 30,
-            frame_rate: 30,
-          },
-          // The child comps ARE the slot lengths. Only these carry a duration —
-          // Nexrender's layers response has no time fields at all.
-          { aeid: 2, name: "PH_HERO_comp", width: 1920, height: 1080, duration: 7 },
-          { aeid: 3, name: "PH_CUT_A_comp", width: 960, height: 540, duration: 2 },
-          { aeid: 4, name: "PH_CUT_B_comp", width: 960, height: 540, duration: 2 },
-          { aeid: 5, name: "PH_STILL_comp", width: 640, height: 360 },
+          { aeid: 1, name: "Final", width: 1920, height: 1080, duration: 12, frame_rate: 30 },
+          // Scene wrappers: each holds one empty placeholder and animates it.
+          { aeid: 2, name: "Scene_1", width: 1920, height: 1080, duration: 60 },
+          { aeid: 3, name: "Scene_2", width: 1920, height: 1080, duration: 60 },
+          // The placeholder comps themselves. A designer's `PH_*` comp is EMPTY
+          // and 60 seconds long: you are meant to drop your own footage in. Its
+          // duration is not a slot length, and it has no layer to replace.
+          { aeid: 4, name: "PH_HERO", width: 1920, height: 1080, duration: 60 },
+          { aeid: 5, name: "PH_CUT_A", width: 1920, height: 1080, duration: 60 },
+          // …but some templates do ship footage inside the placeholder.
+          { aeid: 6, name: "PH_CUT_B_comp", width: 960, height: 540, duration: 60 },
+          { aeid: 7, name: "PH_STILL_comp", width: 640, height: 360, duration: 60 },
         ],
         layers: [
-          // ── three video slots, each a placeholder precomp ──
-          { composition_id: 1, aeid: 10, name: "PH_HERO", layer_type: "av", source_type: "comp", source_comp_id: 2, width: 1920, height: 1080 },
-          { composition_id: 2, aeid: 11, name: "hero-clip.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 1920, height: 1080 },
-          { composition_id: 1, aeid: 12, name: "PH_CUT_A", layer_type: "av", source_type: "comp", source_comp_id: 3, width: 960, height: 540 },
-          { composition_id: 3, aeid: 13, name: "cutaway-a.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 960, height: 540 },
-          { composition_id: 1, aeid: 14, name: "PH_CUT_B", layer_type: "av", source_type: "comp", source_comp_id: 4, width: 960, height: 540 },
-          { composition_id: 4, aeid: 15, name: "cutaway-b.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 960, height: 540 },
+          // ── Final: the scenes, in time order ──
+          { composition_id: 1, aeid: 10, name: "Scene_1", layer_type: "av", source_type: "comp", source_comp_id: 2, width: 1920, height: 1080, start_time: 0, in_point: 0, out_point: 5 },
+          { composition_id: 1, aeid: 11, name: "Scene_2", layer_type: "av", source_type: "comp", source_comp_id: 3, width: 1920, height: 1080, start_time: 5, in_point: 5, out_point: 9 },
+          // A placeholder placed directly, holding real footage.
+          { composition_id: 1, aeid: 12, name: "PH_CUT_B", layer_type: "av", source_type: "comp", source_comp_id: 6, width: 960, height: 540, start_time: 9, in_point: 9, out_point: 11 },
+
+          // ── inside the scenes: EMPTY placeholder comps ──
+          { composition_id: 2, aeid: 13, name: "PH_HERO", layer_type: "av", source_type: "comp", source_comp_id: 4, width: 1920, height: 1080, start_time: 0, in_point: 0, out_point: 60 },
+          { composition_id: 3, aeid: 14, name: "PH_CUT_A", layer_type: "av", source_type: "comp", source_comp_id: 5, width: 1920, height: 1080, start_time: 0, in_point: 0, out_point: 60 },
+          // …and the one that is not empty.
+          { composition_id: 6, aeid: 15, name: "cutaway-b.mp4", layer_type: "av", source_type: "file", source_comp_id: null, width: 960, height: 540, start_time: 0, in_point: 0, out_point: 60 },
 
           // ── the template's own audio layer: takes the master's voiceover ──
-          { composition_id: 1, aeid: 20, name: "voiceover.mp3", layer_type: "av", source_type: "file", source_comp_id: null },
+          { composition_id: 1, aeid: 20, name: "voiceover.mp3", layer_type: "av", source_type: "file", source_comp_id: null, start_time: 0, in_point: 0, out_point: 12 },
 
           // ── text ──
-          { composition_id: 1, aeid: 30, name: "Headline", layer_type: "text", source_type: null, source_comp_id: null, width: 1200, height: 120, data: { font: "Montserrat-SemiBold", fontSize: 72 } },
-          { composition_id: 1, aeid: 31, name: "Subhead", layer_type: "text", source_type: null, source_comp_id: null, width: 900, height: 60 },
+          { composition_id: 1, aeid: 30, name: "Headline", layer_type: "text", source_type: null, source_comp_id: null, width: 1200, height: 120, start_time: 0, in_point: 1, out_point: 4 },
+          { composition_id: 1, aeid: 31, name: "Subhead", layer_type: "text", source_type: null, source_comp_id: null, width: 900, height: 60, start_time: 0, in_point: 5, out_point: 8 },
 
           // ── images: one of each class ──
-          { composition_id: 1, aeid: 40, name: "logo.png", layer_type: "av", source_type: "file", source_comp_id: null, width: 180, height: 60 },
-          { composition_id: 1, aeid: 41, name: "background.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 1920, height: 1080 },
-          { composition_id: 1, aeid: 42, name: "product-photo.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 800, height: 800 },
+          { composition_id: 1, aeid: 40, name: "logo.png", layer_type: "av", source_type: "file", source_comp_id: null, width: 180, height: 60, start_time: 0, in_point: 0, out_point: 12 },
+          { composition_id: 1, aeid: 41, name: "background.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 1920, height: 1080, start_time: 0, in_point: 0, out_point: 12 },
+          { composition_id: 1, aeid: 42, name: "product-photo.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 800, height: 800, start_time: 0, in_point: 2, out_point: 6 },
           // A placeholder precomp holding a STILL — v1 called this VIDEO.
-          { composition_id: 1, aeid: 43, name: "PH_STILL", layer_type: "av", source_type: "comp", source_comp_id: 5, width: 640, height: 360 },
-          { composition_id: 5, aeid: 44, name: "hero-shot.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 640, height: 360 },
+          { composition_id: 1, aeid: 43, name: "PH_STILL", layer_type: "av", source_type: "comp", source_comp_id: 7, width: 640, height: 360, start_time: 0, in_point: 6, out_point: 10 },
+          { composition_id: 7, aeid: 44, name: "hero-shot.jpg", layer_type: "av", source_type: "file", source_comp_id: null, width: 640, height: 360, start_time: 0, in_point: 0, out_point: 60 },
         ],
       };
     },
@@ -480,11 +563,11 @@ function createStubTemplateRenderProvider(): TemplateRenderProvider {
           break;
         }
       }
-      // A preview job carries no assets (the template renders its own
+      // A library preview carries no assets (the template renders its own
       // placeholder content), so there is no clip to echo. Hand back a real,
       // tiny MP4 instead: the preview stage then genuinely downloads it,
       // re-hosts it, and pulls a poster frame out of it, all for free.
-      if (input.preview) {
+      if (input.libraryPreview) {
         log.warn("STUB — returning a canned preview clip", {
           template: input.referenceTag,
         });

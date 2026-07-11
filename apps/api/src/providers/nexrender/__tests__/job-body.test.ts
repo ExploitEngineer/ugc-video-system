@@ -28,29 +28,20 @@ describe("isStubTemplateId — cost safety across two processes on one database"
   });
 });
 
-describe("buildRenderJobBody — preview and settings are mutually exclusive", () => {
-  it("a PREVIEW job omits `settings` entirely", () => {
-    // Nexrender rejects a job carrying both. This is the whole reason the
-    // builder branches rather than spreading a common object.
-    const body = buildRenderJobBody({ ...base, preview: true });
+describe("buildRenderJobBody — a library preview is an ordinary render", () => {
+  it("never sends Nexrender's `preview` flag, which truncates the output", () => {
+    // A 12.03s template came back as a 3.7s clip, so the library card lied about
+    // how long the template runs. A library preview is just a render with no
+    // assets — `libraryPreview` says which KIND of render this is, and must never
+    // reach the job body.
+    const body = buildRenderJobBody({ ...base, libraryPreview: true });
+    expect(body).not.toHaveProperty("preview");
+    expect(body).not.toHaveProperty("libraryPreview");
     expect(body).toEqual({
       template: { id: "tpl_123", composition: "main" },
-      preview: true,
+      assets: [],
+      settings: { type: "video", quality: "full", codec: "video_h264_vbr_15mbps" },
     });
-    expect(body).not.toHaveProperty("settings");
-  });
-
-  it("a preview job carries NO assets, even if some were passed", () => {
-    // The template must render its OWN placeholder content — that is what makes
-    // the preview representative of what the admin uploaded.
-    const body = buildRenderJobBody({
-      ...base,
-      preview: true,
-      assets: [
-        { kind: "media", mediaType: "video", composition: "main", layerName: "clip", src: "https://x/y.mp4" },
-      ],
-    });
-    expect(body).not.toHaveProperty("assets");
   });
 
   it("a DELIVERABLE job carries settings and no `preview` flag", () => {
@@ -59,6 +50,32 @@ describe("buildRenderJobBody — preview and settings are mutually exclusive", (
     expect(body).toMatchObject({
       settings: { type: "video", quality: "full", codec: "video_h264_vbr_15mbps" },
     });
+  });
+
+  it("sends layerIndex INSTEAD of layerName for an unnamed layer", () => {
+    // Nexrender matches the name stored in the project. A footage placeholder has
+    // none — After Effects only displays its source's name — so a job carrying
+    // `layerName: "PH_1"` dies with "Couldn't find any layers by provided name".
+    const body = buildRenderJobBody({
+      ...base,
+      assets: [
+        {
+          kind: "media",
+          mediaType: "video",
+          composition: "Scene_1",
+          layerName: "PH_1",
+          layerIndex: 2,
+          src: "https://x/y.mp4",
+        },
+      ],
+    });
+    expect(body.assets[0]).toEqual({
+      type: "video",
+      composition: "Scene_1",
+      layerIndex: 2,
+      src: "https://x/y.mp4",
+    });
+    expect(body.assets[0]).not.toHaveProperty("layerName");
   });
 
   it("maps a media asset straight through, and text via nx:text-params-set", () => {

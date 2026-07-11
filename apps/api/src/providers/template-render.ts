@@ -41,10 +41,21 @@ export interface NexLayer {
   width?: number;
   height?: number;
   /**
-   * Undocumented parser metadata (`additionalProperties: true`). May carry a
-   * text layer's font/size — Nexrender documents neither, and no endpoint
-   * reports which fonts a template needs. Probed defensively via `extractFont`
-   * and dumped by `scripts/inspect-nexrender-layers.ts`.
+   * Where this layer's source time 0 sits on ITS composition's timeline. For a
+   * nested comp, adding this to a child layer's time converts the child into the
+   * parent's clock — which is how `timeline.ts` resolves a placeholder buried
+   * three comps deep into an absolute window on the main composition.
+   */
+  start_time?: number;
+  /** When the layer becomes visible, on its own composition's timeline. */
+  in_point?: number;
+  /** When it stops being visible, same clock. */
+  out_point?: number;
+  /**
+   * Undocumented parser metadata (`additionalProperties: true`). EMPTY (`{}`) on
+   * every layer of every real project we have introspected — no font, no size,
+   * no timing. Do not build on it; `scripts/inspect-nexrender-layers.ts` dumps
+   * it if that ever changes.
    */
   data?: Record<string, unknown>;
 }
@@ -67,7 +78,15 @@ export type TemplateJobAssetInput =
       kind: "media";
       mediaType: "video" | "image" | "audio";
       composition: string;
+      /** Used when `layerIndex` is absent, and kept for logs regardless. */
       layerName: string;
+      /**
+       * 1-based stacking index. Present when the layer has no name of its own —
+       * the usual case for a designer's footage placeholder — because Nexrender
+       * matches the STORED name, and an unnamed layer has none. Sent INSTEAD of
+       * `layerName`, never alongside it.
+       */
+      layerIndex?: number;
       src: string;
     }
   | { kind: "text"; composition: string; layerName: string; value: string }
@@ -79,6 +98,11 @@ export type TemplateJobAssetInput =
    *
    * `fill` covers the composition and crops the overflow; `fit` letterboxes.
    * Fill, always: cropped edges beat black bars in an ad.
+   *
+   * ONLY for a layer with a real name: `nx:layer-autoscale` takes a `layerName`
+   * and offers no index form, so an unnamed layer cannot be autoscaled. Its
+   * media is pre-sized to the original source's dimensions instead, which keeps
+   * the layer's authored transform correct.
    *
    * ORDER MATTERS. Nexrender applies assets in array order, so this must come
    * AFTER the media asset it scales, or it scales the placeholder that is about
@@ -105,17 +129,24 @@ export interface TemplateRenderInput {
   /** Stable tag for logs + idempotency (the runId, or the templateId). */
   referenceTag?: string;
   /**
-   * Render a fast, cheap, LOW-RESOLUTION preview instead of a deliverable.
+   * This render is the template library's own preview, not a user's ad.
    *
-   * This is the template library's only way to show a user what they are
-   * picking: Nexrender exposes no thumbnail endpoint and no way to attach our
-   * own metadata to a template. Submitted with an EMPTY `assets` array, so the
-   * template renders its own placeholder content.
+   * It changes NOTHING about the job we submit: the library's preview is an
+   * ordinary render whose `assets` array is empty, so the template composites its
+   * own placeholder content. The flag exists so the stub provider can hand back a
+   * canned clip rather than pretend to composite, and so the logs say which of
+   * the two kinds of render this was.
    *
-   * `preview` and `settings` are mutually exclusive in the Nexrender API — the
-   * provider must omit `settings` entirely when this is set.
+   * It is NOT Nexrender's `preview` parameter, which we never send: that one
+   * truncates the output — a 12.03s template came back as 3.7 seconds — and the
+   * library card would then misreport how long the template runs. Hence the
+   * name: this is the library's preview, not the renderer's.
+   *
+   * Rendering a preview is also a genuine validation gate. It is the same
+   * template through the same engine, so if the preview fails, the deliverable
+   * would too.
    */
-  preview?: boolean;
+  libraryPreview?: boolean;
 }
 
 export interface TemplateRenderTask {
@@ -173,6 +204,13 @@ export interface TemplateRegisterResult {
   upload?: TemplateUploadTarget;
 }
 
+/** A spooled upload on local disk, streamed to the provider from there. */
+export interface TemplateUploadFile {
+  path: string;
+  size: number;
+  contentType: string;
+}
+
 export interface TemplateRenderProvider {
   /**
    * Register a user-uploaded template project → returns a provider template id.
@@ -183,16 +221,31 @@ export interface TemplateRenderProvider {
     input: TemplateRegisterInput,
   ): Promise<TemplateRegisterResult>;
   /**
-   * Upload the raw project bytes to the presigned target from `registerTemplate`.
+   * Upload the project to the presigned target from `registerTemplate`.
    * Nexrender's documented flow: a raw-body PUT sending ONLY `Content-Type`
    * (its presigned URL signs `host` only, so any extra `x-amz-*` header is
    * rejected). Runs server-side — the object store blocks cross-origin browser
    * uploads, and the bytes must never touch our own storage.
+   *
+   * Takes a PATH, not bytes: a Collect Files archive is hundreds of megabytes
+   * and is streamed off disk so the heap never holds it.
    */
-  uploadTemplateBytes(
+  uploadTemplateFile(
     target: TemplateUploadTarget,
-    bytes: Uint8Array,
+    file: TemplateUploadFile,
   ): Promise<void>;
+  /**
+   * Remove a registered template from the provider.
+   *
+   * Called for a template we are throwing away — one the provider could not
+   * parse, one our own validation refuses, or one the admin deleted. A project
+   * we will never render has no business occupying the provider's store.
+   *
+   * Idempotent from our side: a template that is already gone is a success, not
+   * an error. It throws only when the provider REFUSES (e.g. an active job still
+   * holds the template), because the caller must not then forget the id.
+   */
+  deleteTemplate(templateId: string): Promise<void>;
   /**
    * Fetch a registered template's raw structure (status + compositions + layers).
    * `status` is `processing` until Nexrender finishes introspecting.
