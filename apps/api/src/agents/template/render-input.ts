@@ -44,13 +44,22 @@ function pushMediaWithAutoscale(
   mediaType: "video" | "image",
   src: string,
 ): void {
+  const byIndex = slot.targetBy === "index" && slot.layerIndex != null;
   assets.push({
     kind: "media",
     mediaType,
     composition: slot.composition,
     layerName: slot.jobLayerName,
+    ...(byIndex ? { layerIndex: slot.layerIndex ?? undefined } : {}),
     src,
   });
+
+  // An unnamed layer cannot be autoscaled: `nx:layer-autoscale` takes a
+  // `layerName` and has no index form. Its media is pre-sized to the original
+  // source's dimensions instead (`clips.ts`), so the layer's authored transform
+  // still frames it exactly as the designer intended.
+  if (byIndex) return;
+
   // MUST follow its media asset. Nexrender applies assets in array order, so an
   // autoscale placed first would scale the placeholder that is about to be
   // replaced, and the real source would land at the wrong size.
@@ -69,8 +78,9 @@ function pushMediaWithAutoscale(
 /**
  * Assemble the render job.
  *
- * - every non-empty VIDEO slot gets ITS OWN slice of the 15s master, so a
- *   7s/2s/2s template shows three different moments of one continuous shot
+ * - every VIDEO slot gets ITS OWN slice of the 15s master, cut from the second
+ *   of the clip that slot occupies in the finished ad, so a four-scene template
+ *   shows four different moments of one continuous shot
  * - every IMAGE slot the Image Agent filled gets its still; one it did not fill
  *   (a logo, a background, or a generation that failed) is simply omitted, and
  *   the template keeps its own artwork
@@ -95,8 +105,6 @@ export function buildRenderInput(
   for (const slot of template.slots) {
     switch (slot.asset) {
       case "VIDEO": {
-        // A placeholder precomp with no fillable inner layer: nothing to target.
-        if (slot.empty) continue;
         // An unsliced slot falls back to the whole master; AE trims it.
         const url = clipUrls.get(slot.jobLayerName) ?? masterClipUrl;
         pushMediaWithAutoscale(assets, slot, "video", url);
@@ -127,6 +135,9 @@ export function buildRenderInput(
           mediaType: "audio",
           composition: slot.composition,
           layerName: slot.jobLayerName,
+          ...(slot.targetBy === "index" && slot.layerIndex != null
+            ? { layerIndex: slot.layerIndex }
+            : {}),
           src: parts.audioUrl,
         });
         // Deliberately no autoscale: an audio layer has no dimensions.

@@ -374,15 +374,28 @@ export async function mergeSegmentUrls(
  * nearest keyframe, which would silently shift a 2s cutaway by up to a second.
  * These clips are 15 seconds; accuracy is worth the decode.
  *
- * `keepAudio: false` strips the track. Slicing a clip with a baked-in voiceover
- * otherwise yields stuttering half-words across the slots, so the master's audio
- * is normally routed whole to the template's own audio layer instead.
+ * ALWAYS MUTED. Slicing a clip with a baked-in voiceover yields stuttering
+ * half-words across the slots, with silence in the gaps between them. The
+ * master's speech is laid over the finished render whole instead
+ * (`muxVoiceover`).
  */
 export async function sliceClip(
   videoUrl: string,
-  opts: { startSec: number; durationSec: number; keepAudio?: boolean },
+  opts: {
+    startSec: number;
+    durationSec: number;
+    /**
+     * Resize the slice to exactly this, cropping rather than letterboxing.
+     *
+     * The template's placeholder layer carries the designer's transform, sized
+     * for the source they expected. `replaceSource` keeps that transform, and an
+     * unnamed layer cannot be autoscaled afterwards — so footage of the original
+     * source's dimensions is the only way the shot lands where they put it.
+     */
+    targetSize?: { width: number; height: number };
+  },
 ): Promise<{ bytes: Uint8Array; mime: string }> {
-  const { startSec, durationSec, keepAudio = false } = opts;
+  const { startSec, durationSec, targetSize } = opts;
   if (!(durationSec > 0)) {
     throw new Error(`sliceClip: durationSec must be positive, got ${durationSec}`);
   }
@@ -394,16 +407,29 @@ export async function sliceClip(
     await fetchToFile(videoUrl, input);
     const out = join(dir, "out.mp4");
 
-    log.info("▶ slicing clip", { startSec, durationSec, keepAudio });
+    // h264 needs even dimensions; a layer box can be fractional.
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    const scaleCrop = targetSize
+      ? [
+          "-vf",
+          `scale=${even(targetSize.width)}:${even(targetSize.height)}:force_original_aspect_ratio=increase,` +
+            `crop=${even(targetSize.width)}:${even(targetSize.height)},setsar=1`,
+        ]
+      : [];
+
+    log.info("▶ slicing clip", {
+      startSec,
+      durationSec,
+      size: targetSize ? `${targetSize.width}x${targetSize.height}` : "source",
+    });
     await runFfmpegWithRetry(
       [
         "-y",
         "-i", input,
         "-ss", String(startSec),
         "-t", String(durationSec),
-        ...(keepAudio
-          ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
-          : ["-an"]),
+        "-an",
+        ...scaleCrop,
         // Match mergeSegmentUrls' normalize pass, so slices and merged clips
         // decode identically in After Effects.
         "-c:v", "libx264",
@@ -514,6 +540,159 @@ export async function extractAudio(
     const bytes = await readFile(out);
     log.info("✓ audio extracted", { bytes: bytes.length });
     return { bytes: new Uint8Array(bytes), mime: "audio/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Does this file carry an audio stream?
+ *
+ * There is no ffprobe in this image — `ffmpeg-static` ships the encoder alone —
+ * so ask the stream mapper. `-map 0:a:0` against a silent file fails with
+ * "Stream map '0:a:0' matches no streams"; decoding 0.1s to nowhere is cheap.
+ */
+async function hasAudioStream(file: string): Promise<boolean> {
+  try {
+    await runFfmpeg(
+      ["-y", "-i", file, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+      "probe-audio",
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lay a voiceover over a finished video.
+ *
+ * This is how a template ad gets its speech. Most After Effects templates have
+ * no audio layer at all, so there is nowhere for Nexrender to inject the track —
+ * and even the ones that do would only receive it if the designer happened to
+ * name a layer we can find. Muxing afterwards works for every template, and the
+ * result is one continuous voiceover across the whole ad rather than a fragment
+ * under each scene.
+ *
+ * `-shortest` trims the 15s master's track to the composition's real runtime.
+ * If the render brought its own audio — a music bed the designer baked in — the
+ * bed is ducked under the voice rather than discarded.
+ */
+export async function muxVoiceover(
+  videoUrl: string,
+  audioUrl: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-mux-${randomUUID()}-`));
+  try {
+    const video = join(dir, "in.mp4");
+    const audio = join(dir, "vo.m4a");
+    await Promise.all([
+      fetchToFile(videoUrl, video),
+      fetchToFile(audioUrl, audio),
+    ]);
+    const out = join(dir, "out.mp4");
+
+    const bed = await hasAudioStream(video);
+    log.info("▶ muxing voiceover", { musicBed: bed });
+
+    // The video is stream-copied in both branches: only audio re-encodes.
+    const audioArgs = bed
+      ? [
+          "-filter_complex",
+          "[0:a]volume=0.25[bed];[1:a][bed]amix=inputs=2:duration=first:dropout_transition=0[a]",
+          "-map", "0:v:0",
+          "-map", "[a]",
+        ]
+      : ["-map", "0:v:0", "-map", "1:a:0"];
+
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", video,
+        "-i", audio,
+        ...audioArgs,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        // The voiceover outlives the composition; the render decides the length.
+        "-shortest",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "mux-voiceover",
+    );
+
+    const bytes = await readFile(out);
+    if (bytes.length === 0) {
+      throw new Error("muxVoiceover: produced an empty file");
+    }
+    log.info("✓ voiceover muxed", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Hard-cap a finished video at `maxSec`, cropping anything past it.
+ *
+ * A template composition can run longer than the 15s master (many or long
+ * slots), but the product is always a 15s ad, so the render is trimmed to length
+ * here. Re-encodes rather than stream-copying so the cut lands exactly at maxSec,
+ * not the nearest earlier keyframe. The muxed voiceover / baked audio is carried
+ * through. `-t` never pads: a clip already shorter than maxSec passes through at
+ * its own length.
+ */
+export async function capVideoDuration(
+  bytes: Uint8Array,
+  maxSec: number,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  if (!(maxSec > 0)) {
+    throw new Error(`capVideoDuration: maxSec must be positive, got ${maxSec}`);
+  }
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-cap-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await writeFile(input, bytes);
+    const out = join(dir, "out.mp4");
+
+    log.info("▶ capping video duration", { maxSec, bytesIn: bytes.length });
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-t", String(maxSec),
+        // Same normalize pass as sliceClip / mergeSegmentUrls, so the cropped
+        // output decodes identically to the rest of the pipeline's clips.
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "cap-duration",
+    );
+
+    const capped = await readFile(out);
+    if (capped.length === 0) {
+      throw new Error("capVideoDuration: produced an empty file");
+    }
+    log.info("✓ video capped", { bytes: capped.length });
+    return { bytes: new Uint8Array(capped), mime: "video/mp4" };
   } finally {
     release();
     await rm(dir, { recursive: true, force: true }).catch(() => {});

@@ -1,4 +1,5 @@
-// Cut the 15s master clip into one piece per video slot, and route its audio.
+// Cut the 15s master clip into one piece per video slot, and pull out its
+// voiceover.
 //
 // Called from `template_render`, before the Nexrender job is assembled. Both
 // halves are idempotent: a rewind that re-enters the render step reuses the
@@ -18,12 +19,23 @@ import { planClipSlices } from "./slices.js";
 
 const log = createLogger("template-clips");
 
+/**
+ * The `meta.jobLayerName` the extracted voiceover is persisted under. A sentinel,
+ * not a layer: the track is a property of the master clip, and most templates
+ * have no audio layer to name it after.
+ */
+const VOICEOVER_KEY = "__master__";
+
 export interface ClipAssets {
   /** `jobLayerName` → the URL to inject into that video slot. */
   clipUrls: Map<string, string>;
-  /** The master's full voiceover, when the template has a layer to take it. */
+  /** The master's full voiceover, as its own asset. */
   audioUrl?: string;
-  /** The audio layer that receives it. */
+  /**
+   * The template's own audio layer, when it has one. Absent means the voiceover
+   * has nowhere to live inside After Effects and is muxed over the finished
+   * render instead — which is the usual case.
+   */
   audioLayerName?: string;
 }
 
@@ -48,8 +60,15 @@ async function existingByLayer(
 /**
  * Prepare the footage for every video slot, plus the voiceover.
  *
- * The composition is never trimmed to the clip: each slot gets a slice of its
- * own length, so a 30s template renders 30 seconds with its graphics intact.
+ * Each slot receives the second of the master it actually occupies in the
+ * finished ad, cut 1:1, so the scenes read as one continuous take AND stay in
+ * sync with the voiceover. Every slice is muted; the speech is carried whole,
+ * either by the template's own audio layer or — far more often — by a mux over
+ * the finished render.
+ *
+ * The ad is capped at the master's 15s downstream (`capVideoDuration`): a
+ * composition longer than that keeps its design, but anything past 15s is
+ * cropped rather than compressed into frame.
  */
 export async function prepareTemplateClips(
   runId: string,
@@ -62,13 +81,15 @@ export async function prepareTemplateClips(
   if (videoSlots.length === 0) {
     // The library rejects such templates, but a stale snapshot could still
     // reach here. Nothing to cut.
-    log.warn("template has no fillable video slot");
+    log.warn("template has no video slot");
     return { clipUrls: new Map() };
   }
 
-  const plans = planClipSlices(videoSlots, { hasAudioLayer: Boolean(audio) });
+  const plans = planClipSlices(videoSlots);
   const done = await existingByLayer(runId, "template_clip");
   const clipUrls = new Map<string, string>();
+
+  const slotByLayer = new Map(videoSlots.map((s) => [s.jobLayerName, s]));
 
   // Cut sequentially. `sliceClip` shares the single-slot ffmpeg semaphore with
   // the merge path, so parallelism here would only queue behind itself.
@@ -79,17 +100,19 @@ export async function prepareTemplateClips(
       continue;
     }
 
-    // The whole master, unmodified: skip ffmpeg and point the slot straight at
-    // it. After Effects trims it to whatever the layer needs.
-    if (plan.wholeMaster && plan.keepAudio) {
-      clipUrls.set(plan.jobLayerName, masterUrl);
-      continue;
-    }
+    // Size the slice to the placeholder's own source. An unnamed layer — which
+    // is what a footage placeholder is — cannot be autoscaled by Nexrender, so
+    // the footage has to arrive already the right shape.
+    const slot = slotByLayer.get(plan.jobLayerName);
+    const targetSize =
+      slot?.width && slot?.height
+        ? { width: slot.width, height: slot.height }
+        : undefined;
 
     const { bytes, mime } = await sliceClip(masterUrl, {
       startSec: plan.startSec,
       durationSec: plan.durationSec,
-      keepAudio: plan.keepAudio,
+      targetSize,
     });
     const { assetUrl } = await persistAsset({
       runId,
@@ -100,7 +123,6 @@ export async function prepareTemplateClips(
         jobLayerName: plan.jobLayerName,
         startSec: plan.startSec,
         durationSec: plan.durationSec,
-        muted: !plan.keepAudio,
       },
     });
     clipUrls.set(plan.jobLayerName, assetUrl);
@@ -111,31 +133,28 @@ export async function prepareTemplateClips(
     });
   }
 
-  // No audio layer: the voiceover already rides on whichever slice `keepAudio`
-  // marked, and there is nothing to extract.
-  if (!audio) {
-    log.info("no audio layer — voiceover stays on the longest slice");
-    return { clipUrls };
-  }
-
+  // Always extracted, whether it will be injected into an audio layer or muxed
+  // over the render.
   const doneAudio = await existingByLayer(runId, "template_audio");
-  const cachedAudio = doneAudio.get(audio.jobLayerName);
-  if (cachedAudio) {
-    return { clipUrls, audioUrl: cachedAudio, audioLayerName: audio.jobLayerName };
+  const cached = doneAudio.get(VOICEOVER_KEY);
+  const audioUrl =
+    cached ??
+    (
+      await persistAsset({
+        runId,
+        kind: "template_audio",
+        ...(await extractAudio(masterUrl)),
+        meta: { jobLayerName: VOICEOVER_KEY },
+      })
+    ).assetUrl;
+
+  if (audio) {
+    log.info("✓ voiceover routed to the template's audio layer", {
+      slot: audio.jobLayerName,
+    });
+    return { clipUrls, audioUrl, audioLayerName: audio.jobLayerName };
   }
 
-  // One continuous voiceover across the whole ad, rather than a fragment under
-  // each slot. This is the reason the slices are muted.
-  const track = await extractAudio(masterUrl);
-  const { assetUrl } = await persistAsset({
-    runId,
-    kind: "template_audio",
-    bytes: track.bytes,
-    mime: track.mime,
-    meta: { jobLayerName: audio.jobLayerName },
-  });
-  log.info("✓ voiceover routed to the template's audio layer", {
-    slot: audio.jobLayerName,
-  });
-  return { clipUrls, audioUrl: assetUrl, audioLayerName: audio.jobLayerName };
+  log.info("no audio layer — voiceover will be muxed over the render");
+  return { clipUrls, audioUrl };
 }

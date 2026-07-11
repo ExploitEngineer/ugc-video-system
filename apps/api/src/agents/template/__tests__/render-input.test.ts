@@ -107,11 +107,46 @@ describe("buildRenderInput — slot filling", () => {
     expect(layers).toContain("hero.jpg");
   });
 
-  it("skips an EMPTY video placeholder — there is no layer to target", () => {
+  it("injects into an empty placeholder comp through its outer layer", () => {
+    // The bug that shipped a template ad with no video in it: the slot was
+    // marked `empty` and skipped here, so the job carried no video asset at all.
+    // Introspection now targets the `av/comp` layer in the comp that places it.
     const input = build(
-      template([slot({ asset: "VIDEO", jobLayerName: "PH_1", empty: true })]),
+      template([
+        slot({ asset: "VIDEO", composition: "Scene_1", jobLayerName: "PH_1" }),
+      ]),
     );
-    expect(input.assets).toHaveLength(0);
+    expect(input.assets).toMatchObject([
+      { kind: "media", mediaType: "video", composition: "Scene_1", layerName: "PH_1" },
+      { kind: "autoscale", composition: "Scene_1", layerName: "PH_1" },
+    ]);
+  });
+
+  it("addresses an unnamed layer by index, and does NOT autoscale it", () => {
+    // `nx:layer-autoscale` takes a layerName and offers no index form, so an
+    // unnamed layer cannot be scaled after the fact. Its footage is pre-sized by
+    // `clips.ts` instead.
+    const input = build(
+      template([
+        slot({
+          asset: "VIDEO",
+          composition: "Scene_1",
+          jobLayerName: "PH_1",
+          targetBy: "index",
+          layerIndex: 2,
+        }),
+      ]),
+    );
+    expect(input.assets).toEqual([
+      {
+        kind: "media",
+        mediaType: "video",
+        composition: "Scene_1",
+        layerName: "PH_1",
+        layerIndex: 2,
+        src: CLIP,
+      },
+    ]);
   });
 
   it("falls back to the placeholder rather than rendering a blank text layer", () => {

@@ -5,7 +5,12 @@ import type { TemplateSlot } from "@ugc/shared";
 import { MASTER_CLIP_SECONDS } from "../geometry.js";
 import { planClipSlices } from "../slices.js";
 
-const vid = (jobLayerName: string, durationSec: number | null): TemplateSlot =>
+/** A slot that knows where it sits on the template's timeline. */
+const at = (
+  jobLayerName: string,
+  startSec: number,
+  durationSec: number,
+): TemplateSlot =>
   ({
     asset: "VIDEO",
     composition: "main",
@@ -14,99 +19,145 @@ const vid = (jobLayerName: string, durationSec: number | null): TemplateSlot =>
     injectVia: "asset",
     width: null,
     height: null,
+    startSec,
+    durationSec,
+  }) as TemplateSlot;
+
+/** A slot from an older snapshot: no resolved window. */
+const untimed = (jobLayerName: string, durationSec: number | null): TemplateSlot =>
+  ({
+    asset: "VIDEO",
+    composition: "main",
+    layerName: jobLayerName,
+    jobLayerName,
+    injectVia: "asset",
+    width: null,
+    height: null,
+    startSec: null,
     durationSec,
   }) as TemplateSlot;
 
 const M = MASTER_CLIP_SECONDS; // 15
 
-describe("planClipSlices — the 7s/2s/2s case this whole change exists for", () => {
-  it("lays the windows end to end, so the slots read as one continuous take", () => {
-    const plan = planClipSlices([vid("a", 7), vid("b", 2), vid("c", 2)]);
-    expect(plan).toEqual([
-      { jobLayerName: "a", startSec: 0, durationSec: 7, wholeMaster: false, keepAudio: true },
-      { jobLayerName: "b", startSec: 7, durationSec: 2, wholeMaster: false, keepAudio: false },
-      { jobLayerName: "c", startSec: 9, durationSec: 2, wholeMaster: false, keepAudio: false },
+describe("planClipSlices — the real mixkit template this change exists for", () => {
+  // Final_1920x1080 runs 12.033s; its four scenes occupy these windows.
+  const SCENES = [
+    at("PH_1", 0, 2.167),
+    at("PH_2", 2.167, 2.333),
+    at("PH_3", 4.767, 2.267),
+    at("PH_4", 7.033, 2.033),
+  ];
+
+  it("cuts each slot from the second of the master it actually plays at", () => {
+    expect(planClipSlices(SCENES)).toEqual([
+      { jobLayerName: "PH_1", startSec: 0, durationSec: 2.167 },
+      { jobLayerName: "PH_2", startSec: 2.167, durationSec: 2.333 },
+      { jobLayerName: "PH_3", startSec: 4.767, durationSec: 2.267 },
+      { jobLayerName: "PH_4", startSec: 7.033, durationSec: 2.033 },
     ]);
   });
 
   it("gives every slot DIFFERENT footage — the entire point", () => {
-    const plan = planClipSlices([vid("a", 7), vid("b", 2), vid("c", 2)]);
-    const starts = plan.map((p) => p.startSec);
+    const starts = planClipSlices(SCENES).map((p) => p.startSec);
     expect(new Set(starts).size).toBe(starts.length);
   });
 
-  it("hands the voiceover to the LONGEST slice when there is no audio layer", () => {
-    const plan = planClipSlices([vid("a", 2), vid("b", 7), vid("c", 2)]);
-    expect(plan.map((p) => p.keepAudio)).toEqual([false, true, false]);
-  });
-
-  it("mutes every slice when the template has an audio layer to take the track", () => {
-    const plan = planClipSlices([vid("a", 7), vid("b", 2)], { hasAudioLayer: true });
-    expect(plan.every((p) => !p.keepAudio)).toBe(true);
-  });
-});
-
-describe("planClipSlices — over budget", () => {
-  it("spreads windows across the master when the slots want more than 15s", () => {
-    // 3 x 7s = 21s of footage from a 15s master.
-    const plan = planClipSlices([vid("a", 7), vid("b", 7), vid("c", 7)]);
-    expect(plan.map((p) => p.startSec)).toEqual([0, 4, 8]);
-    // First starts at 0, last ends exactly at the master's end.
-    expect(plan[0]?.startSec).toBe(0);
-    expect((plan[2]?.startSec ?? 0) + (plan[2]?.durationSec ?? 0)).toBe(M);
-  });
-
-  it("still gives each slot a distinct window", () => {
-    const plan = planClipSlices([vid("a", 10), vid("b", 10), vid("c", 10)]);
-    expect(new Set(plan.map((p) => p.startSec)).size).toBe(3);
-  });
-});
-
-describe("planClipSlices — single slot", () => {
-  it("takes the whole master when the slot's length is unknown", () => {
-    const [only] = planClipSlices([vid("a", null)]);
-    expect(only).toMatchObject({ startSec: 0, durationSec: M, wholeMaster: true });
-  });
-
-  it("cuts the opening seconds when the slot is shorter than the master", () => {
-    const [only] = planClipSlices([vid("a", 6)]);
-    expect(only).toMatchObject({ startSec: 0, durationSec: 6, wholeMaster: false });
-  });
-
-  it("gives a slot LONGER than the master the whole master (AE holds the last frame)", () => {
-    const [only] = planClipSlices([vid("a", 20)]);
-    expect(only).toMatchObject({ startSec: 0, durationSec: M, wholeMaster: true });
-  });
-});
-
-describe("planClipSlices — unknown lengths", () => {
-  it("splits the master evenly across slots with no duration", () => {
-    const plan = planClipSlices([vid("a", null), vid("b", null), vid("c", null)]);
-    expect(plan.map((p) => p.durationSec)).toEqual([5, 5, 5]);
-    expect(plan.map((p) => p.startSec)).toEqual([0, 5, 10]);
-  });
-
-  it("mixes known and unknown without breaking the budget", () => {
-    const plan = planClipSlices([vid("a", 9), vid("b", null)]);
-    // b falls back to an even share (7.5), so 9 + 7.5 > 15 → spread.
-    for (const p of plan) {
-      expect(p.startSec + p.durationSec).toBeLessThanOrEqual(M + 1e-6);
+  it("keeps the footage in sync with the voiceover muxed over the render", () => {
+    // A 1:1 mapping means master[t] plays at composition time t. Anything else
+    // and a talking head's lips stop matching the words.
+    for (const p of planClipSlices(SCENES)) {
+      const slot = SCENES.find((s) => s.jobLayerName === p.jobLayerName);
+      expect(p.startSec).toBe(slot?.startSec);
     }
   });
 });
 
+describe("planClipSlices — a composition longer than the master", () => {
+  it("maps 1:1 and leaves a past-master slot for the 15s crop to drop", () => {
+    // The master is 15s and the ad is cropped to 15s downstream, so a slot the
+    // design places at 20s is never shown. It is NOT compressed onto the master
+    // (that would desync every earlier slot from the linear voiceover): the
+    // visible slot stays 1:1, the past-master slot clamps to the master's tail.
+    const plan = planClipSlices([at("a", 0, 4), at("b", 20, 4)]);
+    expect(plan[0]).toEqual({ jobLayerName: "a", startSec: 0, durationSec: 4 });
+    expect(plan[1]?.startSec).toBeCloseTo(M - 0.1, 5); // 14.9 — a tail sliver, cropped away
+  });
+
+  it("never lets a slice run past the end of the master", () => {
+    const plan = planClipSlices([at("a", 0, 4), at("b", 28, 4)]);
+    for (const p of plan) {
+      expect(p.startSec + p.durationSec).toBeLessThanOrEqual(M + 1e-6);
+    }
+  });
+
+  it("shortens — never slides back — a slot that straddles the master's end", () => {
+    // A slot at 13s running 4s would end at 17s; keep its true start (sync) and
+    // shorten to what the master has left, rather than sliding the start back.
+    const [p] = planClipSlices([at("a", 13, 4)]);
+    expect(p).toEqual({ jobLayerName: "a", startSec: 13, durationSec: M - 13 });
+  });
+
+  it("gives a slot longer than the master the whole master (AE holds the last frame)", () => {
+    const [only] = planClipSlices([at("a", 0, 20)]);
+    expect(only).toEqual({ jobLayerName: "a", startSec: 0, durationSec: M });
+  });
+});
+
+describe("planClipSlices — no timeline (older snapshots)", () => {
+  it("lays the windows end to end when they fit", () => {
+    const plan = planClipSlices([untimed("a", 7), untimed("b", 2), untimed("c", 2)]);
+    expect(plan).toEqual([
+      { jobLayerName: "a", startSec: 0, durationSec: 7 },
+      { jobLayerName: "b", startSec: 7, durationSec: 2 },
+      { jobLayerName: "c", startSec: 9, durationSec: 2 },
+    ]);
+  });
+
+  it("spreads windows across the master when the slots want more than 15s", () => {
+    const plan = planClipSlices([untimed("a", 7), untimed("b", 7), untimed("c", 7)]);
+    expect(plan.map((p) => p.startSec)).toEqual([0, 4, 8]);
+    expect((plan[2]?.startSec ?? 0) + (plan[2]?.durationSec ?? 0)).toBe(M);
+  });
+
+  it("splits the master evenly across slots with no duration at all", () => {
+    const plan = planClipSlices([untimed("a", null), untimed("b", null), untimed("c", null)]);
+    expect(plan.map((p) => p.durationSec)).toEqual([5, 5, 5]);
+    expect(plan.map((p) => p.startSec)).toEqual([0, 5, 10]);
+  });
+
+  it("takes the whole master for a lone slot of unknown length", () => {
+    expect(planClipSlices([untimed("a", null)])).toEqual([
+      { jobLayerName: "a", startSec: 0, durationSec: M },
+    ]);
+  });
+
+  it("falls back for the whole template when ANY slot lacks a window", () => {
+    // A half-resolved timeline is not a timeline: mixing absolute starts with
+    // guessed ones would stack two slices on the same second.
+    const plan = planClipSlices([at("a", 0, 2), untimed("b", 2)]);
+    expect(plan.map((p) => p.startSec)).toEqual([0, 2]);
+  });
+});
+
 describe("planClipSlices — invariants that must hold for ANY template", () => {
-  const CASES: Array<Array<number | null>> = [
+  const TIMED: Array<Array<[number, number]>> = [
+    [[0, 2.167], [2.167, 2.333], [4.767, 2.267], [7.033, 2.033]],
+    [[0, 15]], [[0, 20]], [[0, 4], [20, 4]], [[11, 1], [0, 1]],
+    [[0, 0.5], [14.5, 0.5]], [[0, 3], [3, 3], [6, 3], [9, 3], [12, 3]],
+  ];
+  const UNTIMED: Array<Array<number | null>> = [
     [7, 2, 2], [7, 7, 7], [2], [20], [null], [null, null], [15, 15],
     [1, 1, 1, 1, 1, 1, 1, 1], [0.5, 14.5], [30, 1], [null, 4, null],
-    [10, 10, 10, 10],
   ];
 
   it("never runs past the end of the master, never starts before it", () => {
-    for (const lens of CASES) {
-      const slots = lens.map((d, i) => vid(`s${i}`, d));
+    const all = [
+      ...TIMED.map((w) => w.map(([s, d], i) => at(`s${i}`, s, d))),
+      ...UNTIMED.map((l) => l.map((d, i) => untimed(`s${i}`, d))),
+    ];
+    for (const slots of all) {
       for (const p of planClipSlices(slots)) {
-        const label = `${JSON.stringify(lens)} → ${p.jobLayerName}`;
+        const label = `${JSON.stringify(slots.map((s) => s.durationSec))} → ${p.jobLayerName}`;
         expect(p.startSec, label).toBeGreaterThanOrEqual(0);
         expect(p.durationSec, label).toBeGreaterThan(0);
         expect(p.startSec + p.durationSec, label).toBeLessThanOrEqual(M + 1e-6);
@@ -115,18 +166,10 @@ describe("planClipSlices — invariants that must hold for ANY template", () => 
   });
 
   it("emits exactly one plan per slot, in order", () => {
-    for (const lens of CASES) {
-      const slots = lens.map((d, i) => vid(`s${i}`, d));
+    for (const lens of UNTIMED) {
+      const slots = lens.map((d, i) => untimed(`s${i}`, d));
       const plan = planClipSlices(slots);
       expect(plan.map((p) => p.jobLayerName)).toEqual(slots.map((s) => s.jobLayerName));
-    }
-  });
-
-  it("marks at most one slice as carrying the audio", () => {
-    for (const lens of CASES) {
-      const slots = lens.map((d, i) => vid(`s${i}`, d));
-      const kept = planClipSlices(slots).filter((p) => p.keepAudio).length;
-      expect(kept, JSON.stringify(lens)).toBe(1);
     }
   });
 
