@@ -12,8 +12,7 @@
 // branches here (no video slot / more than one) are unit-testable without a
 // network or a Nexrender account.
 
-import { createHash } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 
 import {
   type TemplateMetadata,
@@ -27,6 +26,7 @@ import { unprocessable } from "../../lib/errors.js";
 import { createLogger } from "../../lib/log.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
 import type { TemplateRenderProvider } from "../../providers/template-render.js";
+import { type AepLayerIndex, parseAepLayersFromFile } from "./aep.js";
 import { buildMetadata, buildStructure } from "./introspect.js";
 
 const log = createLogger("template-library");
@@ -53,9 +53,6 @@ export function templateTypeFromName(
   return null;
 }
 
-export const sha256 = (bytes: Uint8Array): string =>
-  createHash("sha256").update(bytes).digest("hex");
-
 /** Parse the jsonb columns back into their schemas, tolerating a null/legacy shape. */
 export function parseStructure(v: unknown): TemplateStructure | null {
   const r = templateStructureSchema.safeParse(v);
@@ -81,6 +78,63 @@ export async function failTemplate(id: string, reason: string): Promise<void> {
   await setTemplate(id, { status: "failed", error: reason });
 }
 
+// ── discarding a template's upload ───────────────────────────────────────────
+
+/**
+ * A run still holding this template mid-pipeline.
+ *
+ * `routes/runs.ts` copies `nexrenderTemplateId` into `runs.template` when the
+ * run is created, and `applyTemplate` renders from that snapshot. So a run that
+ * started before the template was archived still needs the remote project to
+ * exist. Nexrender's own 409 only protects a job it has already accepted, not
+ * one of ours still waiting in the worker queue.
+ */
+const RUN_TERMINAL = ["completed", "failed"] as const;
+
+async function hasRunInFlight(templateId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: schema.runs.id })
+    .from(schema.runs)
+    .where(
+      and(
+        eq(schema.runs.templateId, templateId),
+        notInArray(schema.runs.status, [...RUN_TERMINAL]),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * Hand a template's bytes back to Nexrender, then forget its id.
+ *
+ * Best-effort, and deliberately so. A failure here must never mask the real
+ * reason the template was thrown away, and `nexrenderTemplateId` is cleared ONLY
+ * when the remote delete actually succeeded — an upload we could not remove
+ * stays discoverable, so `reapArchivedTemplates` can try again, rather than
+ * becoming a silent orphan nobody can name.
+ */
+async function discardRemoteTemplate(
+  row: Pick<TemplateRow, "id" | "nexrenderTemplateId">,
+  provider: TemplateRenderProvider,
+  why: string,
+): Promise<boolean> {
+  if (!row.nexrenderTemplateId) return true;
+  try {
+    await provider.deleteTemplate(row.nexrenderTemplateId);
+  } catch (err) {
+    log.warn("could not delete the remote template; leaving it registered", {
+      id: row.id,
+      nexrenderTemplateId: row.nexrenderTemplateId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+  await setTemplate(row.id, { nexrenderTemplateId: null });
+  log.info("discarded the remote template", { id: row.id, why });
+  return true;
+}
+
 // ── create ───────────────────────────────────────────────────────────────────
 
 export interface CreateTemplateInput {
@@ -88,7 +142,11 @@ export interface CreateTemplateInput {
   displayName: string;
   description?: string;
   tags?: string[];
-  bytes: Uint8Array;
+  /** The spooled upload on local disk. The CALLER deletes it. */
+  path: string;
+  size: number;
+  /** sha256 of the file, computed while it was being spooled. The dedupe key. */
+  contentHash: string;
 }
 
 /**
@@ -113,7 +171,13 @@ export async function createTemplate(
     );
   }
 
-  const contentHash = sha256(input.bytes);
+  // The project file is the only place a layer's real name and stacking index
+  // exist, and this upload is the only time we hold it. Best-effort: an
+  // unparseable project still uploads, and its media slots fall back to the name
+  // Nexrender reports.
+  const aepLayers = await parseAepLayersFromFile(input.path, input.filename);
+
+  const contentHash = input.contentHash;
   const existing = await db.query.templates.findFirst({
     where: and(
       eq(schema.templates.contentHash, contentHash),
@@ -122,6 +186,12 @@ export async function createTemplate(
   });
   if (existing) {
     log.info("template deduped by content hash", { id: existing.id });
+    // Re-uploading the identical file is how a template registered before this
+    // parser existed gets its layer indices. Cheap, and it costs no render.
+    if (aepLayers && !existing.aepLayers) {
+      await setTemplate(existing.id, { aepLayers });
+      return { row: (await getTemplate(existing.id)) ?? existing, deduped: true };
+    }
     return { row: existing, deduped: true };
   }
 
@@ -134,6 +204,7 @@ export async function createTemplate(
       displayName: input.displayName,
       description: input.description ?? null,
       tags: input.tags ?? [],
+      aepLayers,
       status: "registering",
     })
     .returning();
@@ -142,13 +213,26 @@ export async function createTemplate(
   // Register + upload synchronously: it is fast, and the admin should learn
   // immediately that their file was rejected rather than discovering it in a
   // background status three seconds later.
+  //
+  // `templateId` lives outside the try so the catch can clean up after itself:
+  // if `registerTemplate` succeeded and the byte upload then failed, Nexrender
+  // is holding a template that can never be rendered.
+  let templateId: string | undefined;
   try {
-    const { templateId, upload } = await provider.registerTemplate({
+    const registered = await provider.registerTemplate({
       filename: input.filename,
       displayName: input.displayName,
       type: sourceType,
     });
-    if (upload) await provider.uploadTemplateBytes(upload, input.bytes);
+    templateId = registered.templateId;
+    if (registered.upload) {
+      await provider.uploadTemplateFile(registered.upload, {
+        path: input.path,
+        size: input.size,
+        contentType:
+          sourceType === "zip" ? "application/zip" : "application/octet-stream",
+      });
+    }
 
     await setTemplate(row.id, {
       nexrenderTemplateId: templateId,
@@ -157,6 +241,13 @@ export async function createTemplate(
     log.info("template registered", { id: row.id, templateId, sourceType });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    if (templateId) {
+      await discardRemoteTemplate(
+        { id: row.id, nexrenderTemplateId: templateId },
+        provider,
+        "the byte upload failed after registration",
+      );
+    }
     await failTemplate(row.id, `Registration failed: ${reason}`);
     const failed = await getTemplate(row.id);
     return { row: failed ?? row, deduped: false };
@@ -173,7 +264,7 @@ export async function createTemplate(
  * sliced across all of them, so the cost is flat — but past this the slices are
  * too short to read as anything, and the template is probably not an ad.
  */
-export const MAX_VIDEO_SLOTS = 8;
+export const MAX_VIDEO_SLOTS = 10;
 
 /**
  * Why a template cannot join the library, or null when it can. Pure, so the
@@ -213,6 +304,10 @@ export async function introspectTemplate(
 ): Promise<TemplateRow> {
   const row = await getTemplate(id);
   if (!row) throw unprocessable("Template not found.");
+  // `failed` is terminal, and a rejected template no longer has a remote id
+  // (we gave its bytes back). Without this, a stray poll would fall into the
+  // branch below and overwrite the real rejection reason with "never registered".
+  if (row.status === "failed") return row;
   if (!row.nexrenderTemplateId) {
     await failTemplate(id, "Template was never registered with Nexrender.");
     return (await getTemplate(id)) ?? row;
@@ -221,6 +316,7 @@ export async function introspectTemplate(
   const raw = await provider.getTemplateStructure(row.nexrenderTemplateId);
 
   if (raw.status === "error" || raw.status === "failed") {
+    await discardRemoteTemplate(row, provider, "Nexrender could not parse it");
     await failTemplate(id, `Nexrender could not parse this project (${raw.status}).`);
     return (await getTemplate(id)) ?? row;
   }
@@ -229,11 +325,18 @@ export async function introspectTemplate(
     return row;
   }
 
-  const structure = buildStructure(raw.compositions, raw.layers);
+  const structure = buildStructure(
+    raw.compositions,
+    raw.layers,
+    row.aepLayers as AepLayerIndex | null,
+  );
   const metadata = buildMetadata(structure);
 
   const rejection = validateForLibrary(structure, metadata);
   if (rejection) {
+    // This template will never be rendered, so it has no business occupying
+    // Nexrender's store. The bytes go back before the row is marked failed.
+    await discardRemoteTemplate(row, provider, rejection);
     await failTemplate(id, rejection);
     return (await getTemplate(id)) ?? row;
   }
@@ -256,15 +359,88 @@ export async function introspectTemplate(
   return (await getTemplate(id)) ?? row;
 }
 
+/**
+ * Re-derive a template's structure from Nexrender, in place.
+ *
+ * The project bytes never change; our reading of them does. When introspection
+ * learns something new — that a placeholder comp is empty and must be targeted
+ * through its outer layer, that a slot's real length lives in the layer chain
+ * rather than the child comp's `duration` — every template in the library is
+ * carrying a stale structure, and re-uploading a 200MB `.aep` to fix that is
+ * absurd. This is GETs only: no upload, no render, no cost.
+ *
+ * The existing preview is kept. It shows the template's own placeholder content,
+ * which no change to our classifier can affect.
+ */
+export async function reintrospectTemplate(
+  id: string,
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
+): Promise<TemplateRow> {
+  const row = await getTemplate(id);
+  if (!row) throw unprocessable("Template not found.");
+  if (!row.nexrenderTemplateId) {
+    throw unprocessable("Template was never registered with Nexrender.");
+  }
+
+  const raw = await provider.getTemplateStructure(row.nexrenderTemplateId);
+  if (raw.status !== "uploaded") {
+    throw unprocessable(
+      `Nexrender has not finished parsing this project (${raw.status}).`,
+    );
+  }
+
+  const structure = buildStructure(
+    raw.compositions,
+    raw.layers,
+    row.aepLayers as AepLayerIndex | null,
+  );
+  const metadata = buildMetadata(structure);
+
+  const rejection = validateForLibrary(structure, metadata);
+  if (rejection) {
+    // Deliberately NOT `discardRemoteTemplate`, unlike the first introspection.
+    // This template was accepted once; what changed is OUR classifier. Deleting
+    // the upload here would mean a regression in our own code could wipe every
+    // project in the library in one sweep, recoverable only by re-uploading each
+    // file by hand. The row goes `failed`; the bytes stay, so fixing the
+    // classifier and re-reading rescues it.
+    await failTemplate(id, rejection);
+    return (await getTemplate(id)) ?? row;
+  }
+
+  await setTemplate(id, {
+    structure,
+    metadata,
+    error: null,
+    // A template that already has a preview goes straight back to pickable.
+    status: row.previewVideoUrl ? "ready" : "previewing",
+  });
+  const { video, image, text, audio } = metadata.slotCounts;
+  log.info("template re-introspected", {
+    id,
+    durationSec: metadata.durationSec ?? "unknown",
+    slots: `${video}v ${image}i ${text}t ${audio}a`,
+  });
+  return (await getTemplate(id)) ?? row;
+}
+
 // ── read / update / archive ──────────────────────────────────────────────────
 
 export async function getTemplate(id: string): Promise<TemplateRow | undefined> {
   return db.query.templates.findFirst({ where: eq(schema.templates.id, id) });
 }
 
-/** Every row, any status, newest first — the admin console's list. */
+/**
+ * The admin console's list: every LIVE row, any status, newest first.
+ *
+ * Archived rows are excluded. `archiveTemplate` is a soft delete — runs made
+ * with a template keep their snapshot — but to the admin who pressed the button
+ * it has to LOOK deleted, and an archived row that keeps coming back reads as a
+ * broken button.
+ */
 export async function listAllTemplates(): Promise<TemplateRow[]> {
   return db.query.templates.findMany({
+    where: isNull(schema.templates.archivedAt),
     orderBy: [desc(schema.templates.createdAt)],
   });
 }
@@ -307,10 +483,61 @@ export async function updateTemplate(
  * for re-upload. Runs that used it keep their `template` snapshot and their
  * `template_id` FK is ON DELETE SET NULL, so an archived template can never
  * take finished ads down with it.
+ *
+ * The row is soft; the UPLOAD is not. A template the admin removed from the
+ * library will never be rendered again, so its bytes go back to Nexrender —
+ * unless a run is still mid-pipeline with it, in which case the delete is left
+ * to `reapArchivedTemplates` once that run finishes. Archiving ALWAYS succeeds:
+ * a provider that will not delete must not be able to keep a template visible.
  */
-export async function archiveTemplate(id: string): Promise<void> {
+export async function archiveTemplate(
+  id: string,
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
+): Promise<void> {
   await setTemplate(id, { archivedAt: new Date() });
   log.info("template archived", { id });
+
+  const row = await getTemplate(id);
+  if (!row?.nexrenderTemplateId) return;
+
+  if (await hasRunInFlight(id)) {
+    log.info("remote delete deferred: a run is still using this template", {
+      id,
+    });
+    return;
+  }
+  await discardRemoteTemplate(row, provider, "archived by an admin");
+}
+
+/**
+ * Delete the Nexrender upload of every archived template that still has one.
+ *
+ * The safety net for the two cases `archiveTemplate` cannot handle inline: a run
+ * was in flight when the admin pressed Delete, or the remote delete failed. Also
+ * cleans up everything archived before this code existed.
+ *
+ * Returns how many uploads it reclaimed. Never throws: it runs on the worker's
+ * tick, and one stubborn template must not stop the next one being swept.
+ */
+export async function reapArchivedTemplates(
+  provider: TemplateRenderProvider = createTemplateRenderProvider(),
+): Promise<number> {
+  const rows = await db.query.templates.findMany({
+    where: and(
+      isNotNull(schema.templates.archivedAt),
+      isNotNull(schema.templates.nexrenderTemplateId),
+    ),
+    limit: 20, // a sweep, not a migration
+  });
+  if (rows.length === 0) return 0;
+
+  let reaped = 0;
+  for (const row of rows) {
+    if (await hasRunInFlight(row.id)) continue;
+    if (await discardRemoteTemplate(row, provider, "archived")) reaped += 1;
+  }
+  if (reaped > 0) log.info("reaped archived template uploads", { reaped });
+  return reaped;
 }
 
 /**

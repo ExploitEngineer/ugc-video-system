@@ -5,7 +5,6 @@ import type { TemplateMetadata, TemplateStructure } from "@ugc/shared";
 import {
   parseMetadata,
   parseStructure,
-  sha256,
   templateTypeFromName,
   validateForLibrary,
   MAX_VIDEO_SLOTS,
@@ -34,16 +33,8 @@ describe("templateTypeFromName", () => {
   });
 });
 
-describe("sha256 — the dedupe key", () => {
-  it("is stable for identical bytes and differs for a one-byte change", () => {
-    const a = new Uint8Array([1, 2, 3, 4]);
-    const b = new Uint8Array([1, 2, 3, 4]);
-    const c = new Uint8Array([1, 2, 3, 5]);
-    expect(sha256(a)).toBe(sha256(b));
-    expect(sha256(a)).not.toBe(sha256(c));
-    expect(sha256(a)).toHaveLength(64);
-  });
-});
+// The dedupe key (sha256) is now computed by `spoolToTempFile` as the upload
+// streams past, so it is covered by `lib/__tests__/upload-spool.test.ts`.
 
 describe("validateForLibrary — which templates the pipeline can actually fill", () => {
   const structure = (mainComposition: string | null): TemplateStructure =>
@@ -87,7 +78,7 @@ describe("validateForLibrary — which templates the pipeline can actually fill"
   it("rejects an absurd number of video slots", () => {
     // Not a cost limit — the slices would simply be too short to read.
     expect(validateForLibrary(structure("main"), meta(MAX_VIDEO_SLOTS + 1))).toMatch(
-      /at most 8/,
+      new RegExp(`at most ${MAX_VIDEO_SLOTS}`),
     );
   });
 
