@@ -2,8 +2,12 @@
 //
 // Nexrender exposes no thumbnail endpoint and no way to attach our own metadata
 // to a template, so the ONLY way to show a user what they are picking is to
-// render the template once ourselves. A `preview: true` job with an EMPTY asset
-// list renders the template's own placeholder content, fast and cheap.
+// render the template once ourselves. An ordinary render job with an EMPTY asset
+// list composites the template's own placeholder content.
+//
+// Deliberately a FULL render, not Nexrender's `preview` parameter: that one
+// truncates the output (a 12.03s template came back as 3.7 seconds), so the
+// picker's card would misreport how long the template runs.
 //
 // The output lives on Nexrender's CDN and expires (~14 days), so we download it
 // immediately, re-host it to Supabase under `templates/{id}/`, and pull a poster
@@ -67,7 +71,7 @@ export async function previewTemplate(
       nexrenderTemplateId: row.nexrenderTemplateId,
       composition: structure.mainComposition,
       assets: [], // the template renders its OWN placeholder content
-      preview: true,
+      libraryPreview: true,
       referenceTag: id,
     });
     jobId = task.jobId;

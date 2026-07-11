@@ -44,7 +44,7 @@ export function planningSlots(slots: TemplateSlot[]): TemplateSlot[] {
     if (s.asset === "AUDIO") return false;
     if (s.asset === "IMAGE") return s.imageClass === "content";
     if (s.asset === "VIDEO") {
-      if (s.empty || seenVideo) return false;
+      if (seenVideo) return false;
       seenVideo = true;
       return true;
     }

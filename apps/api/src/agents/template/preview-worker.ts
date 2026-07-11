@@ -14,11 +14,25 @@ import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
 import { createLogger } from "../../lib/log.js";
-import { failTemplate, introspectTemplate } from "./library.js";
+import {
+  failTemplate,
+  introspectTemplate,
+  reapArchivedTemplates,
+} from "./library.js";
 import { previewTemplate } from "./preview.js";
 
 /** Non-terminal statuses the worker can advance. `ready`/`failed` are terminal. */
 const CLAIMABLE = ["introspecting", "previewing"] as const;
+
+/**
+ * Sweep archived templates whose Nexrender upload survived, once a minute.
+ *
+ * `archiveTemplate` deletes the upload inline, but skips a template a run is
+ * still rendering with. Without this sweep that upload would orphan forever.
+ * Counted in ticks rather than kept on a second timer, so it cannot outlive the
+ * worker or fire while the process is shutting down.
+ */
+const REAP_EVERY_TICKS = 12;
 
 /** A lock older than this belonged to a dead process and is reclaimable. */
 const STALE_MS = 180_000;
@@ -49,7 +63,18 @@ async function advance(id: string, status: string): Promise<void> {
   }
 }
 
+let ticks = 0;
+
 async function tick(): Promise<void> {
+  // Cleanup, not progress: a stubborn upload must not stop templates advancing.
+  if (ticks++ % REAP_EVERY_TICKS === 0) {
+    await reapArchivedTemplates().catch((err) => {
+      log.warn("reaping archived templates failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   const rows = await db
     .select({ id: schema.templates.id, status: schema.templates.status })
     .from(schema.templates)

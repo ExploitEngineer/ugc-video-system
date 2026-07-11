@@ -6,7 +6,10 @@
 // placeholder wording.
 //
 // `charBudget` is a HARD ceiling, not a hint: the designer sized that box, and a
-// sentence where a two-word CTA belongs overflows or renders garbled.
+// sentence where a two-word CTA belongs overflows or renders garbled. The budget
+// comes from the placeholder's own length, so the placeholder is also the SHAPE
+// the copy must take — a split-text intro whose layers read "OPENER" / "BOLD"
+// wants one word per slot, and a sentence there runs off the screen.
 
 import { formatBrand } from "../../../lib/brand.js";
 import type { ChatMessage } from "../../../providers/openai/index.js";
@@ -21,9 +24,11 @@ export interface TemplateTextSlotInput {
   currentText?: string;
   /** From `template_plan`: what this line should say, and why. */
   copyIntent?: string;
-  /** Hard character ceiling derived from the box and the placeholder. */
+  /** Hard character ceiling, derived from the placeholder's own length. */
   charBudget?: number;
 }
+
+const wordCount = (s: string): number => s.trim().split(/\s+/).length;
 
 export interface TemplateTextFillPromptInput {
   userPrompt: string;
@@ -40,7 +45,14 @@ export interface TemplateTextFillPromptInput {
 function describeSlot(s: TemplateTextSlotInput, i: number): string {
   const parts = [`${i + 1}. jobLayerName="${s.jobLayerName}"`];
   if (s.copyIntent) parts.push(`purpose: ${s.copyIntent}`);
-  if (s.currentText) parts.push(`placeholder: "${s.currentText}"`);
+  if (s.currentText) {
+    const words = wordCount(s.currentText);
+    // The word count is the point. A budget of "5 characters" reads as a typo
+    // until you see that the designer's own text is one four-letter word.
+    parts.push(
+      `the designer wrote "${s.currentText}" here — ${words} word${words === 1 ? "" : "s"}, ${s.currentText.trim().length} characters`,
+    );
+  }
   if (s.charBudget) parts.push(`MAX ${s.charBudget} characters`);
   return parts.join(" — ");
 }
@@ -58,6 +70,11 @@ export function buildTemplateTextFillPrompt(
     "its purpose; where it does not, infer it from the placeholder (a slot",
     'reading "Shop Now" is a call-to-action, one reading "Your Headline Here" is',
     "the hero headline).",
+    "",
+    "MATCH THE PLACEHOLDER'S SHAPE. The designer sized the box, the font and the",
+    "animation around the exact words they typed. If the placeholder is a single",
+    "word, write a single word. If it is a three-word CTA, write three words. A",
+    "sentence where one word belongs runs off the edge of the frame.",
     "",
     "NEVER exceed a slot's stated character limit. It is the width of the box the",
     "designer drew, not a suggestion — copy that overruns it renders clipped or",

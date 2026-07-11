@@ -15,11 +15,8 @@ import { db, schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
-import {
-  classifyRunError,
-  RunFailure,
-  truncateDetail,
-} from "../../lib/run-failure.js";
+import { classifyRunError, RunFailure } from "../../lib/run-failure.js";
+import { capVideoDuration, muxVoiceover } from "../../lib/video/merge.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
 import type {
   TemplateRenderResult,
@@ -31,11 +28,21 @@ import { persistAsset, persistSheet } from "../persist.js";
 import type { SkillContext } from "../types.js";
 import { prepareTemplateClips } from "./clips.js";
 import { fillTemplateText } from "./fill-text/index.js";
+import { MASTER_CLIP_SECONDS } from "./geometry.js";
+import { dropAssetsByLayerName, parseMissingLayerName } from "./self-heal.js";
 import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
 import { buildRenderInput } from "./render-input.js";
 
 type Video = typeof schema.videos.$inferSelect;
+
+/**
+ * How many times a single `template_render` submits to Nexrender before giving
+ * up: one real attempt plus up to three self-heal retries, each dropping one
+ * unresolvable layer. Bounds the paid-render cost of a pathological template
+ * while still clearing the common one-or-two-bad-layer case.
+ */
+const MAX_TEMPLATE_RENDER_ATTEMPTS = 4;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,9 +93,9 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
 
     const template = runTemplateSchema.parse(run.template);
     const imageUrls = await generatedImageUrls(runId);
-    // Cut the 15s master into a slice per video slot, and route its voiceover to
-    // the template's audio layer. Idempotent: a rewind into this step reuses the
-    // slices already cut rather than paying for ffmpeg twice.
+    // Cut the 15s master into a slice per video slot, and pull out its voiceover.
+    // Idempotent: a rewind into this step reuses the slices already cut rather
+    // than paying for ffmpeg twice.
     const { clipUrls, audioUrl, audioLayerName } = await prepareTemplateClips(
       runId,
       template,
@@ -110,41 +117,78 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
       assets: input.assets.length,
       images: imageUrls.size,
       clips: clipUrls.size,
-      voiceover: audioLayerName ?? "on the longest slice",
+      voiceover: audioLayerName ?? "muxed over the render",
     });
 
     const provider = createTemplateRenderProvider();
 
-    // Idempotent resume: reuse a persisted job id rather than re-submitting.
-    let task: TemplateRenderTask;
-    if (run.nexrenderJobId) {
-      log.info("resuming existing render job", { jobId: run.nexrenderJobId });
-      task = { jobId: run.nexrenderJobId };
-    } else {
-      task = await provider.submitRender(input);
-      await db
-        .update(schema.runs)
-        .set({ nexrenderJobId: task.jobId })
-        .where(eq(schema.runs.id, runId));
-    }
-
-    // Poll until terminal or the dead-man's-switch timeout fires.
-    const deadline = Date.now() + env.NEXRENDER_POLL_TIMEOUT_MS;
+    // Render with self-healing. Nexrender aborts the WHOLE job on the first layer
+    // it cannot resolve (this template duplicates the layer name "dynamic", which
+    // its text function then can't find) and offers no per-asset skip. So on a
+    // "couldn't find any layers by provided name (X)" failure we drop every asset
+    // targeting X and re-render, bounded: the ad renders with the layers that DO
+    // resolve, and the rest keep the template's own artwork. The single
+    // `template_render: started` event above keeps the amber spinner alive across
+    // every attempt, so the timeline reads as continuous work.
+    let assets = input.assets;
+    const skippedLayers: string[] = [];
     let result: TemplateRenderResult = { state: "processing" };
-    while (Date.now() < deadline) {
-      result = await provider.pollRender(task);
-      if (result.state === "completed" || result.state === "failed") break;
-      await sleep(env.NEXRENDER_POLL_INTERVAL_MS);
-    }
+    let task: TemplateRenderTask | undefined;
 
-    if (result.state === "failed") {
-      throw new RunFailure(
-        "TEMPLATE_RENDER_FAILED",
-        "The template render failed.",
-        result.error ?? `Nexrender job ${task.jobId} failed`,
-      );
-    }
-    if (result.state !== "completed" || !result.videoUrl) {
+    for (let attempt = 1; attempt <= MAX_TEMPLATE_RENDER_ATTEMPTS; attempt++) {
+      // Reuse a persisted job id ONLY on the first attempt (idempotent resume
+      // after a crash). A self-heal drop always submits a fresh job.
+      if (attempt === 1 && run.nexrenderJobId) {
+        log.info("resuming existing render job", { jobId: run.nexrenderJobId });
+        task = { jobId: run.nexrenderJobId };
+      } else {
+        task = await provider.submitRender({ ...input, assets });
+        await db
+          .update(schema.runs)
+          .set({ nexrenderJobId: task.jobId })
+          .where(eq(schema.runs.id, runId));
+      }
+
+      // Poll until terminal or the dead-man's-switch timeout fires.
+      const deadline = Date.now() + env.NEXRENDER_POLL_TIMEOUT_MS;
+      result = { state: "processing" };
+      while (Date.now() < deadline) {
+        result = await provider.pollRender(task);
+        if (result.state === "completed" || result.state === "failed") break;
+        await sleep(env.NEXRENDER_POLL_INTERVAL_MS);
+      }
+
+      if (result.state === "completed") break;
+
+      if (result.state === "failed") {
+        const missing = parseMissingLayerName(result.error);
+        const droppable =
+          missing != null &&
+          attempt < MAX_TEMPLATE_RENDER_ATTEMPTS &&
+          assets.some((a) => a.layerName === missing);
+        if (droppable) {
+          const before = assets.length;
+          assets = dropAssetsByLayerName(assets, missing);
+          skippedLayers.push(missing);
+          log.warn(
+            "↻ render failed on an unresolvable layer — retrying without it",
+            { jobId: task.jobId, skipping: missing, dropped: before - assets.length, attempt },
+          );
+          // Force a fresh submit next iteration.
+          await db
+            .update(schema.runs)
+            .set({ nexrenderJobId: null })
+            .where(eq(schema.runs.id, runId));
+          continue;
+        }
+        throw new RunFailure(
+          "TEMPLATE_RENDER_FAILED",
+          "The template render failed.",
+          result.error ?? `Nexrender job ${task.jobId} failed`,
+        );
+      }
+
+      // Neither completed nor failed → the poll loop hit the timeout.
       throw new RunFailure(
         "TEMPLATE_RENDER_FAILED",
         "The template render timed out.",
@@ -152,18 +196,55 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
       );
     }
 
-    // Download the Nexrender output and re-host to Supabase — the Cloud URL
-    // expires (~14d), so persist our own copy immediately.
-    log.info("▶ downloading render output", { jobId: task.jobId });
-    const res = await fetchWithRetry(result.videoUrl, undefined, {
-      label: "template-render-download",
-    });
-    if (!res.ok) {
-      throw new Error(
-        `template_render: download failed ${res.status} for job ${task.jobId}`,
+    if (!task || result.state !== "completed" || !result.videoUrl) {
+      throw new RunFailure(
+        "TEMPLATE_RENDER_FAILED",
+        "The template render failed.",
+        result.error ?? "the template render did not complete",
       );
     }
-    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (skippedLayers.length > 0) {
+      log.info("✓ render healed by skipping unresolvable layers", {
+        skippedLayers: skippedLayers.join(", "),
+      });
+    }
+
+    // The template has no audio layer to inject the speech into — the common
+    // case, most .aep projects have none — so lay it over the finished render.
+    // `-shortest` trims the 15s track to the composition's own runtime.
+    const muxed = !audioLayerName && audioUrl;
+
+    // Download the Nexrender output and re-host to Supabase — the Cloud URL
+    // expires (~14d), so persist our own copy immediately.
+    let bytes: Uint8Array;
+    if (muxed) {
+      log.info("▶ muxing the voiceover over the render", { jobId: task.jobId });
+      bytes = (await muxVoiceover(result.videoUrl, audioUrl)).bytes;
+    } else {
+      log.info("▶ downloading render output", { jobId: task.jobId });
+      const res = await fetchWithRetry(result.videoUrl, undefined, {
+        label: "template-render-download",
+      });
+      if (!res.ok) {
+        throw new Error(
+          `template_render: download failed ${res.status} for job ${task.jobId}`,
+        );
+      }
+      bytes = new Uint8Array(await res.arrayBuffer());
+    }
+
+    // The product is always a 15s ad. A composition can run longer (many/long
+    // slots) and would otherwise render at full comp length, so crop the tail.
+    // Skip only when the comp is provably <= the master, to avoid a needless
+    // re-encode of the common short-template case.
+    const compSec = template.metadata.durationSec;
+    if (compSec == null || compSec > MASTER_CLIP_SECONDS) {
+      log.info("▶ cropping render to master length", {
+        compSec,
+        maxSec: MASTER_CLIP_SECONDS,
+      });
+      bytes = (await capVideoDuration(bytes, MASTER_CLIP_SECONDS)).bytes;
+    }
 
     const persisted = await persistSheet<Video>({
       runId,
@@ -184,6 +265,12 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
               nexrenderTemplateId,
               nexrenderJobId: task.jobId,
               composition,
+              voiceover: muxed ? "muxed" : "audio-layer",
+              // Layers Nexrender could not resolve and the render dropped to
+              // recover. Absent on a clean render; audits a partially-healed one.
+              ...(skippedLayers.length > 0
+                ? { skippedLayers: skippedLayers.join(", ") }
+                : {}),
             },
             status: "completed",
           })
@@ -235,16 +322,9 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
     const raw = err instanceof Error ? err.message : String(err);
     const detail = failure.detail ?? raw;
     log.error("✗ template_render failed", { code: failure.code, err: detail });
-    await writeStepEvent({
-      runId,
-      step: "template_render",
-      status: "failed",
-      payload: {
-        error: failure.userMessage,
-        code: failure.code,
-        detail: truncateDetail(detail),
-      },
-    });
+    // The single `failed` step-event is written by `failRun` in the orchestrator,
+    // which catches this re-thrown RunFailure. Writing one here too produced two
+    // identical `failed` rows for one failure and a flickering timeline.
     throw new RunFailure(failure.code, failure.userMessage, detail, {
       cause: err,
     });
