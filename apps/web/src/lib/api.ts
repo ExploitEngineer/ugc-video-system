@@ -109,6 +109,9 @@ export async function uploadEditedVideo(
 /** The header the API's admin middleware checks. */
 export const ADMIN_KEY_HEADER = "x-admin-key";
 
+/** The uploader's own claim about the body size. A hint, never trusted. */
+export const TEMPLATE_BYTES_HEADER = "x-template-bytes";
+
 /**
  * Forward a request to an `/admin/*` API route, carrying the admin key through.
  *
@@ -122,12 +125,17 @@ export async function proxyAdmin(
 ): Promise<Response> {
   const key = req.headers.get(ADMIN_KEY_HEADER) ?? "";
   const contentType = req.headers.get("content-type");
+  // `content-length` does not survive a streamed `fetch` (undici sends the body
+  // chunked), so the browser also states the size in `x-template-bytes`. It lets
+  // the API answer 413 before reading a gigabyte it is going to throw away.
+  const declaredBytes = req.headers.get(TEMPLATE_BYTES_HEADER);
   try {
     const res = await fetch(apiUrl(path), {
       method: req.method,
       headers: {
         [ADMIN_KEY_HEADER]: key,
         ...(contentType ? { "content-type": contentType } : {}),
+        ...(declaredBytes ? { [TEMPLATE_BYTES_HEADER]: declaredBytes } : {}),
       },
       ...(opts.stream
         ? { body: req.body, duplex: "half" }
