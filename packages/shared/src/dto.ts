@@ -154,6 +154,27 @@ export const runSchema = z.object({
   errorCode: runErrorCodeSchema.nullable(),
   /** Pending step-by-step feedback message, consumed by the next regen. */
   feedback: z.string().nullable(),
+  /**
+   * `pipeline: "template"` only — the library template this ad is composited
+   * into. Unlike `pipeline`, this CAN change after creation: `POST
+   * /runs/:id/retemplate` swaps it and re-composites the same video.
+   * Null on a `video`-pipeline run, and on a template run whose template row was
+   * later deleted (`ON DELETE SET NULL`).
+   */
+  templateId: z.string().nullable(),
+  /** The template's display name, read off the run's immutable snapshot. */
+  templateName: z.string().nullable(),
+  /**
+   * A re-template is in flight: the worker is re-running `template_plan →
+   * template_fill → template_images → template_render` against a NEW template,
+   * reusing the reference sheets, the storyboard and the 15s master clip.
+   *
+   * The timeline needs this. Step events are append-only, so without it a run
+   * mid-re-template is indistinguishable from a fresh one: the reference sheets'
+   * old `started` rows read as "Generating" and the four re-running steps read
+   * as "Passed" before they run. Cleared when `template_render` lands.
+   */
+  retemplating: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -327,10 +348,24 @@ export const regenerateVideoInputSchema = z.object({
 });
 export type RegenerateVideoInput = z.infer<typeof regenerateVideoInputSchema>;
 
+/**
+ * Body for `POST /runs/:id/retemplate` — composite the ad's EXISTING video into
+ * a different template. The reference sheets, the storyboard and the 15s master
+ * clip are template-independent and are reused; only the plan, the copy, the
+ * stills and the composite are re-derived for the new slots.
+ *
+ * The new template must have the same aspect ratio as the run: the master was
+ * shot in the original template's shape.
+ */
+export const retemplateInputSchema = z.object({
+  templateId: z.string().uuid(),
+});
+export type RetemplateInput = z.infer<typeof retemplateInputSchema>;
+
 // ── Template pipeline: auto-discovered slots + the run's template snapshot ───
 // An ADMIN uploads a template into a global library; we register it with
 // Nexrender, introspect it via its v3 API, classify its layers into SLOTS, and
-// render a cheap `preview: true` clip so users can see it before picking it.
+// render its own placeholder content once so users can see it before picking it.
 // See `apps/api/src/agents/template/introspect.ts`.
 
 /**
@@ -355,12 +390,29 @@ export const templateSlotSchema = z.object({
   composition: z.string(),
   /** Display label — the discovered layer/placeholder name. */
   layerName: z.string(),
-  /** The exact string to send as the render job's `layerName`. */
+  /**
+   * Stable key for this slot: what the plan, the copywriter and the image agent
+   * all address it by, and the `layerName` a render job sends when `targetBy` is
+   * `"name"`. Not necessarily the layer's real name — see `targetBy`.
+   */
   jobLayerName: z.string(),
+  /**
+   * How a render job addresses this layer.
+   *
+   * `"name"` when the designer gave the layer a name (always true of text
+   * layers, which After Effects names after their own words).
+   *
+   * `"index"` when they did not. An unnamed footage layer stores an empty name
+   * and After Effects merely DISPLAYS its source's name, which is what Nexrender
+   * reports — aiming a media asset at that name fails outright. Such a layer can
+   * only be reached by its stacking position, and `nx:layer-autoscale` cannot
+   * touch it (that function takes a `layerName` and nothing else).
+   */
+  targetBy: z.enum(["name", "index"]).default("name"),
+  /** 1-based stacking index, from the project file. Required by `targetBy: "index"`. */
+  layerIndex: z.number().int().positive().nullable().default(null),
   /** TEXT only: the layer's current words (= its name), used as an AI hint. */
   currentText: z.string().optional(),
-  /** VIDEO only: a placeholder precomp with no introspectable inner layer. */
-  empty: z.boolean().optional(),
   /** How to inject: a normal asset, or an `nx:text-params-set` function asset. */
   injectVia: z.enum(["asset", "function"]),
 
@@ -376,28 +428,28 @@ export const templateSlotSchema = z.object({
   imageClass: imageSlotClassSchema.optional(),
   /**
    * TEXT only: how many characters this box can hold before it overflows the
-   * designer's layout. Derived from the placeholder's own length and, when
-   * geometry + font size are known, the box width. The copywriter treats this
-   * as a hard ceiling rather than a vague "match the rough length".
+   * designer's layout. Derived from the placeholder the designer typed, which is
+   * the only trustworthy signal — a split-text layer's box is far wider than its
+   * glyphs. The copywriter treats this as a hard ceiling rather than a vague
+   * "match the rough length".
    */
   charBudget: z.number().int().positive().optional(),
+
+  // ── Position on the main composition's timeline (`agents/template/timeline.ts`) ──
   /**
-   * TEXT only: the layer's font family, IF Nexrender's opaque `data` bag
-   * carries it (undocumented — probed defensively). We never SEND this back;
-   * it exists so the plan agent knows how wide the copy will render. The
-   * designer's own typography is always preserved.
+   * Seconds into the main composition where this slot first appears, resolved
+   * through the whole nesting chain. Null when the layer's window could not be
+   * resolved (an older snapshot, or a comp nothing places).
    */
-  font: z.string().optional(),
+  startSec: z.number().nonnegative().nullable().default(null),
   /**
-   * VIDEO only: how long this slot's footage is, in seconds.
+   * VIDEO only: how long the slot is actually on screen.
    *
-   * A slot that is a placeholder PRECOMP has one: its child composition's own
-   * `duration`. A slot that is a direct file layer has none — Nexrender's v3
-   * layers response carries no time fields at all — so this is null and the
-   * slice planner falls back to an even split of the master.
-   *
-   * This is what lets a 7s/2s/2s template receive three DIFFERENT slices of one
-   * 15s master rather than the same opening seconds three times.
+   * NOT the placeholder composition's own `duration` — a designer's empty `PH_2`
+   * comp routinely reports 60 seconds while the scene that places it is visible
+   * for 2.3. This is the resolved window, and it is what lets a 4-scene template
+   * receive four DIFFERENT slices of one 15s master rather than the same opening
+   * seconds four times.
    */
   durationSec: z.number().positive().nullable().default(null),
 });

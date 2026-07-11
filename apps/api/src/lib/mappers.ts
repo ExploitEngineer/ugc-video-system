@@ -108,6 +108,9 @@ export type RunListRow = Pick<
   | "error"
   | "errorCode"
   | "feedback"
+  | "templateId"
+  | "template"
+  | "retemplating"
   | "createdAt"
   | "updatedAt"
 >;
@@ -142,6 +145,12 @@ export function toRunDto(row: RunListRow): Run {
     // degrade an unknown value to null rather than 500-ing the poll.
     errorCode: runErrorCodeSchema.nullable().catch(null).parse(row.errorCode ?? null),
     feedback: row.feedback ?? null,
+    templateId: row.templateId ?? null,
+    // Off the run's own immutable snapshot, not a join: the library row can be
+    // archived (which nulls `template_id`) while the ad keeps rendering.
+    templateName:
+      (row.template as { displayName?: string } | null)?.displayName ?? null,
+    retemplating: row.retemplating,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
