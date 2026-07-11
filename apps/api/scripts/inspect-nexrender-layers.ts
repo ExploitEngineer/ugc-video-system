@@ -183,14 +183,14 @@ async function main(): Promise<void> {
   // ── THE `data`-BAG PROBE ──
   // Nexrender's v3 layer schema declares `data` as an opaque bag
   // (`additionalProperties: true`) and documents NOTHING about its contents.
-  // No endpoint anywhere reports which fonts a template needs (checked against
-  // the v3 template-metadata and the fonts endpoints), so this bag is the only
-  // possible source. Dump every distinct key path we see, across every layer and
-  // composition, so `extractFont`/`extractFontSize` in
-  // `src/agents/template/introspect.ts` can be pointed at the REAL names instead
-  // of the defensive guesses they currently probe.
   //
-  // Run this against a real .aep BEFORE writing anything font-dependent.
+  // It is EMPTY (`{}`) on every layer of every real project introspected so far:
+  // no font, no size, no timing. Timing lives in the top-level `start_time` /
+  // `in_point` / `out_point` fields instead (`agents/template/timeline.ts`), and
+  // fonts are not exposed anywhere at all — which is fine, because we never send
+  // one and Nexrender resolves the designer's typography itself.
+  //
+  // This dump exists to catch the day that changes.
   const keyPaths = (obj: unknown, prefix = ""): string[] => {
     if (typeof obj !== "object" || obj === null) return [];
     return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) => {
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     const fontish = [...dataKeys.keys()].filter((k) => /font|family|size|typeface/i.test(k));
     console.log(
       fontish.length
-        ? `\n  ★ FONT-ISH KEYS: ${fontish.join(", ")}\n    → point extractFont/extractFontSize at these exact paths.`
+        ? `\n  ★ FONT-ISH KEYS: ${fontish.join(", ")}`
         : "\n  no font-ish keys — fonts are not exposed here.",
     );
   }

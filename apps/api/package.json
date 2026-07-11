@@ -21,7 +21,8 @@
     "video:verify": "tsx scripts/verify-video.ts",
     "cda:verify": "tsx scripts/verify-cda.ts",
     "byteplus:probe": "tsx scripts/probe-byteplus.ts",
-    "nexrender:inspect": "tsx scripts/inspect-nexrender-layers.ts"
+    "nexrender:inspect": "tsx scripts/inspect-nexrender-layers.ts",
+    "template:probe": "tsx scripts/probe-template-render.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
@@ -29,6 +30,7 @@
     "@ugc/shared": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "fflate": "^0.8.3",
     "ffmpeg-static": "^5.2.0",
     "hono": "^4.12.23",
     "openai": "^6.39.1",
