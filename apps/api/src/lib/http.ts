@@ -7,6 +7,10 @@
 // caller — it retries with capped exponential backoff + jitter instead. This is
 // the network-layer robustness the pipeline relies on (no timeouts/fallbacks).
 
+import { createReadStream } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+
 import { createLogger } from "./log.js";
 
 const log = createLogger("http");
@@ -93,4 +97,109 @@ export async function fetchWithRetry(
   throw lastErr instanceof Error
     ? lastErr
     : new Error(`${label} failed after ${attempts} attempts`);
+}
+
+export interface PutFileResult {
+  status: number;
+  ok: boolean;
+  body: string;
+}
+
+/**
+ * PUT a file from disk, streamed, with an explicit `Content-Length`.
+ *
+ * `fetch` cannot do this job. Its body must be a stream to stay off the heap,
+ * and undici then sends `Transfer-Encoding: chunked`, which a presigned S3 PUT
+ * rejects; a stream is also consumed by the first attempt, so it cannot be
+ * retried. `node:http`'s `request()` lets us set the length up front and open a
+ * fresh `createReadStream` per attempt.
+ *
+ * Retries transient failures with the same capped-exponential backoff as
+ * `fetchWithRetry`. Safe because the target is one idempotent object: re-sending
+ * after a dropped socket overwrites it rather than duplicating anything.
+ */
+export async function putFile(
+  url: string,
+  file: { path: string; size: number; contentType: string },
+  opts: FetchRetryOptions = {},
+): Promise<PutFileResult> {
+  const attempts = Math.max(1, opts.attempts ?? 4);
+  const base = opts.baseDelayMs ?? 600;
+  const label = opts.label ?? "putFile";
+  const timeoutMs = opts.timeoutMs ?? 300_000;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await putFileOnce(url, file, timeoutMs);
+      if (!RETRYABLE_STATUS.has(res.status) || attempt === attempts) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+      log.warn("retryable status", { label, attempt, status: res.status });
+    } catch (err) {
+      lastErr = err;
+      log.warn("put error", {
+        label,
+        attempt,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      if (attempt === attempts) break;
+    }
+    await sleep(
+      Math.min(base * 2 ** (attempt - 1), 12_000) +
+        Math.floor(Math.random() * 400),
+    );
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(`${label} failed after ${attempts} attempts`);
+}
+
+function putFileOnce(
+  url: string,
+  file: { path: string; size: number; contentType: string },
+  timeoutMs: number,
+): Promise<PutFileResult> {
+  const target = new URL(url);
+  const request = target.protocol === "http:" ? httpRequest : httpsRequest;
+
+  return new Promise<PutFileResult>((resolve, reject) => {
+    const req = request(
+      target,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.contentType,
+          "Content-Length": file.size,
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        // Read the body: a 4xx from the store explains itself, and an unread
+        // response keeps the socket from being released.
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => {
+          if (chunks.length < 32) chunks.push(c);
+        });
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          resolve({
+            status,
+            ok: status >= 200 && status < 300,
+            body: Buffer.concat(chunks).toString("utf8").slice(0, 2000),
+          });
+        });
+        res.on("error", reject);
+      },
+    );
+
+    req.on("timeout", () => req.destroy(new Error("PUT timed out")));
+    req.on("error", reject);
+
+    const body = createReadStream(file.path);
+    body.on("error", (err) => {
+      req.destroy(err);
+      reject(err);
+    });
+    body.pipe(req);
+  });
 }
