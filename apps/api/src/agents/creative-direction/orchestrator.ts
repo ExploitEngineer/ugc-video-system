@@ -700,9 +700,19 @@ async function executeStep(
     case "template_render": {
       // pipeline:"template" only, automatic (never gated): composite the
       // final_video + the template_fill text into the template registered at
-      // run creation. Writes its own started/passed/failed events and
-      // persists the templated_video alongside the final_video.
+      // run creation. Writes its own started/passed events (the single `failed`
+      // is written by `failRun` below on the re-thrown RunFailure) and persists
+      // the templated_video alongside the final_video.
       await templateAgent.applyTemplate(ctx);
+      // The composite is the last step of a re-template, so the short chain is
+      // spent. Leaving the flag set would make a later `regenerate-video` skip
+      // the `video` step and re-render the template over the clip it just
+      // deleted. Cleared here rather than in the route: this is the only place
+      // that knows the re-template actually finished.
+      await db
+        .update(schema.runs)
+        .set({ retemplating: false })
+        .where(eq(schema.runs.id, runId));
       return {};
     }
   }
@@ -1117,6 +1127,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         run.criticEnabled,
         run.duration,
         run.pipeline,
+        run.retemplating,
       );
       if (!step) {
         await setRun(runId, { status: "completed" });
@@ -1209,6 +1220,7 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       run.criticEnabled,
       run.duration,
       run.pipeline,
+      run.retemplating,
     );
     const gate = gateForNext(next, referenceExists);
     if (run.mode === "confirm" && gate) {

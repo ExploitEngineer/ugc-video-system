@@ -87,8 +87,12 @@ export function nextStep(
   criticEnabled: boolean,
   duration: Duration = "15s",
   pipeline: Pipeline = "video",
+  retemplating = false,
 ): Step | null {
   const multi = isMultiSegment(duration);
+  // `retemplating` only ever means anything on a template run. Bind it to the
+  // pipeline here so no other chain can be steered by a stale flag.
+  const reTemplate = pipeline === "template" && retemplating;
   // What follows the reference phase: inspection (critic on), else the
   // multi-segment N×4-panel master storyboard (30/45/60s) or the 15s single
   // storyboard. (The `narrative_outline` step is retired — the master is
@@ -130,15 +134,27 @@ export function nextStep(
     // spend, because its per-slot output shapes every downstream agent. The
     // reference phase follows it: `driveRun` treats a forward `person_sheet`
     // as the parallel product ∥ person phase.
+    //
+    // RE-TEMPLATING short-circuits straight to the copywriter. The user swapped
+    // the template on a finished ad, so the reference sheets and the storyboard
+    // already exist and are template-independent. Re-running the storyboard
+    // would be worse than wasteful: it writes a NEW transcript, and the copy
+    // would then be written against a script the kept master clip never spoke.
+    // Nothing between here and `template_fill` reads `runs.template_plan`.
     case "template_plan":
-      return "person_sheet";
+      return reTemplate ? "template_fill" : "person_sheet";
     case "template_fill":
       return "template_images";
     // Images before video: Seedance is the most expensive call in the pipeline
     // and belongs as late as possible, so everything that can fail cheaply
     // fails before it.
+    //
+    // When re-templating, the master clip already exists and is entirely
+    // template-independent. Skip `video` OUTRIGHT rather than leaning on its
+    // `persistedFinalVideo` guard, so no phantom `video` step lands on the
+    // timeline for a clip nobody regenerated.
     case "template_images":
-      return "video";
+      return reTemplate ? "template_render" : "video";
     // Once the final clip exists, a template run composites it (plus the AI
     // copy + images) into the template picked at run creation — never gated,
     // since the template was validated before the run existed. A normal

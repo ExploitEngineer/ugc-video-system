@@ -144,6 +144,77 @@ describe("nextStep — template pipeline chain", () => {
       nextStep("template_render", false, false, "15s", "template"),
     ).toBeNull();
   });
+});
+
+// The user swapped the template on a FINISHED ad. The reference sheets, the
+// storyboard and the 15s Seedance master are all template-independent and must
+// be reused; only the four template-keyed artifacts are re-derived.
+//
+//   template_plan → template_fill → template_images → template_render
+//
+describe("nextStep — re-templating a finished ad", () => {
+  const retemplate = (step: Parameters<typeof nextStep>[0]) =>
+    nextStep(step, false, false, "15s", "template", true);
+
+  it("template_plan goes straight to the copywriter, NOT the reference phase", () => {
+    // Re-running the reference phase would re-pay for both 4K sheets, and the
+    // storyboard behind it would write a NEW transcript — so the copy would be
+    // written against a script the kept master clip never spoke.
+    expect(retemplate("template_plan")).toBe("template_fill");
+  });
+
+  it("template_images goes straight to the render, skipping `video` outright", () => {
+    // The master clip already exists and is template-independent. Skipping the
+    // step (rather than relying on its `persistedFinalVideo` guard) keeps a
+    // phantom `video` event off the run's timeline.
+    expect(retemplate("template_images")).toBe("template_render");
+  });
+
+  it("the whole re-template chain is exactly four steps", () => {
+    const chain: string[] = [];
+    let step: ReturnType<typeof nextStep> = "template_plan";
+    while (step) {
+      chain.push(step);
+      step = retemplate(step);
+    }
+    expect(chain).toEqual([
+      "template_plan",
+      "template_fill",
+      "template_images",
+      "template_render",
+    ]);
+  });
+
+  it("changes NOTHING when the flag is off", () => {
+    expect(nextStep("template_plan", false, false, "15s", "template")).toBe(
+      "person_sheet",
+    );
+    expect(nextStep("template_images", false, false, "15s", "template")).toBe(
+      "video",
+    );
+  });
+
+  it("leaves every non-template pipeline alone", () => {
+    // The flag can only be set on a template run, but the graph must not depend
+    // on that being true.
+    expect(nextStep("template_images", false, false, "15s", "video", true)).toBe(
+      "video",
+    );
+    expect(nextStep("storyboard", false, false, "15s", "video", true)).toBe(
+      "video",
+    );
+  });
+
+  it("still resolves each regenerate-template rewind checkpoint", () => {
+    // `rewindStepForTemplateRegen` returns null | "storyboard" | "video". A
+    // re-template that FAILS mid-chain has to be recoverable by that route.
+    expect(nextStep("storyboard", false, false, "15s", "template", true)).toBe(
+      "template_fill",
+    );
+    expect(nextStep("video", false, false, "15s", "template", true)).toBe(
+      "template_render",
+    );
+  });
 
   it("multi merge: always complete — the template pipeline is single-clip", () => {
     expect(nextStep("merge", false, false, "60s")).toBeNull();
