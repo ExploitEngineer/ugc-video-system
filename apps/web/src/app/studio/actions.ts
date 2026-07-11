@@ -108,3 +108,42 @@ export async function regenerateVideoAction(
     return null;
   }
 }
+
+export type RetemplateResult =
+  | { ok: true; run: RunDetail }
+  | { ok: false; error: string };
+
+/**
+ * Composite this ad's EXISTING video into a different template.
+ *
+ * The reference sheets, the storyboard and the 15s master clip are reused; only
+ * the plan, the on-screen copy, the template's stills and the composite are
+ * re-derived for the new slots. The run flips back to `running` and the worker
+ * drives the short chain.
+ *
+ * Unlike the actions above this one surfaces the API's message rather than
+ * collapsing to `null`: its refusals ("that is already this ad's template", an
+ * aspect-ratio mismatch) are the whole point, and the user has to read them.
+ */
+export async function retemplateAction(
+  runId: string,
+  templateId: string,
+): Promise<RetemplateResult> {
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}/retemplate`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      return { ok: false, error: body?.error ?? `Failed (${res.status}).` };
+    }
+    return { ok: true, run: (await res.json()) as RunDetail };
+  } catch (err) {
+    console.error("[retemplateAction] request to API failed:", err);
+    return { ok: false, error: "Could not reach the server." };
+  }
+}

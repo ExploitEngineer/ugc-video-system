@@ -37,6 +37,9 @@ function Card({ t }: { t: TemplateSummary }) {
       >
         {t.previewVideoUrl ? (
           // Muted + playsInline so hover-play is allowed by the browser at all.
+          // `relative z-10`: the card's `backdrop-blur` opens a backdrop root,
+          // and Brave will not hit-test a <video> inside one — without this the
+          // pointer never enters the element and the hover preview never plays.
           <video
             src={t.previewVideoUrl}
             poster={t.previewPosterUrl ?? undefined}
@@ -44,7 +47,7 @@ function Card({ t }: { t: TemplateSummary }) {
             loop
             playsInline
             preload="none"
-            className="size-full object-cover"
+            className="relative z-10 size-full object-cover"
             onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
             onMouseLeave={(e) => {
               e.currentTarget.pause();

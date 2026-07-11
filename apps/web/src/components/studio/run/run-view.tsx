@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { RunDetail } from "@ugc/shared";
 import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
@@ -37,10 +38,12 @@ import { FeedbackBar } from "@/components/studio/run/feedback-bar";
 import { AgentMessage, UserMessage } from "@/components/studio/run/message";
 import { NowRunning } from "@/components/studio/run/now-running";
 import { RegenerateClip } from "@/components/studio/run/regenerate-clip";
+import { RetemplateDialog } from "@/components/studio/run/retemplate-dialog";
 import {
   GATE_NEXT_LABEL,
   gateOf,
   isTerminal,
+  optimisticRegen,
 } from "@/components/studio/run/run-meta";
 import { ScriptPanel } from "@/components/studio/run/script-panel";
 import { StepTimeline } from "@/components/studio/run/step-timeline";
@@ -163,11 +166,29 @@ export function RunView({ runId }: { runId: string }) {
 
   const regenerateTemplateMutation = useMutation({
     mutationFn: () => regenerateTemplateAction(runId),
+    // Amber loader on the click. The retry re-runs from the step that failed,
+    // mirroring the API's `rewindStepForTemplateRegen` → its next step; the
+    // button only shows for these two codes.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<RunDetail>(queryKey);
+      if (prev) {
+        const target =
+          prev.errorCode === "TEMPLATE_FILL_FAILED"
+            ? "template_fill"
+            : "template_render";
+        queryClient.setQueryData(queryKey, optimisticRegen(prev, target));
+      }
+      return { prev };
+    },
     onSuccess: (detail) => {
       if (detail) queryClient.setQueryData(queryKey, detail);
       toast.message("Retrying the template…");
     },
-    onError: () => toast.error("Couldn’t retry — try again"),
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
+      toast.error("Couldn’t retry — try again");
+    },
   });
 
   // Record this run in the sidebar history — covers both freshly-created runs
@@ -262,6 +283,10 @@ export function RunView({ runId }: { runId: string }) {
   const finalVideo = isTemplateRun
     ? templatedVideo
     : (editedVideo ?? run.assets.find((a) => a.kind === "final_video"));
+  // The precondition for re-templating: there has to be a generated video to
+  // re-composite. Mirrors the API's own check, so a run that failed before the
+  // clip existed never offers the action.
+  const hasGeneratedVideo = run.assets.some((a) => a.kind === "final_video");
   // Multi-segment: the N 15s segment clips + the N segment storyboard rows.
   // Segments finish in parallel (random order), so order by the `segmentIndex`
   // stamped on each asset's meta, falling back to original order if absent.
@@ -379,6 +404,22 @@ export function RunView({ runId }: { runId: string }) {
 
       {/* Agent — live progress + the pipeline timeline. */}
       <AgentMessage label="Pipeline">
+        {/* A re-template lights up only four of the eight rows and greys the
+            rest. Say why, at the moment it is true, rather than leaving a
+            half-lit timeline to be puzzled over. */}
+        {run.retemplating && (
+          <div className="border-warning/40 bg-warning/5 mb-3 flex items-start gap-3 rounded-xl border px-4 py-3">
+            <LayoutTemplateIcon className="text-warning mt-0.5 size-4 shrink-0" />
+            <p className="text-muted-foreground text-sm">
+              Rebuilding in{" "}
+              <span className="text-foreground font-medium">
+                {run.templateName ?? "the new template"}
+              </span>
+              . Keeping your video, reference sheets and storyboard — only the
+              copy, the template's images and the final assembly are redone.
+            </p>
+          </div>
+        )}
         {running && <NowRunning run={run} />}
         <Card>
           <CardContent className="py-6">
@@ -484,18 +525,34 @@ export function RunView({ runId }: { runId: string }) {
                 </p>
               )}
             </div>
-            {isTemplateRun &&
-              (run.errorCode === "TEMPLATE_RENDER_FAILED" ||
-                run.errorCode === "TEMPLATE_FILL_FAILED") && (
-                <Button
-                  variant="brand"
-                  size="sm"
-                  onClick={() => regenerateTemplateMutation.mutate()}
-                  disabled={regenerateTemplateMutation.isPending}
-                >
-                  Retry
-                </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Retry re-renders the run's FROZEN template snapshot. When the
+                  template itself is at fault, retrying hits the same wall every
+                  time — so offer the way out beside it. */}
+              {isTemplateRun && hasGeneratedVideo && (
+                <RetemplateDialog
+                  runId={run.id}
+                  aspectRatio={run.aspectRatio}
+                  currentTemplateId={run.templateId}
+                  currentTemplateName={run.templateName}
+                  // Re-picking the same template re-resolves its snapshot, which
+                  // is how an admin-side template fix reaches a failed ad.
+                  allowCurrent
+                />
               )}
+              {isTemplateRun &&
+                (run.errorCode === "TEMPLATE_RENDER_FAILED" ||
+                  run.errorCode === "TEMPLATE_FILL_FAILED") && (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    onClick={() => regenerateTemplateMutation.mutate()}
+                    disabled={regenerateTemplateMutation.isPending}
+                  >
+                    Retry
+                  </Button>
+                )}
+            </div>
           </div>
         </AgentMessage>
       )}
@@ -545,7 +602,16 @@ export function RunView({ runId }: { runId: string }) {
                 {/* Regenerate the whole clip (no segmentIndex → 15s final, or
                     all segments of a multi run) reusing the same sheets. */}
                 <RegenerateClip runId={run.id} />
-                {!isTemplateRun && (
+                {isTemplateRun ? (
+                  /* Keep the generated video, composite it into a different
+                     template. The template run's counterpart to "Edit video". */
+                  <RetemplateDialog
+                    runId={run.id}
+                    aspectRatio={run.aspectRatio}
+                    currentTemplateId={run.templateId}
+                    currentTemplateName={run.templateName}
+                  />
+                ) : (
                   <Button asChild variant="brand" size="sm">
                     <Link href={`/studio/${run.id}/edit`}>
                       <PencilIcon className="size-4" />

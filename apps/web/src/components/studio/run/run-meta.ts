@@ -66,6 +66,111 @@ export function stepOrderFor(
  */
 const REFERENCE_STEPS: Step[] = ["product_sheet", "person_sheet"];
 
+/**
+ * What a re-template re-runs, and what it carries over. Exactly the two halves
+ * of `nextStep(..., retemplating: true)` on the API: the plan, the copy, the
+ * stills and the composite are keyed to the template's slots; the reference
+ * sheets, the storyboard and the 15s master clip say nothing about which After
+ * Effects project they end up inside.
+ */
+const REUSED_ON_RETEMPLATE: Step[] = [
+  "creative_brief",
+  "product_sheet",
+  "person_sheet",
+  "storyboard",
+  "video",
+];
+
+/**
+ * When the run's CURRENT template pass began — the newest `template_plan`
+ * `started` event. Null for a run that has never planned a template.
+ *
+ * `template_plan` opens every template pass, on a fresh run and on a
+ * re-template alike, so it is the boundary itself. No extra state needed.
+ */
+function passStartedAt(run: RunDetail): string | null {
+  for (let i = run.stepEvents.length - 1; i >= 0; i--) {
+    const e = run.stepEvents[i];
+    if (e.step === "template_plan" && e.status === "started")
+      return e.createdAt;
+  }
+  return null;
+}
+
+/**
+ * A step's events WITHIN the current pass.
+ *
+ * Step events are append-only: nothing deletes them, so after a re-template the
+ * run still carries pass 1's `template_fill: passed`. Read naively, that makes a
+ * step that has not started yet read as "Passed". Scoping to the pass fixes it,
+ * and is a no-op everywhere else:
+ *
+ *  - a fresh template run — `template_plan` is its first step, so every later
+ *    event is in-pass;
+ *  - `regenerate-video` — `template_plan` does not re-run, the boundary holds;
+ *  - `regenerate-template` rewinding to the start — `template_plan` DOES re-run,
+ *    and there the sheets genuinely re-run too, so dropping their stale events
+ *    is exactly right.
+ */
+function eventsInPass(run: RunDetail, step: Step) {
+  const events = run.stepEvents.filter((e) => e.step === step);
+  const since = passStartedAt(run);
+  if (!since) return events;
+  return events.filter((e) => e.createdAt >= since);
+}
+
+/**
+ * An optimistic RunDetail for the instant a regenerate/re-template button is
+ * clicked — BEFORE the server responds. Flips the run to `running` and appends
+ * a synthetic `regenerated` event on the target step, so the timeline lights the
+ * amber loader on the click rather than after the round trip. The server's
+ * authoritative response (which carries the REAL seeded event) then overwrites
+ * this with an identical-looking state, so the spinner never flickers.
+ *
+ * `onError` rolls back to the pre-click snapshot the caller captured.
+ */
+export function optimisticRegen(
+  run: RunDetail,
+  target: Step,
+  opts: {
+    segmentIndex?: number;
+    /** The re-template case: also flip `retemplating` and the template identity. */
+    retemplate?: { templateId: string; templateName: string | null };
+  } = {},
+): RunDetail {
+  const now = new Date().toISOString();
+  return {
+    ...run,
+    status: "running",
+    retemplating: opts.retemplate ? true : run.retemplating,
+    ...(opts.retemplate
+      ? {
+          templateId: opts.retemplate.templateId,
+          templateName: opts.retemplate.templateName,
+        }
+      : {}),
+    stepEvents: [
+      ...run.stepEvents,
+      {
+        id: `optimistic-${target}-${now}`,
+        runId: run.id,
+        step: target,
+        status: "regenerated" as const,
+        payload:
+          opts.segmentIndex != null
+            ? { source: "user_regen", segmentIndex: opts.segmentIndex }
+            : { source: "user_regen" },
+        createdAt: now,
+      },
+    ],
+  };
+}
+
+/** The video step a `regenerate-video` click re-runs, by run shape. */
+export function videoRegenTarget(run: RunDetail): Step {
+  return isMultiSegment(run.duration) ? "segment_video" : "video";
+}
+
 export const STEP_LABEL: Record<Step, string> = {
   creative_brief: "Creative brief",
   product_sheet: "Product reference sheet",
@@ -178,9 +283,13 @@ export const GATE_NEXT_LABEL: Record<Gate, string> = {
 export type StepState =
   | "pending"
   | "active"
+  /** Re-running against a NEW template, on a run that already has its video. */
+  | "rebuilding"
   | "awaiting"
   | "regenerating"
   | "done"
+  /** Ran in an EARLIER pass and is being carried over, not re-run. */
+  | "reused"
   | "failed"
   | "skipped";
 
@@ -232,7 +341,11 @@ export function activeSteps(run: RunDetail): Step[] {
   const segCount = segmentCountFor(run.duration);
   const active: Step[] = [];
   for (const step of stepOrderFor(run.duration, run.pipeline)) {
-    const events = run.stepEvents.filter((e) => e.step === step);
+    // Pass-scoped, so active-detection agrees with `stepState`'s terminal logic
+    // (which also reads `eventsInPass`). During a re-template a prior pass's
+    // `started`/`passed` would otherwise leak in and flip a step's state. A no-op
+    // for non-template runs — `passStartedAt` is null, so this is all events.
+    const events = eventsInPass(run, step);
     if (events.length === 0) continue;
     if (step === "segment_video") {
       // Parallel fan-out: in flight until all N segments have a TERMINAL latest
@@ -260,12 +373,22 @@ export function stepState(run: RunDetail, step: Step): StepState {
   // `currentStep` is null before the first step completes (and during the
   // parallel reference phase) → -1, so no step reads as "behind currentStep".
   const currentIdx = run.currentStep ? order.indexOf(run.currentStep) : -1;
-  const events = run.stepEvents.filter((e) => e.step === step);
+  // Scoped to the CURRENT pass: a re-template leaves the previous pass's
+  // terminal events behind, and they would otherwise mark a step "Passed"
+  // before it has run.
+  const events = eventsInPass(run, step);
 
   // Skipped reference steps are known up front from the run's asset plan (the
   // backend resolves them from the ad type's asset policy + uploads). Render
   // "Skipped" immediately, never flashing "Generating" during the parallel phase.
   if (run.skippedSteps.includes(step)) return "skipped";
+
+  // A re-template reuses everything that is not keyed to the template's slots.
+  // This must come BEFORE the reference-phase branch below: that branch keys off
+  // `currentStep === null`, which a re-template also sets, and would then find
+  // the PREVIOUS pass's `started` events and report both sheets as "Generating"
+  // while nothing at all is running.
+  if (run.retemplating && REUSED_ON_RETEMPLATE.includes(step)) return "reused";
 
   // Parallel reference phase: while it's in flight (the backend keeps
   // `currentStep` null until BOTH the product and person sheets finish), every
@@ -276,7 +399,8 @@ export function stepState(run: RunDetail, step: Step): StepState {
   if (
     REFERENCE_STEPS.includes(step) &&
     run.status === "running" &&
-    run.currentStep === null
+    run.currentStep === null &&
+    !run.retemplating
   ) {
     if (events.some((e) => e.status === "failed")) return "failed";
     // Synchronize the START of the parallel reference phase: as soon as EITHER
@@ -299,8 +423,19 @@ export function stepState(run: RunDetail, step: Step): StepState {
   // The genuinely in-flight step (derived from step events, not currentStep)
   // shows live — this is what makes the long-running video step read as
   // "Generating" instead of jumping straight to done.
+  // Amber for work being REDONE, brand for work being done the first time. Three
+  // things count as redone: a re-template (`rebuilding`), the confirm-mode revise
+  // loop (`status: regenerating`), and a step whose latest event is `regenerated`
+  // — which is what a user "Regenerate clip" / "Try another template" click seeds,
+  // and what the video retry-ladder writes mid-render. Driving off the EVENT, not
+  // just the run status, is what lets `regenerate-video` (which stays
+  // `status: running`) still read amber.
   if (activeSteps(run).includes(step)) {
-    return run.status === "regenerating" ? "regenerating" : "active";
+    if (run.retemplating) return "rebuilding";
+    const latest = eventsInPass(run, step).at(-1)?.status;
+    if (run.status === "regenerating" || latest === "regenerated")
+      return "regenerating";
+    return "active";
   }
 
   // Event-authoritative terminal status. Step events are the source of truth and

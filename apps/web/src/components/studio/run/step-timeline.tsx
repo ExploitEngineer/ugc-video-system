@@ -56,6 +56,13 @@ const PILL: Record<StepState, { label: string; cls: string; dot: string }> = {
     cls: "border-brand/40 bg-brand/10 text-brand",
     dot: "bg-brand animate-pulse",
   },
+  // Amber, like `regenerating`: both mean work being redone. The label differs
+  // because the cause does — a new template, not a revision.
+  rebuilding: {
+    label: "Rebuilding",
+    cls: "border-warning/40 bg-warning/10 text-warning",
+    dot: "bg-warning animate-pulse motion-reduce:animate-none",
+  },
   awaiting: {
     label: "Ready to confirm",
     cls: "border-brand/40 bg-brand/10 text-brand",
@@ -64,12 +71,19 @@ const PILL: Record<StepState, { label: string; cls: string; dot: string }> = {
   regenerating: {
     label: "Regenerating",
     cls: "border-warning/40 bg-warning/10 text-warning",
-    dot: "bg-warning animate-pulse",
+    dot: "bg-warning animate-pulse motion-reduce:animate-none",
   },
   done: {
     label: "Passed",
     cls: "border-success/30 bg-success/10 text-success",
     dot: "bg-success",
+  },
+  // Ran in an earlier pass and is being carried over. NOT "Skipped": the user
+  // paid for this sheet and it is in the ad. Muted, but a check — it happened.
+  reused: {
+    label: "Reused",
+    cls: "border-border/60 text-muted-foreground",
+    dot: "bg-muted-foreground/40",
   },
   failed: {
     label: "Failed",
@@ -157,10 +171,30 @@ function Indicator({
           <Loader2Icon className="size-4 animate-spin" />
         </span>
       );
+    case "rebuilding":
+      return (
+        <span className={cn(base, "border-warning text-warning bg-warning/10")}>
+          <span className="border-warning/50 absolute inset-0 animate-ping rounded-full border motion-reduce:animate-none" />
+          <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" />
+        </span>
+      );
     case "regenerating":
       return (
         <span className={cn(base, "border-warning text-warning bg-warning/10")}>
-          <Loader2Icon className="size-4 animate-spin" />
+          <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" />
+        </span>
+      );
+    case "reused":
+      // A check, not a minus: this step ran and its artifact is in the ad. The
+      // muted treatment says it was carried over rather than redone.
+      return (
+        <span
+          className={cn(
+            base,
+            "border-border/70 bg-muted/40 text-muted-foreground/70",
+          )}
+        >
+          <CheckIcon className="size-4" />
         </span>
       );
     case "awaiting":
