@@ -106,8 +106,8 @@ export const projects = pgTable("projects", {
  *
  * Users never upload here — they PICK from this table (`GET /templates`), which
  * is why every row carries a rendered `preview_video_url`: Nexrender exposes no
- * thumbnail endpoint, so a cheap `preview: true` render of the template's own
- * placeholder content is the only way to show a user what they are choosing.
+ * thumbnail endpoint, so a full render of the template's own placeholder content
+ * is the only way to show a user what they are choosing.
  * A preview belongs to no run, and `assets.run_id` is NOT NULL, so preview
  * files live under their own `templates/{id}/…` storage prefix and their URLs
  * are columns here rather than `assets` rows.
@@ -131,7 +131,13 @@ export const templates = pgTable(
 
     status: text("status").notNull().default("registering"), // TemplateStatus — text + CHECK so new values need no enum migration
     structure: jsonb("structure"), // TemplateStructure — slots[], comps, dims, duration, frame rate
-    metadata: jsonb("metadata"), // TemplateMetadata — durationSec, frameRate, aspectRatio, clipSeconds, trimComp, slotCounts
+    metadata: jsonb("metadata"), // TemplateMetadata — durationSec, frameRate, aspectRatio, slotCounts
+    // aeid → { index, name, composition }, parsed out of the uploaded .aep at
+    // upload time (`agents/template/aep.ts`). Nexrender's introspection reports a
+    // layer's SOURCE name and lists layers in creation order, so this is the only
+    // place a media asset's real `layerIndex` comes from. Null for a project we
+    // could not parse; targeting then falls back to the reported name.
+    aepLayers: jsonb("aep_layers"),
 
     previewVideoUrl: text("preview_video_url"),
     previewVideoPath: text("preview_video_path"), // Supabase Storage object path (internal)
@@ -223,6 +229,7 @@ export const runs = pgTable(
     templatePlan: jsonb("template_plan"), // TemplatePlan { conceptSummary, slots[] } — written by the template_plan step, read by the storyboard, copywriter, image and video agents so all four describe the same ad
     templateTextFill: jsonb("template_text_fill"), // TemplateTextFillEntry[] { jobLayerName, value } — written by the template_fill step (LLM), consumed by template_render
     nexrenderJobId: text("nexrender_job_id"), // Nexrender Cloud job id — persisted on submit for idempotent resume/poll of template_render
+    retemplating: boolean("retemplating").notNull().default(false), // pipeline:"template" only — the user swapped the template on a finished ad. Re-derives plan/copy/stills/composite for the new slots and REUSES the 15s master clip: `nextStep` skips the reference phase, the storyboard and `video`. Cleared when template_render lands.
     lockedAt: timestamp("locked_at", { withTimezone: true }), // worker lock — one driver per run
     lockedBy: text("locked_by"), // worker fencing token (workerId) — losing driver self-aborts
 
