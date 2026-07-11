@@ -11,11 +11,9 @@ import {
   countSlots,
   deriveAspectRatio,
   detectMainComposition,
-  extractFont,
-  extractFontSize,
-  extractLayerDuration,
   extType,
   fillableImageSlots,
+  fillableVideoSlots,
 } from "../introspect.js";
 
 // Fixture helpers — only the fields the classifier reads.
@@ -94,7 +92,7 @@ describe("buildStructure — slot discovery, geometry and classification", () =>
   const comps = [MAIN, comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360 })];
   const layers = [
     layer({ composition_id: 1, aeid: 10, name: "your-clip.mp4", width: 1920, height: 1080 }),
-    layer({ composition_id: 1, aeid: 11, name: "Headline", layer_type: "text", source_type: null, width: 1200, height: 120, data: { font: "Montserrat-SemiBold", fontSize: 72 } }),
+    layer({ composition_id: 1, aeid: 11, name: "Headline", layer_type: "text", source_type: null, width: 1200, height: 120 }),
     layer({ composition_id: 1, aeid: 13, name: "logo.png", width: 180, height: 60 }),
     layer({ composition_id: 1, aeid: 14, name: "background.jpg", width: 1920, height: 1080 }),
     layer({ composition_id: 1, aeid: 15, name: "product-photo.jpg", width: 800, height: 800 }),
@@ -138,12 +136,12 @@ describe("buildStructure — slot discovery, geometry and classification", () =>
     expect(ph).toMatchObject({ width: 640, height: 360 });
   });
 
-  it("derives a char budget and a font for text slots", () => {
+  it("budgets a text slot from the designer's own words, not its 1200px box", () => {
     const h = bySlot("Headline");
     expect(h?.currentText).toBe("Headline");
-    expect(h?.font).toBe("Montserrat-SemiBold");
-    // 1200px / (72 * 0.5) = 33 chars, which beats the 8-char placeholder.
-    expect(h?.charBudget).toBe(33);
+    // "Headline" is 8 chars → 8 * 1.15 = 9.2 → 9. The box would have said 33,
+    // and 33 characters is how the copy ended up off the screen.
+    expect(h?.charBudget).toBe(9);
   });
 
   it("ignores structure layers rather than dropping them silently", () => {
@@ -204,95 +202,177 @@ describe("buildMetadata — the surface the picker + run gate read", () => {
   });
 });
 
-// ── per-slot video durations: the whole point of the slicing change ──────────
+// ── the empty placeholder comp: why the first real render had no video ───────
 
-describe("buildStructure — a VIDEO slot's own length", () => {
-  it("reads a placeholder precomp's CHILD composition duration", () => {
-    // Nexrender's layers response has no time fields at all. The child comp the
-    // designer built around a placeholder is the only per-slot time signal.
-    const comps = [
-      comp({ aeid: 1, name: "main", width: 1920, height: 1080, duration: 30 }),
-      comp({ aeid: 2, name: "PH_HERO_comp", width: 1920, height: 1080, duration: 7 }),
-      comp({ aeid: 3, name: "PH_CUT_comp", width: 960, height: 540, duration: 2 }),
+describe("buildStructure — an EMPTY placeholder composition", () => {
+  // `Final → Scene_1 → PH_1`, where `PH_1` is an empty 60s comp. This is what a
+  // real designer ships: you are meant to drop your own footage into it.
+  const comps = [
+    comp({ aeid: 1, name: "Final", width: 1920, height: 1080, duration: 12 }),
+    comp({ aeid: 2, name: "Scene_1", width: 1920, height: 1080, duration: 60 }),
+    comp({ aeid: 3, name: "PH_1", width: 1920, height: 1080, duration: 60 }),
+  ];
+  const layers = [
+    layer({ composition_id: 1, aeid: 10, name: "Scene_1", source_type: "comp", source_comp_id: 2, in_point: 0, out_point: 2.167, start_time: 0 }),
+    // The outer layer's BOX is smaller than its source: the designer scaled it.
+    layer({ composition_id: 2, aeid: 11, name: "PH_1", source_type: "comp", source_comp_id: 3, width: 640, height: 360, in_point: 0, out_point: 60, start_time: 0 }),
+    // PH_1 (aeid 3) has NO layers at all.
+  ];
+  const video = buildStructure(comps, layers).slots.find((s) => s.asset === "VIDEO");
+
+  it("targets the OUTER layer, in the comp that places it", () => {
+    // There is no layer inside `PH_1` to replace. Nexrender's ExtendScript calls
+    // `layer.replaceSource(theImport, true)` with no guard on the old source
+    // type, so the `av/comp` layer itself is a legal target.
+    expect(video).toMatchObject({
+      composition: "Scene_1",
+      jobLayerName: "PH_1",
+      layerName: "PH_1",
+    });
+  });
+
+  it("addresses an UNNAMED placeholder by stacking index, never by name", () => {
+    // `PH_1` is the name of the layer's SOURCE. The layer itself is unnamed, and
+    // Nexrender matches stored names — aiming a media asset at `PH_1` fails with
+    // "Couldn't find any layers by provided name (PH_1)".
+    const aep = { "11": { index: 2, name: "", composition: "Scene_1" } };
+    const slot = buildStructure(comps, layers, aep).slots.find((s) => s.asset === "VIDEO");
+    expect(slot).toMatchObject({ targetBy: "index", layerIndex: 2 });
+  });
+
+  it("addresses a placeholder the designer DID name by name", () => {
+    const aep = { "11": { index: 2, name: "Hero Footage", composition: "Scene_1" } };
+    const slot = buildStructure(comps, layers, aep).slots.find((s) => s.asset === "VIDEO");
+    expect(slot).toMatchObject({ targetBy: "name", layerIndex: 2 });
+  });
+
+  it("falls back to name targeting when the project could not be parsed", () => {
+    expect(video).toMatchObject({ targetBy: "name", layerIndex: null });
+  });
+
+  it("sizes the slot to the placeholder comp, not the outer layer's box", () => {
+    // `replaceSource` keeps the layer's authored transform, and an index-targeted
+    // layer cannot be autoscaled — so the footage must arrive at the size the
+    // original source had.
+    expect(video).toMatchObject({ width: 1920, height: 1080 });
+  });
+
+  it("emits the slot as fillable rather than skipping it", () => {
+    // The bug: the slot existed, was marked `empty`, and the render step dropped
+    // it — so the job carried zero video assets and the ad had no footage.
+    expect(fillableVideoSlots(buildStructure(comps, layers).slots)).toHaveLength(1);
+  });
+
+  it("takes the slot's length from the scene, not the placeholder's 60s", () => {
+    expect(video?.startSec).toBe(0);
+    expect(video?.durationSec).toBe(2.167);
+  });
+});
+
+// ── a placeholder comp that holds TEXT, not footage ──────────────────────────
+
+describe("buildStructure — a placeholder comp whose only layer is TEXT", () => {
+  // Transcribed from the real `water-template`: `Placeholder _Text` is a comp
+  // holding one text layer, `'placeholder '`. Its NAME matches `isPlaceholder`,
+  // so v1 followed it in, found no media layer, fell back to `inner[0]` (the
+  // text layer) and emitted a VIDEO slot pointing at it. Nexrender then called
+  // `replaceSource` on a text layer and After Effects died:
+  //
+  //   Error: After Effects error: layer does not have a source.
+  const comps = [
+    comp({ aeid: 1, name: "main", width: 1920, height: 1080, duration: 12 }),
+    comp({ aeid: 2, name: "Placeholder _Text", width: 1920, height: 1080, duration: 12 }),
+  ];
+  const layers = [
+    layer({ composition_id: 1, aeid: 10, name: "Placeholder _Text", source_type: "comp", source_comp_id: 2, in_point: 0, out_point: 3, start_time: 0 }),
+    layer({ composition_id: 2, aeid: 11, name: "placeholder ", layer_type: "text", source_type: null, width: 882, height: 88 }),
+  ];
+  const slots = buildStructure(comps, layers).slots;
+
+  it("emits NO video slot — a text layer has no source to replace", () => {
+    expect(slots.filter((s) => s.asset === "VIDEO")).toHaveLength(0);
+  });
+
+  it("still emits the text layer's own TEXT slot", () => {
+    // The text branch already claimed this layer. The placeholder branch was
+    // claiming it a SECOND time, so one layer carried two slots.
+    const text = slots.filter((s) => s.asset === "TEXT");
+    expect(text).toHaveLength(1);
+    // Never trim: After Effects stores the trailing space, and Nexrender's
+    // `nx:text-params-set` matches the stored name exactly.
+    expect(text[0]).toMatchObject({
+      composition: "Placeholder _Text",
+      jobLayerName: "placeholder ",
+    });
+  });
+
+  it("a placeholder comp holding real footage is still a VIDEO slot", () => {
+    const withMedia = [
+      layers[0],
+      layer({ composition_id: 2, aeid: 12, name: "b-roll.mp4", width: 1920, height: 1080 }),
     ];
+    const found = buildStructure(comps, withMedia).slots.filter(
+      (s) => s.asset === "VIDEO",
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ jobLayerName: "b-roll.mp4" });
+  });
+
+  it("a placeholder comp holding a shape layer is not a media slot either", () => {
+    const shapeOnly = [
+      layers[0],
+      layer({ composition_id: 2, aeid: 13, name: "Shape Layer 1", layer_type: "shape", source_type: null }),
+    ];
+    expect(
+      buildStructure(comps, shapeOnly).slots.filter((s) => s.asset === "VIDEO"),
+    ).toHaveLength(0);
+  });
+});
+
+describe("buildStructure — a VIDEO slot's own window", () => {
+  it("reads through the nesting chain, and orders the slots by time", () => {
+    const comps = [
+      comp({ aeid: 1, name: "Final", width: 1920, height: 1080, duration: 12 }),
+      comp({ aeid: 2, name: "Scene_A", width: 1920, height: 1080, duration: 60 }),
+      comp({ aeid: 3, name: "Scene_B", width: 1920, height: 1080, duration: 60 }),
+      comp({ aeid: 4, name: "PH_LATE", width: 1920, height: 1080, duration: 60 }),
+      comp({ aeid: 5, name: "PH_EARLY", width: 1920, height: 1080, duration: 60 }),
+    ];
+    // Declared LATE-first, to prove layer-list order is not time order.
     const layers = [
-      layer({ composition_id: 1, aeid: 10, name: "PH_HERO", source_type: "comp", source_comp_id: 2 }),
-      layer({ composition_id: 2, aeid: 11, name: "hero.mp4" }),
-      layer({ composition_id: 1, aeid: 12, name: "PH_CUT", source_type: "comp", source_comp_id: 3 }),
-      layer({ composition_id: 3, aeid: 13, name: "cut.mp4" }),
+      layer({ composition_id: 1, aeid: 10, name: "Scene_A", source_type: "comp", source_comp_id: 2, in_point: 5, out_point: 9, start_time: 5 }),
+      layer({ composition_id: 2, aeid: 11, name: "PH_LATE", source_type: "comp", source_comp_id: 4, in_point: 0, out_point: 60, start_time: 0 }),
+      layer({ composition_id: 1, aeid: 12, name: "Scene_B", source_type: "comp", source_comp_id: 3, in_point: 0, out_point: 5, start_time: 0 }),
+      layer({ composition_id: 3, aeid: 13, name: "PH_EARLY", source_type: "comp", source_comp_id: 5, in_point: 0, out_point: 60, start_time: 0 }),
     ];
     const videos = buildStructure(comps, layers).slots.filter((s) => s.asset === "VIDEO");
-    expect(videos.map((s) => s.durationSec)).toEqual([7, 2]);
+    expect(videos.map((s) => s.jobLayerName)).toEqual(["PH_EARLY", "PH_LATE"]);
+    expect(videos.map((s) => s.startSec)).toEqual([0, 5]);
+    expect(videos.map((s) => s.durationSec)).toEqual([5, 4]);
   });
 
-  it("leaves a direct file layer's duration null — nothing exposes it", () => {
+  it("still targets the inner layer when the placeholder holds footage", () => {
+    const comps = [MAIN, comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360, duration: 60 })];
+    const layers = [
+      layer({ composition_id: 1, aeid: 10, name: "PH_1", source_type: "comp", source_comp_id: 2, in_point: 1, out_point: 4, start_time: 1 }),
+      layer({ composition_id: 2, aeid: 11, name: "clip.mp4", in_point: 0, out_point: 60 }),
+    ];
+    // The INNER layer's own index decides how it is addressed, not the outer's.
+    const aep = { "11": { index: 1, name: "", composition: "PH_1_comp" } };
+    const video = buildStructure(comps, layers, aep).slots.find((s) => s.asset === "VIDEO");
+    expect(video).toMatchObject({
+      composition: "PH_1_comp",
+      jobLayerName: "clip.mp4",
+      targetBy: "index",
+      layerIndex: 1,
+      startSec: 1,
+      durationSec: 3,
+    });
+  });
+
+  it("leaves a layer with no time fields unresolved rather than guessing", () => {
     const s = buildStructure([MAIN], [layer({ composition_id: 1, aeid: 1, name: "clip.mp4" })]);
-    expect(s.slots[0]).toMatchObject({ asset: "VIDEO", durationSec: null });
-  });
-
-  it("ignores a child comp that reports a zero or negative duration", () => {
-    const comps = [
-      MAIN,
-      comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360, duration: 0 }),
-    ];
-    const layers = [
-      layer({ composition_id: 1, aeid: 10, name: "PH_1", source_type: "comp", source_comp_id: 2 }),
-      layer({ composition_id: 2, aeid: 11, name: "clip.mp4" }),
-    ];
-    const video = buildStructure(comps, layers).slots.find((s) => s.asset === "VIDEO");
-    expect(video?.durationSec).toBeNull();
-  });
-
-  it("falls back to the data bag when the child comp has no duration", () => {
-    const comps = [MAIN, comp({ aeid: 2, name: "PH_1_comp", width: 640, height: 360 })];
-    const layers = [
-      layer({ composition_id: 1, aeid: 10, name: "PH_1", source_type: "comp", source_comp_id: 2, data: { duration: 3.5 } }),
-      layer({ composition_id: 2, aeid: 11, name: "clip.mp4" }),
-    ];
-    const video = buildStructure(comps, layers).slots.find((s) => s.asset === "VIDEO");
-    expect(video?.durationSec).toBe(3.5);
-  });
-});
-
-describe("extractLayerDuration — the undocumented data bag", () => {
-  it("reads a direct duration under the shapes a parser plausibly emits", () => {
-    expect(extractLayerDuration({ duration: 4 })).toBe(4);
-    expect(extractLayerDuration({ durationSec: "2.5" })).toBe(2.5);
-    expect(extractLayerDuration({ source: { duration: 6 } })).toBe(6);
-  });
-
-  it("derives a duration from an in/out pair", () => {
-    expect(extractLayerDuration({ inPoint: 2, outPoint: 9 })).toBe(7);
-    expect(extractLayerDuration({ startTime: 1, endTime: 3 })).toBe(2);
-  });
-
-  it("returns undefined rather than guessing", () => {
-    expect(extractLayerDuration(undefined)).toBeUndefined();
-    expect(extractLayerDuration({})).toBeUndefined();
-    expect(extractLayerDuration({ duration: 0 })).toBeUndefined();
-    expect(extractLayerDuration({ inPoint: 9, outPoint: 2 })).toBeUndefined(); // out before in
-  });
-});
-
-// ── the opaque `data` bag ────────────────────────────────────────────────────
-
-describe("extractFont / extractFontSize — the undocumented data bag", () => {
-  it("probes the shapes a parser plausibly emits", () => {
-    expect(extractFont({ font: "Inter" })).toBe("Inter");
-    expect(extractFont({ fontFamily: "Inter" })).toBe("Inter");
-    expect(extractFont({ text: { font: "Inter" } })).toBe("Inter");
-    expect(extractFont({ style: { fontFamily: "Inter" } })).toBe("Inter");
-    expect(extractFontSize({ fontSize: 48 })).toBe(48);
-    expect(extractFontSize({ text: { fontSize: "48" } })).toBe(48);
-  });
-
-  it("returns undefined rather than guessing", () => {
-    expect(extractFont(undefined)).toBeUndefined();
-    expect(extractFont({})).toBeUndefined();
-    expect(extractFont({ font: "   " })).toBeUndefined();
-    expect(extractFont({ font: 42 as unknown as string })).toBeUndefined();
-    expect(extractFontSize({ fontSize: 0 })).toBeUndefined();
-    expect(extractFontSize({ fontSize: -3 })).toBeUndefined();
+    expect(s.slots[0]).toMatchObject({ asset: "VIDEO", startSec: null, durationSec: null });
   });
 });
 

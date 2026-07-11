@@ -7,14 +7,16 @@
 // `shape`/`null`/`camera`; `source_type` `file`/`comp`/`solid`/null. No value
 // field — but a `text` layer's `name` IS its current words, and an `av/file`
 // layer's `name` carries the source filename+extension. Footage often sits in
-// PLACEHOLDER PRECOMPS (`av/comp` named PH_*/Media_*/…), sometimes empty.
+// PLACEHOLDER PRECOMPS (`av/comp` named PH_*/Media_*/…), usually EMPTY: the
+// designer expects you to drop your footage into the comp yourself.
 //
 // Beyond classification this captures what v2 needs and v1 threw away:
-//   - the main comp's `duration` + `frame_rate` → `clipSeconds` (generate a clip
-//     as long as the template, not a fixed 15s)
+//   - the main comp's `duration` + `frame_rate`
 //   - each layer's box → the gpt-image-2 size for an image slot, and the
 //     icon-vs-backdrop signal behind `imageClass`
 //   - each TEXT layer's `charBudget`, so the copywriter has a hard ceiling
+//   - each slot's ABSOLUTE window on the main timeline (`timeline.ts`), which is
+//     the second of the 15s master it receives
 //
 // A placeholder precomp is NO LONGER assumed to hold video: `classifyPlaceholderSlot`
 // follows it one level in, because assuming VIDEO injected the generated clip
@@ -31,10 +33,12 @@ import type {
   NexComposition,
   NexLayer,
 } from "../../providers/template-render.js";
+import type { AepLayerIndex } from "./aep.js";
 import {
   classifyImageSlot,
   deriveCharBudget,
 } from "./geometry.js";
+import { resolveWindows } from "./timeline.js";
 
 /**
  * Nearest-match aspect ratio from a composition's pixel dimensions — only two
@@ -125,102 +129,19 @@ export function classifyPlaceholderSlot(
   return "VIDEO";
 }
 
-// Nexrender's v3 layers response carries an opaque `data` bag
-// (`additionalProperties: true`). Its contents are UNDOCUMENTED, and no endpoint
-// anywhere reports which fonts a template needs — checked against the v3
-// template-metadata and fonts endpoints. So probe defensively across the shapes
-// a parser plausibly emits, and let `scripts/inspect-nexrender-layers.ts` dump
-// the real keys against a real .aep before anything depends on this.
+// A layer's timing does NOT live in the opaque `data` bag — that bag is `{}` on
+// every layer of every real project we have introspected. It lives in the
+// top-level `start_time` / `in_point` / `out_point` fields, which Nexrender does
+// not document, and `timeline.ts` resolves through the nesting chain.
 //
-// We never SEND a font back to Nexrender: its font bank auto-resolves by family
-// name at submit time, so the designer's typography is preserved untouched.
-// These values exist only so the plan agent knows how wide the copy will render.
-
-const FONT_PATHS = [
-  ["font"], ["fontName"], ["fontFamily"], ["family"],
-  ["text", "font"], ["text", "fontFamily"],
-  ["properties", "font"], ["style", "font"], ["style", "fontFamily"],
-] as const;
-
-const FONT_SIZE_PATHS = [
-  ["fontSize"], ["size"], ["text", "fontSize"],
-  ["properties", "fontSize"], ["style", "fontSize"],
-] as const;
-
-function dig(bag: Record<string, unknown> | undefined, path: readonly string[]): unknown {
-  let cur: unknown = bag;
-  for (const key of path) {
-    if (typeof cur !== "object" || cur === null) return undefined;
-    cur = (cur as Record<string, unknown>)[key];
-  }
-  return cur;
-}
-
-/** The text layer's font family, if the opaque `data` bag happens to carry it. */
-export function extractFont(data?: Record<string, unknown>): string | undefined {
-  if (!data) return undefined;
-  for (const path of FONT_PATHS) {
-    const v = dig(data, path);
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return undefined;
-}
-
-/** The text layer's font size in px, if present. Refines `charBudget`. */
-export function extractFontSize(data?: Record<string, unknown>): number | undefined {
-  if (!data) return undefined;
-  for (const path of FONT_SIZE_PATHS) {
-    const v = dig(data, path);
-    const n = typeof v === "string" ? Number(v) : v;
-    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n;
-  }
-  return undefined;
-}
+// Fonts are nowhere at all: no endpoint reports which fonts a template needs.
+// We never need them either. Nexrender's font bank auto-resolves by family name
+// at submit time, and we never SEND a `font`, so the designer's typography is
+// preserved untouched.
 
 /** A finite, strictly-positive number, else null. Guards a duration of 0 or -1. */
 export function positiveOrNull(n: number | null | undefined): number | null {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
-}
-
-/**
- * A VIDEO layer's length in seconds, IF the opaque `data` bag happens to carry
- * it. The documented v3 layers response has no time fields at all, so this is a
- * defensive probe over the shapes a parser plausibly emits — including an
- * in/out pair, which we turn into a duration.
- *
- * Run `pnpm --filter api nexrender:inspect <templateId>` against a real .aep to
- * see the real key names before trusting any of these.
- */
-const DURATION_PATHS = [
-  ["duration"], ["durationSec"], ["length"],
-  ["source", "duration"], ["properties", "duration"],
-] as const;
-
-const IN_OUT_PAIRS = [
-  [["inPoint"], ["outPoint"]],
-  [["in"], ["out"]],
-  [["startTime"], ["endTime"]],
-] as const;
-
-export function extractLayerDuration(
-  data?: Record<string, unknown>,
-): number | undefined {
-  if (!data) return undefined;
-  const num = (v: unknown): number | undefined => {
-    const n = typeof v === "string" ? Number(v) : v;
-    return typeof n === "number" && Number.isFinite(n) ? n : undefined;
-  };
-
-  for (const path of DURATION_PATHS) {
-    const n = num(dig(data, path));
-    if (n !== undefined && n > 0) return n;
-  }
-  for (const [inPath, outPath] of IN_OUT_PAIRS) {
-    const a = num(dig(data, inPath));
-    const b = num(dig(data, outPath));
-    if (a !== undefined && b !== undefined && b > a) return b - a;
-  }
-  return undefined;
 }
 
 /**
@@ -248,19 +169,22 @@ export function detectMainComposition(
   );
 }
 
-/** Build the editable-slot structure the editor form renders from. */
+/**
+ * Build the editable-slot structure the editor form renders from.
+ *
+ * `aepLayers` is the uploaded project's own view of its layers (`aep.ts`), and
+ * it decides HOW each media layer is addressed. Without it every media asset
+ * falls back to the name Nexrender reported, which is the SOURCE's name and
+ * fails for any layer the designer never renamed — that is, nearly all of them.
+ */
 export function buildStructure(
   comps: NexComposition[],
   layers: NexLayer[],
+  aepLayers?: AepLayerIndex | null,
 ): TemplateStructure {
   const compName = new Map(comps.map((c) => [String(c.aeid), c.name]));
   const nameOf = (id: number | string | null) =>
     compName.get(String(id)) ?? `comp#${id}`;
-  // Keep the comps BY ID, not just their names. A placeholder precomp's child
-  // composition carries its own `duration`, and that is the only place a video
-  // slot's length exists — Nexrender's layers response has no time fields at
-  // all. Losing it here is what forced every slot to receive the whole clip.
-  const compById = new Map(comps.map((c) => [String(c.aeid), c]));
   const layersByComp = new Map<string, NexLayer[]>();
   for (const l of layers) {
     const k = String(l.composition_id);
@@ -269,6 +193,10 @@ export function buildStructure(
 
   const main = detectMainComposition(comps, layers);
   const mainName = main?.name ?? null;
+  // Where each layer sits on the FINAL timeline, resolved through the nesting
+  // chain. A placeholder comp's own `duration` is not a slot length: an empty
+  // `PH_2` reports 60 seconds while the scene placing it runs for 2.3.
+  const windows = mainName ? resolveWindows(mainName, comps, layers) : new Map();
   // Root/renderable comps (nothing nests them) — the composition-dropdown options.
   const nested = new Set(
     layers.map((l) => l.source_comp_id).filter(Boolean).map(String),
@@ -293,6 +221,27 @@ export function buildStructure(
   const compW = main?.width ?? null;
   const compH = main?.height ?? null;
 
+  /** When a layer first reaches the screen, on the main comp's clock. */
+  const startOf = (l: NexLayer): number | null =>
+    windows.get(l.aeid)?.startSec ?? null;
+
+  /**
+   * How a render job must address `l`.
+   *
+   * A layer the designer never renamed stores an empty name; the name Nexrender
+   * reports for it belongs to its SOURCE. Aiming a media asset at that name is
+   * the failure that shipped a template ad with no video in it. Such a layer is
+   * reachable only by its stacking index, which lives in the project file.
+   */
+  const targetOf = (
+    l: NexLayer,
+  ): { targetBy: "name" | "index"; layerIndex: number | null } => {
+    const aep = aepLayers?.[String(l.aeid)];
+    if (!aep) return { targetBy: "name", layerIndex: null };
+    if (aep.name) return { targetBy: "name", layerIndex: aep.index };
+    return { targetBy: "index", layerIndex: aep.index };
+  };
+
   /**
    * An IMAGE slot, classified so the Image Agent knows whether it may fill it.
    * `classifyName` may differ from `layerName`: for a placeholder precomp we
@@ -306,15 +255,18 @@ export function buildStructure(
     layerName: string,
     classifyName: string = layerName,
     extra: Partial<TemplateSlot> = {},
+    target: NexLayer = box,
   ) =>
     add({
       asset: "IMAGE",
       composition: comp,
       layerName,
       jobLayerName,
+      ...targetOf(target),
       injectVia: "asset",
       width: box.width ?? null,
       height: box.height ?? null,
+      startSec: startOf(box),
       durationSec: null, // stills have no length
       imageClass: classifyImageSlot({
         layerName: classifyName,
@@ -332,24 +284,25 @@ export function buildStructure(
     const comp = nameOf(l.composition_id);
 
     if (t === "text" || t === "textlayer") {
-      const font = extractFont(l.data);
-      const fontSize = extractFontSize(l.data);
       add({
         asset: "TEXT",
         composition: comp,
         layerName: l.name,
         jobLayerName: l.name,
         // A text layer's NAME is its current words — Nexrender exposes no
-        // separate value field. See the header note.
+        // separate value field. See the header note. After Effects stores that
+        // name, so a text layer is always addressable by it.
         currentText: l.name,
+        targetBy: "name",
+        layerIndex: aepLayers?.[String(l.aeid)]?.index ?? null,
         injectVia: comp === mainName ? "asset" : "function",
         width: l.width ?? null,
         height: l.height ?? null,
-        // The box wins over the placeholder's length; when the `data` bag has no
-        // font size, the layer's HEIGHT stands in for it.
-        charBudget: deriveCharBudget(l.name, l.width, fontSize, l.height),
+        startSec: startOf(l),
+        // The placeholder the designer typed is the ceiling. The box is not
+        // usable: a split-text layer spreads four glyphs across 1040px.
+        charBudget: deriveCharBudget(l.name, l.width, l.height),
         durationSec: null, // text has no length
-        ...(font ? { font } : {}),
       });
       continue;
     }
@@ -369,12 +322,12 @@ export function buildStructure(
           composition: comp,
           layerName: l.name,
           jobLayerName: l.name,
+          ...targetOf(l),
           injectVia: "asset",
           width: l.width ?? null,
           height: l.height ?? null,
-          // A direct file layer exposes no length. The `data` bag might, but it
-          // is undocumented; the slice planner falls back to an even split.
-          durationSec: extractLayerDuration(l.data) ?? null,
+          startSec: startOf(l),
+          durationSec: positiveOrNull(windows.get(l.aeid)?.durationSec),
         });
       }
       continue;
@@ -389,46 +342,74 @@ export function buildStructure(
       isPlaceholder(l.name)
     ) {
       const childComp = nameOf(l.source_comp_id);
-      const child = compById.get(String(l.source_comp_id));
+      const child = comps.find((c) => String(c.aeid) === String(l.source_comp_id));
       const inner = layersByComp.get(String(l.source_comp_id)) ?? [];
+
+      // Only an `av` layer can hold footage. A comp named `Placeholder _Text`
+      // holding a single TEXT layer is a copy placeholder, not a footage one —
+      // and injecting media into it makes After Effects call `replaceSource` on a
+      // text layer, which dies with "layer does not have a source". The text
+      // branch above already gave that layer its own TEXT slot, so leave it be.
+      //
+      // An EMPTY child comp still counts: the designer expects footage dropped
+      // into it, and we target the outer layer.
+      const media = inner.filter((x) => {
+        const lt = lower(x.layer_type);
+        return lt === "av" || lt === "avlayer";
+      });
+      if (inner.length > 0 && media.length === 0) {
+        ignore("placeholder-comp/no-media-layer");
+        continue;
+      }
+
       const target =
-        inner.find(
+        media.find(
           (x) =>
-            lower(x.layer_type) === "av" &&
-            (lower(x.source_type) === "file" || lower(x.source_type) === "solid"),
-        ) ?? inner[0];
+            lower(x.source_type) === "file" || lower(x.source_type) === "solid",
+        ) ?? media[0];
 
       const kind = classifyPlaceholderSlot(l, target);
-      const layerName = target ? target.name : `(empty ${childComp})`;
-      const jobLayerName = target ? target.name : childComp;
 
       if (kind === "IMAGE") {
         // Geometry comes from the OUTER placeholder layer: it is the box the
         // designer laid out in the main comp. The inner layer is 0,0-anchored.
         // Classify on BOTH names — `logo_placeholder` wrapping `Solid 1` must
         // still read as brand.
-        addImage(l, childComp, jobLayerName, layerName, `${l.name} ${target?.name ?? ""}`, {
-          empty: !target,
-        });
+        addImage(
+          l,
+          target ? childComp : comp,
+          target ? target.name : l.name,
+          target ? target.name : l.name,
+          `${l.name} ${target?.name ?? ""}`,
+          {},
+          target ?? l,
+        );
       } else {
+        const window = windows.get(l.aeid);
         add({
           asset: "VIDEO",
-          composition: childComp,
-          layerName,
-          jobLayerName,
-          empty: !target,
+          // A placeholder comp is USUALLY EMPTY: the designer expects you to drop
+          // footage into it, so there is no inner layer to replace. Target the
+          // outer `av/comp` layer instead, in the comp that places it. Nexrender's
+          // own ExtendScript calls `layer.replaceSource(theImport, true)` with no
+          // guard on the current source type, so swapping a precomp layer's source
+          // for an mp4 is legal After Effects.
+          composition: target ? childComp : comp,
+          layerName: target ? target.name : l.name,
+          jobLayerName: target ? target.name : l.name,
+          ...targetOf(target ?? l),
           injectVia: "asset",
-          width: l.width ?? null,
-          height: l.height ?? null,
-          // THE slot length. The child composition the designer built around this
-          // placeholder is as long as the footage it expects, so a 2s cutaway
-          // precomp reports 2. This is the only per-slot time signal Nexrender
-          // exposes; the inner layer itself carries none.
-          durationSec:
-            positiveOrNull(child?.duration) ??
-            extractLayerDuration(l.data) ??
-            extractLayerDuration(target?.data) ??
-            null,
+          // The ORIGINAL SOURCE's size, which for a placeholder is its child
+          // composition. `replaceSource` keeps the layer's authored transform, so
+          // footage of exactly this size lands exactly where the designer put it —
+          // and an index-targeted layer cannot be autoscaled after the fact.
+          width: child?.width ?? l.width ?? null,
+          height: child?.height ?? l.height ?? null,
+          startSec: window?.startSec ?? null,
+          // How long the slot is ON SCREEN, resolved through the nesting chain —
+          // NOT the placeholder comp's own `duration`, which is routinely 60s for
+          // a scene that runs for two.
+          durationSec: positiveOrNull(window?.durationSec),
         });
       }
       continue;
@@ -439,9 +420,18 @@ export function buildStructure(
     ignore(k);
   }
 
-  // Editable order: VIDEO, IMAGE, AUDIO, TEXT.
+  // Group by kind (the editable order), then by WHEN each slot appears. Time
+  // order is what the slice planner and the copywriter both read: slice 2 must
+  // come from later in the master than slice 1, and the second line of copy must
+  // follow the first. Layer-list order is not time order, so sorting on it — as
+  // this used to — was luck.
   const order = ["VIDEO", "IMAGE", "AUDIO", "TEXT"];
-  slots.sort((a, b) => order.indexOf(a.asset) - order.indexOf(b.asset));
+  slots.sort(
+    (a, b) =>
+      order.indexOf(a.asset) - order.indexOf(b.asset) ||
+      (a.startSec ?? Number.POSITIVE_INFINITY) -
+        (b.startSec ?? Number.POSITIVE_INFINITY),
+  );
 
   return {
     status: "ready",
@@ -489,9 +479,15 @@ export function buildMetadata(structure: TemplateStructure): TemplateMetadata {
   };
 }
 
-/** The VIDEO slots, in layer order, that actually have a layer to fill. */
+/**
+ * The VIDEO slots, in the order they appear on screen.
+ *
+ * Every emitted VIDEO slot is fillable: an empty placeholder comp is targeted
+ * through its outer layer, so there is no longer such a thing as a slot with
+ * nothing to inject into.
+ */
 export function fillableVideoSlots(slots: TemplateSlot[]): TemplateSlot[] {
-  return slots.filter((s) => s.asset === "VIDEO" && !s.empty);
+  return slots.filter((s) => s.asset === "VIDEO");
 }
 
 /** The template's own audio layer, if it has one. */

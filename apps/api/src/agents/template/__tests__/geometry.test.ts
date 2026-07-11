@@ -268,39 +268,38 @@ describe("classifyImageSlot — a generated photo in a logo layer is always wron
 
 // ── deriveCharBudget ─────────────────────────────────────────────────────────
 
-describe("deriveCharBudget — the box is the constraint, not the placeholder", () => {
-  it("uses the placeholder's own length when that is all we have", () => {
-    expect(deriveCharBudget("Your Headline Here")).toBe(18);
+describe("deriveCharBudget — the placeholder is the ceiling, not the box", () => {
+  it("gives the designer's own words a little slack, and no more", () => {
+    // "Your Headline Here" is 18 chars → 18 * 1.15 = 20.7 → 21.
+    expect(deriveCharBudget("Your Headline Here")).toBe(21);
   });
 
-  it("takes the larger of the placeholder length and the box estimate", () => {
-    // 1200px wide at 72px font ≈ 33 chars, which beats a short placeholder.
-    expect(deriveCharBudget("Hi", 1200, 72)).toBe(33);
-    // A long placeholder in a narrow box keeps its own length (28 chars).
-    const long = "A very long placeholder line";
-    expect(deriveCharBudget(long, 200, 72)).toBe(long.length);
+  it("IGNORES a box that claims a split-text layer holds a sentence", () => {
+    // The bug this function exists to prevent. `BOLD` is four glyphs; its layer
+    // reports a 1040x71 box because the animation spreads the letters across
+    // the frame. The old width/font estimate said 36 characters, the copywriter
+    // wrote "This watch just became my daily." and it ran off the screen.
+    expect(deriveCharBudget("BOLD", 1040.16, 71.26)).toBe(5);
+    expect(deriveCharBudget("OPENER", 388.3, 424.89)).toBe(7);
+    expect(deriveCharBudget("MIXKIT", 358.9, 68.23)).toBe(7);
   });
 
-  it("falls back to the layer HEIGHT when no font size is exposed", () => {
-    // Caught by a live prompt dump, not by a unit test: a 900x60 layer whose
-    // placeholder is the single word "Subhead" was being capped at 7 characters.
-    // It is not a 7-character slot; it is a 900px box that says "Subhead" today.
-    // Nexrender's `data` bag is undocumented, so a missing font size is the
-    // COMMON case, and the height is the only signal left.
-    expect(deriveCharBudget("Subhead", 900, null, 60)).toBe(37);
-    expect(deriveCharBudget("Subhead", 900, null, null)).toBe(7); // nothing to go on
+  it("never returns a budget too small for a word", () => {
+    expect(deriveCharBudget("Hi", 1200)).toBe(3);
+    expect(deriveCharBudget("!")).toBe(3);
   });
 
-  it("prefers a real font size over the height estimate", () => {
-    // 1200 / (72 * 0.5) = 33, not the height-derived 1200 / (96 * 0.5) = 25.
-    expect(deriveCharBudget("Hi", 1200, 72, 120)).toBe(33);
+  it("falls back to the box ONLY when the placeholder is blank", () => {
+    // Nothing else to go on: 900 / (48 * 0.5) = 37.
+    expect(deriveCharBudget("   ", 900, 60)).toBe(37);
+    expect(deriveCharBudget("", 900, 60)).toBe(37);
   });
 
-  it("errs SHORT on a multi-line box, because short copy always renders", () => {
+  it("errs SHORT on a multi-line blank box, because short copy always renders", () => {
     // A 3-line box overshoots the inferred font size, under-estimating the
     // budget. Clipped layout is unrecoverable; a shorter line is not.
-    const oneLine = deriveCharBudget("x", 900, null, 60) ?? 0;
-    const threeLine = deriveCharBudget("x", 900, null, 180) ?? 0;
+    const oneLine = deriveCharBudget("", 900, 60) ?? 0;
+    const threeLine = deriveCharBudget("", 900, 180) ?? 0;
     expect(threeLine).toBeLessThan(oneLine);
   });
 
@@ -308,6 +307,7 @@ describe("deriveCharBudget — the box is the constraint, not the placeholder", 
     expect(deriveCharBudget(undefined)).toBeUndefined();
     expect(deriveCharBudget("")).toBeUndefined();
     expect(deriveCharBudget("   ")).toBeUndefined();
+    expect(deriveCharBudget("", 900, null)).toBeUndefined();
   });
 });
 

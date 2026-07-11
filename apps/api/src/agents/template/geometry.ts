@@ -28,13 +28,13 @@ export { MAX_CLIP_SEC, MIN_CLIP_SEC, SEEDANCE_DURATIONS, snapUp };
 
 /**
  * Every template run generates ONE clip of exactly this length, whatever the
- * template looks like.
+ * template looks like, so every ad is built from the same amount of footage.
  *
- * It is NOT cut to the composition's duration. A template's video slots are
- * sliced out of this master (`slices.ts`), each getting footage of its own
- * length, so the composition keeps its full runtime and the design's outro is
- * never truncated. It also means every ad is generated from the same amount of
- * footage, whether the template runs 8 seconds or 40.
+ * It is also the length of the FINISHED ad: a template's video slots are sliced
+ * out of this master 1:1 (`slices.ts`), each cut from the second it plays so the
+ * footage stays in sync with the voiceover, and a composition longer than this
+ * is cropped back to it (`capVideoDuration`) — anything the design places past
+ * the 15s mark is dropped rather than compressed into frame.
  */
 export const MASTER_CLIP_SECONDS = MAX_CLIP_SEC; // 15
 
@@ -250,12 +250,10 @@ const GLYPH_WIDTH_RATIO = 0.5;
 
 /**
  * A single-line text layer's box is a little taller than its font size (the
- * ascender-to-descender run plus leading). Inverting that gives a usable font
- * size when Nexrender's opaque `data` bag does not carry one — which is most of
- * the time, since the field is undocumented.
- *
- * A MULTI-line box overshoots this, which under-estimates the character budget.
- * That errs short, and short copy always renders; long copy never does.
+ * ascender-to-descender run plus leading). Inverting that gives a font size when
+ * nothing else does — a guess of LAST RESORT, used only for a text layer whose
+ * placeholder is blank. Nexrender reports no font size anywhere: the opaque
+ * `data` bag is `{}` on every layer of every real project.
  */
 const LINE_HEIGHT_RATIO = 1.25;
 
@@ -264,16 +262,27 @@ export function estimateFontSizeFromBox(height?: number | null): number | undefi
   return height / LINE_HEIGHT_RATIO;
 }
 
+/** How much longer than the designer's own words the copy may run. */
+const PLACEHOLDER_SLACK = 1.15;
+/** Below this, no word fits and the copywriter has nothing to write. */
+const MIN_BUDGET = 3;
+
 /**
  * How many characters a text box can hold before it overflows the designer's
  * layout.
  *
- * The BOX is the real constraint, so it wins when we can measure it. The
- * placeholder's own length is only a floor: a layer whose placeholder text is
- * the single word "Subhead" is not a 7-character slot, it is a 900px-wide box
- * that happens to say "Subhead" today. Capping the copywriter at 7 characters
- * there would be absurd, which is exactly what happened before the box estimate
- * learned to fall back to the layer's height.
+ * THE PLACEHOLDER IS THE CEILING. The designer sized the box, the animation and
+ * the tracking around the exact words they typed, so those words are the only
+ * honest measure of what fits. A little slack, and no more.
+ *
+ * The box is not a usable measure, however tempting the numbers look. In a real
+ * split-text intro the layer `BOLD` — four glyphs — reports a 1040×71px box,
+ * because the animation spreads its letters across the frame. Dividing width by
+ * an estimated glyph width said 36 characters. The copywriter dutifully wrote
+ * "This watch just became my daily." and it ran off the screen.
+ *
+ * Geometry survives only for a layer with a BLANK placeholder, where there is
+ * nothing else at all to go on.
  *
  * The copywriter treats this as a hard ceiling, not "match the rough length".
  * Returns undefined when there is nothing at all to go on.
@@ -281,15 +290,15 @@ export function estimateFontSizeFromBox(height?: number | null): number | undefi
 export function deriveCharBudget(
   currentText: string | undefined,
   width?: number | null,
-  fontSize?: number | null,
   height?: number | null,
 ): number | undefined {
-  const size = fontSize && fontSize > 0 ? fontSize : estimateFontSizeFromBox(height);
-  const fromText = currentText?.trim().length ?? 0;
-  const fromBox =
-    width && size && size > 0
-      ? Math.floor(width / (size * GLYPH_WIDTH_RATIO))
-      : 0;
-  const budget = Math.max(fromText, fromBox);
-  return budget > 0 ? budget : undefined;
+  const placeholder = currentText?.trim().length ?? 0;
+  if (placeholder > 0) {
+    return Math.max(MIN_BUDGET, Math.round(placeholder * PLACEHOLDER_SLACK));
+  }
+
+  const size = estimateFontSizeFromBox(height);
+  if (!width || !size || size <= 0) return undefined;
+  const fromBox = Math.floor(width / (size * GLYPH_WIDTH_RATIO));
+  return fromBox > 0 ? fromBox : undefined;
 }
