@@ -175,6 +175,106 @@ async function extractPanelClean(
 }
 
 /**
+ * Row-major grid a template storyboard of `n` beat panels is rendered in — the
+ * SAME layout the storyboard prompt describes and `cleanSheetGrid` crops. A
+ * near-square grid so each panel stays close to the output frame's shape. `n=4`
+ * is `2×2` (identical to the legacy sheet); `n=3`/`n=5` leave one trailing cell
+ * empty. Only used for template runs (`n` = template video-slot count, 2..6).
+ */
+export function panelGrid(n: number): { rows: number; cols: number } {
+  if (n <= 1) return { rows: 1, cols: 1 };
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  return { rows, cols };
+}
+
+/** Extract cell `(row, col)` of a `rows×cols` sheet with the badge/caption trims. */
+async function extractPanelCleanGrid(
+  bytes: Uint8Array,
+  row: number,
+  col: number,
+  rows: number,
+  cols: number,
+  width: number,
+  height: number,
+): Promise<{ buf: Buffer; w: number; h: number }> {
+  const cellW = Math.floor(width / cols);
+  const cellH = Math.floor(height / rows);
+  const insetX = Math.round(cellW * PANEL_INSET_FRACTION);
+  const trimTop = Math.round(cellH * TOP_TRIM_FRACTION);
+  const trimBottom = Math.round(cellH * BOTTOM_TRIM_FRACTION);
+  const left = col * cellW + insetX;
+  const top = row * cellH + trimTop;
+  const w = Math.max(1, cellW - 2 * insetX);
+  const h = Math.max(1, cellH - trimTop - trimBottom);
+  const buf = await sharp(Buffer.from(bytes))
+    .extract({ left, top, width: w, height: h })
+    .toBuffer();
+  return { buf, w, h };
+}
+
+/**
+ * The N-panel generalization of `cleanSheet2x2` for a template storyboard: trim
+ * the first `n` panels of a `rows×cols` sheet clean of their badge + caption bar
+ * and re-tile them, in row-major order, back into a `rows×cols` grid (any unused
+ * trailing cell stays black). Same overall proportions and reading order as the
+ * source, so it stays inside the provider's asset limits exactly like the 2×2.
+ */
+export async function cleanSheetGrid(
+  bytes: Uint8Array,
+  rows: number,
+  cols: number,
+  n: number,
+): Promise<Uint8Array> {
+  const { width, height } = await masterDims(bytes);
+  const cells: { buf: Buffer; w: number; h: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    cells.push(
+      await extractPanelCleanGrid(
+        bytes,
+        Math.floor(i / cols),
+        i % cols,
+        rows,
+        cols,
+        width,
+        height,
+      ),
+    );
+  }
+  const pw = cells[0].w;
+  const ph = cells[0].h;
+  const block = await sharp({
+    create: {
+      width: pw * cols,
+      height: ph * rows,
+      channels: 3,
+      background: { r: 0, g: 0, b: 0 },
+    },
+  })
+    .composite(
+      cells.map((c, i) => ({
+        input: c.buf,
+        left: (i % cols) * pw,
+        top: Math.floor(i / cols) * ph,
+      })),
+    )
+    .png()
+    .toBuffer();
+
+  let pipeline = sharp(block);
+  if (ph * rows < MIN_OUTPUT_HEIGHT) {
+    pipeline = pipeline.resize({ height: MIN_OUTPUT_HEIGHT });
+  }
+  const cleaned = new Uint8Array(await pipeline.png().toBuffer());
+  log.debug("✓ cleaned labelled N-panel sheet for the video model", {
+    source: `${width}x${height}`,
+    grid: `${rows}x${cols}`,
+    n,
+  });
+  return cleaned;
+}
+
+/**
  * Turn ONE labelled 2×2 storyboard sheet into a CLEAN 2×2 for the video model:
  * each of the four panels is trimmed of its top-corner scene badge and bottom
  * caption bar, then the four are re-tiled edge-to-edge (TL=1, TR=2, BL=3, BR=4)
