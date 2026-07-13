@@ -9,7 +9,7 @@ import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
 import { type Logger, createLogger } from "../../lib/log.js";
 import { padToProviderAspect } from "../../lib/image/normalize.js";
-import { cleanSheet2x2 } from "../../lib/image/crop.js";
+import { cleanSheet2x2, cleanSheetGrid, panelGrid } from "../../lib/image/crop.js";
 import { uploadAsset } from "../../lib/storage.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import {
@@ -61,6 +61,14 @@ export interface VideoBuilderInput {
   /** Scene metadata (incl. transcripts) from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   /**
+   * How many panels the ATTACHED sheet actually has, for the clean-crop grid and
+   * the board-description wording. Normally equals `scenes.length`, but a
+   * template run whose `scenes` were projected from the beats can differ from the
+   * rendered sheet, so the orchestrator passes the sheet's own scene count.
+   * Defaults to `scenes.length`.
+   */
+  boardPanelCount?: number;
+  /**
    * Presenter identity (gender/age/hair) to PIN in the video prompt — from
    * `runs.person_brief`. Empty for no-person ads and uploaded persons; the
    * gender-locked scene text + `@Image 1` carry identity in that case.
@@ -83,6 +91,14 @@ export interface VideoBuilderInput {
   segmentCount?: number;
   /** The OTHER segments' summaries — continuity context for the prompt. */
   otherSummaries?: string[];
+  /**
+   * TEMPLATE pipeline only — the beats' timeline windows (index-aligned with
+   * `scenes`), from `deriveTemplateBeats`. When present, the Seedance shot-list
+   * brackets come from these windows and the clip is forced to ONE continuous
+   * take so the master's seconds line up with the template's slot windows.
+   * Undefined for every non-template run — the prompt is then unchanged.
+   */
+  slotWindows?: { startSec: number; durationSec: number }[];
 }
 
 const DEFAULT_DURATION_SEC = 15;
@@ -171,12 +187,21 @@ async function cleanStoryboardRefUrl(
   url: string,
   runId: string,
   log: Logger,
+  panelCount = 4,
 ): Promise<string> {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const raw = new Uint8Array(await res.arrayBuffer());
-    const cleaned = await cleanSheet2x2(raw);
+    // A template sheet has one panel per beat (2..6) in a near-square grid; the
+    // normal 4-panel sheet keeps the proven 2×2 crop unchanged.
+    const cleaned =
+      panelCount === 4
+        ? await cleanSheet2x2(raw)
+        : await (async () => {
+            const { rows, cols } = panelGrid(panelCount);
+            return cleanSheetGrid(raw, rows, cols, panelCount);
+          })();
     const norm = await padToProviderAspect(cleaned, "image/png", {
       forceJpeg: true,
     });
@@ -266,6 +291,8 @@ export async function videoBuilder(
       hasProductSheet: Boolean(input.productSheetRef?.source),
       brandText: ctx.brandText,
       supportingCast: ctx.supportingCast,
+      slotWindows: input.slotWindows,
+      boardPanelCount: input.boardPanelCount,
     });
     let llmVideoPrompt = "";
     for (let attempt = 1; attempt <= 2 && !llmVideoPrompt.trim(); attempt++) {
@@ -303,6 +330,8 @@ export async function videoBuilder(
           hasProductSheet: Boolean(input.productSheetRef?.source),
           brandText: ctx.brandText,
           supportingCast: ctx.supportingCast,
+          slotWindows: input.slotWindows,
+          boardPanelCount: input.boardPanelCount,
         },
         { audioSafe },
       );
@@ -366,7 +395,12 @@ export async function videoBuilder(
       : [];
     personReferences = [];
     personReferences.push(
-      await cleanStoryboardRefUrl(storyboardUrl, ctx.runId, log),
+      await cleanStoryboardRefUrl(
+        storyboardUrl,
+        ctx.runId,
+        log,
+        input.boardPanelCount ?? input.scenes.length,
+      ),
     );
     if (faceUrl) {
       personReferences.push(
@@ -416,7 +450,11 @@ export async function videoBuilder(
     // (demo pins the product rigid); ugc_authentic = one continuous take. Kept in
     // lockstep with buildVideoPrompt / buildDeterministicVideoPrompt so the
     // composed prompt can never carry a cut-vs-continuous contradiction.
-    const renderDirective = videoRenderDirective(ctx.adType);
+    // A template beat run (slotWindows present) forces ONE continuous take, so
+    // the appended directive must match the prompt bodies' forced-continuous mode.
+    const renderDirective = videoRenderDirective(ctx.adType, {
+      continuous: (input.slotWindows?.length ?? 0) > 0,
+    });
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
     const composePrompt = (
       tier: "llm" | "deterministic",

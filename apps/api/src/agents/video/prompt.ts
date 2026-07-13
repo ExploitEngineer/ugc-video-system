@@ -25,8 +25,26 @@ function fmtTime(sec: number): string {
  * Bracketed time slices, one per panel, e.g. `["[0:00-0:04]", "[0:04-0:08]", …]`.
  * Even split with the last slice absorbing the remainder — for 15s/4 panels this
  * yields 0:00-0:04, 0:04-0:08, 0:08-0:11, 0:11-0:15.
+ *
+ * TEMPLATE beat mode: when `windows` is supplied (a template run steering the
+ * master), the brackets come from the slots' real timeline windows instead, so
+ * the continuous clip shows each slot's beat during the seconds that slot is cut
+ * from. `deriveTemplateBeats` already sorted, merged and made them contiguous;
+ * here we only format and clamp the end to the clip. Absent `windows` ⇒ the even
+ * split, byte-identical for every non-template caller.
  */
-function buildSliceBrackets(durationSec: number, count: number): string[] {
+function buildSliceBrackets(
+  durationSec: number,
+  count: number,
+  windows?: { startSec: number; durationSec: number }[],
+): string[] {
+  if (windows && windows.length > 0) {
+    return windows.map((w) => {
+      const start = Math.round(w.startSec);
+      const end = Math.min(durationSec, Math.round(w.startSec + w.durationSec));
+      return `[${fmtTime(start)}-${fmtTime(end)}]`;
+    });
+  }
   if (count <= 0) return [];
   const step = durationSec / count;
   return Array.from({ length: count }, (_, i) => {
@@ -57,8 +75,16 @@ export function usesCleanCuts(adType: string): boolean {
  * service = multi-scene skit with clean cuts; cinematic/demo = clean cuts
  * between beats (demo also pins the product rigid); ugc = one continuous take.
  */
-export function videoRenderDirective(adType: string): string {
+export function videoRenderDirective(
+  adType: string,
+  opts?: { continuous?: boolean },
+): string {
   const def = getAdType(adType);
+  // A template run steering the master ALWAYS renders one continuous take: the
+  // template does the cutting, and a Seedance cut between beats would desync the
+  // 1:1 slices. This overrides the per-look cut/continuous decision below.
+  if (opts?.continuous)
+    return "Render ONE continuous live-action take that fills the whole frame the entire time - match the board's framing and identity, never a split-screen or collage.";
   if (def.id === "service")
     return "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene - each output frame is ONE full-frame scene; match the board's identity and look, never a split-screen or collage.";
   if (usesCleanCuts(adType))
@@ -126,6 +152,15 @@ export function buildVideoPrompt(input: {
   brandText?: string;
   /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
   supportingCast?: SupportingRole[];
+  /**
+   * TEMPLATE runs only — the beats' timeline windows (index-aligned with
+   * `scenes`). When set, the shot-list brackets come from these windows instead
+   * of an even split, and the render is forced to ONE continuous take (the
+   * template slices it). Undefined ⇒ the generic even-split, unchanged.
+   */
+  slotWindows?: { startSec: number; durationSec: number }[];
+  /** Panels on the attached sheet, for its description. Defaults to `scenes.length`. */
+  boardPanelCount?: number;
 }): ChatMessage[] {
   const {
     adStyle,
@@ -139,7 +174,14 @@ export function buildVideoPrompt(input: {
     otherSummaries,
     visualStyle,
     hasProductSheet,
+    slotWindows,
   } = input;
+  // Template beat mode: the master must be ONE continuous take regardless of the
+  // ad type's usual cut/continuous default, so the 1:1 slices stay in sync.
+  const continuousTake = (slotWindows?.length ?? 0) > 0;
+  // How many panels the attached sheet actually has (a template board renders one
+  // per beat). Only the panel-count wording changes; 4 stays byte-identical.
+  const boardPanels = input.boardPanelCount ?? (scenes.length || 4);
   const anchor = (input.characterAnchor ?? "").trim();
   // Ad-type registry dispatch (Chunk F). `isUgcLook` carries the old `ugc`
   // label/speaker branches; presenter logic comes from `hasPerson`. Legacy ids
@@ -152,8 +194,9 @@ export function buildVideoPrompt(input: {
   const isService = def.id === "service";
   // Per-look motion mode (single source of truth, shared with the deterministic
   // fallback + video/index.ts's renderDirective). cinematic_polished + demo_clean
-  // (and service) CUT between beats; ugc_authentic runs one continuous take.
-  const cuts = usesCleanCuts(adType);
+  // (and service) CUT between beats; ugc_authentic runs one continuous take. A
+  // template beat run forces continuous regardless (the template does the cuts).
+  const cuts = usesCleanCuts(adType) && !continuousTake;
   const renderModeLine = cuts
     ? "Render the beats in order as distinct shots with a clean CUT between each; each beat is ONE stable shot (one camera move or a hold, one action), all motion slow and smooth, never fast."
     : "Render ONE continuous live-action take with NO cuts, the beats flowing smoothly into one another.";
@@ -190,7 +233,7 @@ export function buildVideoPrompt(input: {
     hasProductSheet
       ? "@Image 1 is the product — keep its exact shape, colour, finish and markings identical in every shot"
       : "",
-    `${boardImg} is the film storyboard — a 2×2 grid of four keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4); follow the panels in order, one per time slice`,
+    `${boardImg} is the film storyboard — ${boardPanels === 4 ? "a 2×2 grid of four keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4)" : `a grid of ${boardPanels} keyframe panels in row-major reading order (top-left first)`}; follow the panels in order, one per time slice`,
     hasPresenter
       ? `${faceImg} is the on-screen person — keep this exact face and identity throughout`
       : "",
@@ -234,8 +277,13 @@ export function buildVideoPrompt(input: {
         .join(" ")
     : "";
 
-  // The example slice layout for the literal format line (panel-count aware).
-  const exampleSlices = buildSliceBrackets(durationSec, scenes.length || 4)
+  // The example slice layout for the literal format line (panel-count aware, or
+  // the template's real slot windows in beat mode).
+  const exampleSlices = buildSliceBrackets(
+    durationSec,
+    scenes.length || 4,
+    slotWindows,
+  )
     .map((s, i) => `${s}: <panel ${i + 1} action>`)
     .join("; ");
 
@@ -244,7 +292,7 @@ export function buildVideoPrompt(input: {
     `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
     isService
       ? `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first), ONE per scene. Use it as the LOOK + identity reference. Render the FOUR scenes in order as a short live-action SKIT with a clean CUT between each — they are DISTINCT settings/moments (the world and lighting may change between scenes), NOT one continuous take. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`
-      : `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. ${renderModeLine} Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`,
+      : `A film storyboard is attached as ${boardImg}: ${boardPanels === 4 ? "a clean 2×2 of FOUR keyframe panels in reading order (top-left first)" : `a clean grid of ${boardPanels} keyframe panels in row-major reading order (top-left first)`}. Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. ${renderModeLine} Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the ${boardPanels === 4 ? "2×2" : "panel"} layout, never split the frame into panels or a side-by-side/collage.`,
     `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
     lockedStyle
       ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
@@ -272,7 +320,7 @@ export function buildVideoPrompt(input: {
     .join(" ");
 
   const speakerLabel = isService || isUgcLook ? "spoken" : "voiceover";
-  const slices = buildSliceBrackets(durationSec, scenes.length);
+  const slices = buildSliceBrackets(durationSec, scenes.length, slotWindows);
   const sceneLines = scenes
     .map((s, i) => {
       const slice = slices[i] ?? "";
@@ -336,6 +384,10 @@ export function buildDeterministicVideoPrompt(input: {
   brandText?: string;
   /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
   supportingCast?: SupportingRole[];
+  /** TEMPLATE runs — beat windows (index-aligned with `scenes`); forces one take. */
+  slotWindows?: { startSec: number; durationSec: number }[];
+  /** Panels on the attached sheet, for its description. Defaults to `scenes.length`. */
+  boardPanelCount?: number;
 }, opts?: {
   /**
    * Audio-safe retry mode (the video ladder's `audioMode: "safe"`): the run's
@@ -355,7 +407,11 @@ export function buildDeterministicVideoPrompt(input: {
   const isService = def.id === "service";
   // Per-look motion mode (same source of truth as buildVideoPrompt + index.ts):
   // cinematic_polished + demo_clean CUT between beats; ugc_authentic is one take.
-  const cuts = usesCleanCuts(adType);
+  // A template beat run forces continuous (the template does the cuts).
+  const continuousTake = (input.slotWindows?.length ?? 0) > 0;
+  const cuts = usesCleanCuts(adType) && !continuousTake;
+  // Panel count of the attached sheet (a template board renders one per beat).
+  const boardPanels = input.boardPanelCount ?? (scenes.length || 4);
   const brandTail = formatBrand(input.brandText)
     ? ` ${formatBrand(input.brandText)}.`
     : "";
@@ -391,7 +447,7 @@ export function buildDeterministicVideoPrompt(input: {
     ? `a natural, real human voice fitting ${anchor}`
     : (def.fragments.videoVoice(fctx)[0] ?? "");
   const count = scenes.length || 1;
-  const slices = buildSliceBrackets(durationSec, count);
+  const slices = buildSliceBrackets(durationSec, count, input.slotWindows);
   const speak = isService ? "speaks in English" : ugc ? "spoken" : "voiceover";
   const shots = scenes
     .map((s, i) => {
@@ -447,7 +503,7 @@ export function buildDeterministicVideoPrompt(input: {
   // LLM prompt + video/index.ts so the composed prompt never contradicts itself.
   const openLine = cuts
     ? `Generate a scene from the uploaded film storyboard ${boardRef} - a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render the four beats in order as distinct shots with a clean CUT between each in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME - never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`
-    : `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`;
+    : `Generate a scene using shots in the uploaded film storyboard ${boardRef} — ${boardPanels === 4 ? "a clean 2×2 of four keyframe panels (top-left first)" : `a clean grid of ${boardPanels} keyframe panels (top-left first, row-major)`} used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the ${boardPanels === 4 ? "2×2" : "panel"} layout, never split the frame into panels or a side-by-side/collage.`;
   return (
     `${openLine} ${productPin}${presenterPin}${supportClause}` +
     `${shots}. ` +
