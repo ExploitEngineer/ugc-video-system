@@ -6,6 +6,7 @@
 
 import type { AspectRatio, Duration } from "@ugc/shared";
 import type { HookSelection } from "./ad-types/types.js";
+import type { TemplateBeat } from "./template/beats.js";
 import type { OpenAIProvider } from "../providers/openai/index.js";
 import type { VideoProvider } from "../providers/video.js";
 
@@ -112,6 +113,17 @@ export interface SkillContext {
    * mention; never get a reference sheet. Undefined/empty ⇒ no supporting cast.
    */
   supportingCast?: SupportingRole[];
+  /**
+   * `pipeline: "template"` only — the ordered beats that steer the ONE 15s
+   * master so each video slot's window shows its intended scene (`beats.ts`).
+   * Set by `buildCtx` when the template has ≥ 2 resolved video slots and the
+   * plan authored scenes; undefined otherwise (single-slot / non-template runs,
+   * which keep the generic even-split clip). Read by the orchestrator's video
+   * branch to build the scene list + the Seedance shot-list windows.
+   */
+  templateBeats?: TemplateBeat[];
+  /** `pipeline: "template"` only — the plan's one-line concept, as look context. */
+  templateConcept?: string;
   openai: OpenAIProvider;
   /** Video provider (Seedance 2.0 via BytePlus). Used by the Video Builder. */
   video: VideoProvider;

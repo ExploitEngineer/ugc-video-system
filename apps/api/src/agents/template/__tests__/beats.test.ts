@@ -1,0 +1,165 @@
+import { describe, it, expect } from "vitest";
+
+import type {
+  RunTemplate,
+  TemplatePlan,
+  TemplateSlot,
+} from "@ugc/shared";
+
+import type { StoryboardScene } from "../../image/storyboard/prompt.js";
+import { beatsToScenes, deriveTemplateBeats } from "../beats.js";
+import { MASTER_CLIP_SECONDS } from "../geometry.js";
+
+// A video slot with a resolved timeline window. Only the fields deriveTemplateBeats
+// reads matter; the rest of TemplateSlot is filled to satisfy the type.
+const vslot = (
+  jobLayerName: string,
+  startSec: number | null,
+  durationSec: number | null,
+): TemplateSlot =>
+  ({
+    asset: "VIDEO",
+    composition: "main",
+    layerName: jobLayerName,
+    jobLayerName,
+    injectVia: "asset",
+    width: 1920,
+    height: 1080,
+    startSec,
+    durationSec,
+  }) as TemplateSlot;
+
+const tpl = (slots: TemplateSlot[]): RunTemplate =>
+  ({ slots }) as unknown as RunTemplate;
+
+const plan = (scenes: Record<string, string>): TemplatePlan => ({
+  conceptSummary: "a calm ceramic mug on a morning counter",
+  slots: Object.entries(scenes).map(([jobLayerName, videoScene]) => ({
+    jobLayerName,
+    asset: "VIDEO" as const,
+    role: "",
+    videoScene,
+  })),
+});
+
+describe("deriveTemplateBeats", () => {
+  it("joins each slot's videoScene by jobLayerName, in time order", () => {
+    const beats = deriveTemplateBeats(
+      tpl([vslot("PH_1", 0, 2), vslot("PH_2", 2, 3)]),
+      plan({ PH_1: "the mug fills", PH_2: "hands lift the mug" }),
+    );
+    expect(beats).toBeDefined();
+    expect(beats?.map((b) => b.jobLayerName)).toEqual(["PH_1", "PH_2"]);
+    expect(beats?.map((b) => b.scene)).toEqual([
+      "the mug fills",
+      "hands lift the mug",
+    ]);
+  });
+
+  it("sorts by startSec regardless of slot order", () => {
+    const beats = deriveTemplateBeats(
+      tpl([vslot("late", 6, 3), vslot("early", 0, 3)]),
+      plan({ late: "b", early: "a" }),
+    );
+    expect(beats?.map((b) => b.jobLayerName)).toEqual(["early", "late"]);
+  });
+
+  it("makes the shot list gapless — each beat runs to the next start, last to the end", () => {
+    const beats = deriveTemplateBeats(
+      tpl([vslot("PH_1", 0, 2), vslot("PH_2", 5, 3)]),
+      plan({ PH_1: "a", PH_2: "b" }),
+    );
+    expect(beats?.[0]).toMatchObject({ startSec: 0, durationSec: 5 });
+    expect(beats?.[1]).toMatchObject({
+      startSec: 5,
+      durationSec: MASTER_CLIP_SECONDS - 5,
+    });
+  });
+
+  it("folds a sub-1.5s beat into the one before it", () => {
+    const beats = deriveTemplateBeats(
+      tpl([vslot("PH_1", 0, 5), vslot("PH_2", 5, 1), vslot("PH_3", 6, 4)]),
+      plan({ PH_1: "a", PH_2: "b", PH_3: "c" }),
+    );
+    // PH_2 (1s on screen) is too fleeting for its own Seedance shot.
+    expect(beats?.map((b) => b.jobLayerName)).toEqual(["PH_1", "PH_3"]);
+  });
+
+  it("caps the distinct beats at 6", () => {
+    const slots = Array.from({ length: 8 }, (_, i) =>
+      vslot(`PH_${i}`, i * 1.8, 1.8),
+    );
+    const scenes = Object.fromEntries(slots.map((s) => [s.jobLayerName, "x"]));
+    const beats = deriveTemplateBeats(tpl(slots), plan(scenes));
+    expect(beats?.length).toBeLessThanOrEqual(6);
+    expect(beats?.length).toBe(6);
+  });
+
+  it("returns undefined for a single-video-slot template (stays generic)", () => {
+    expect(
+      deriveTemplateBeats(tpl([vslot("only", 0, 15)]), plan({ only: "a" })),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when a window is unresolved", () => {
+    expect(
+      deriveTemplateBeats(
+        tpl([vslot("PH_1", 0, 2), vslot("PH_2", null, null)]),
+        plan({ PH_1: "a", PH_2: "b" }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when the plan authored no scenes at all", () => {
+    expect(
+      deriveTemplateBeats(
+        tpl([vslot("PH_1", 0, 2), vslot("PH_2", 2, 3)]),
+        plan({ PH_1: "", PH_2: "" }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("beatsToScenes", () => {
+  const beat = (startSec: number, durationSec: number, scene: string) => ({
+    jobLayerName: "x",
+    startSec,
+    durationSec,
+    scene,
+  });
+
+  const sbScene = (i: number, transcript: string): StoryboardScene => ({
+    index: i,
+    cameraAngle: `angle ${i}`,
+    actionMovement: "",
+    sceneDescription: `sb ${i}`,
+    panelCaption: "",
+    transcript,
+    adStyle: "warm",
+  });
+
+  it("uses the beat scene as the description and borrows the transcript by midpoint", () => {
+    const storyboard = [sbScene(0, "line A"), sbScene(1, "line B")];
+    // beat 0 midpoint 1s → first half → scene 0; beat 1 midpoint ~11s → scene 1.
+    const scenes = beatsToScenes(
+      [beat(0, 2, "beat one"), beat(8, 7, "beat two")],
+      storyboard,
+    );
+    expect(scenes[0]).toMatchObject({
+      sceneDescription: "beat one",
+      transcript: "line A",
+    });
+    expect(scenes[1]).toMatchObject({
+      sceneDescription: "beat two",
+      transcript: "line B",
+    });
+  });
+
+  it("falls back to an empty transcript when there is no storyboard", () => {
+    const scenes = beatsToScenes([beat(0, 5, "solo beat")], []);
+    expect(scenes[0]).toMatchObject({
+      sceneDescription: "solo beat",
+      transcript: "",
+    });
+  });
+});
