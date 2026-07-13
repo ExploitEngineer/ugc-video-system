@@ -25,6 +25,10 @@ export interface PlanSlotInput {
   /** IMAGE/VIDEO: the layer's pixel box, so the model knows hero vs. inset. */
   width?: number | null;
   height?: number | null;
+  /** VIDEO: seconds into the 15s master where this slot's piece begins. */
+  startSec?: number | null;
+  /** VIDEO: how long this slot is on screen, in seconds. */
+  durationSec?: number | null;
 }
 
 export interface TemplatePlanPromptInput {
@@ -43,6 +47,19 @@ export interface TemplatePlanPromptInput {
 const box = (w?: number | null, h?: number | null): string =>
   w && h ? `${w}x${h}px` : "size unknown";
 
+/** `0:02` — minutes:seconds, rounded, for a sub-minute clip. */
+const clock = (sec: number): string => {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** `plays 0:02–0:05 (2.3s)` — a VIDEO slot's window on the master, when known. */
+const videoWindow = (s: PlanSlotInput): string | null => {
+  if (s.startSec == null || s.durationSec == null) return null;
+  const end = s.startSec + s.durationSec;
+  return `plays ${clock(s.startSec)}–${clock(end)} (${s.durationSec.toFixed(1)}s)`;
+};
+
 function describeSlot(s: PlanSlotInput, i: number): string {
   const head = `${i + 1}. jobLayerName="${s.jobLayerName}"  [${s.asset}]`;
   if (s.asset === "TEXT") {
@@ -51,7 +68,12 @@ function describeSlot(s: PlanSlotInput, i: number): string {
     if (s.charBudget) parts.push(`MAX ${s.charBudget} characters`);
     return parts.join(" — ");
   }
-  return `${head} — ${box(s.width, s.height)}`;
+  const parts = [`${head} — ${box(s.width, s.height)}`];
+  if (s.asset === "VIDEO") {
+    const w = videoWindow(s);
+    if (w) parts.push(w);
+  }
+  return parts.join(" — ");
 }
 
 export function buildTemplatePlanPrompt(
@@ -62,8 +84,8 @@ export function buildTemplatePlanPrompt(
 
   const system = [
     "You are planning how to fill a designer's After Effects template for ONE",
-    "specific ad. The template has slots: a video slot for the ad clip, image",
-    "slots for stills, and text slots for on-screen copy.",
+    "specific ad. The template has slots: one or more video slots the ad clip",
+    "fills, image slots for stills, and text slots for on-screen copy.",
     "",
     "Your job is to decide, for each slot, what it should contain — so that the",
     "clip, the stills and the copy all describe the SAME ad. This plan is read by",
@@ -86,10 +108,13 @@ export function buildTemplatePlanPrompt(
           "  while a wrong generated image is not.",
         ].join("\n")
       : "",
-    "- VIDEO slot: write `videoScene` — the hero scene the generated clip shows.",
-    `  The clip is ${input.clipSeconds} seconds long, so describe ONE continuous`,
-    "  moment, not a sequence of cuts. The template may cut this single shot into",
-    "  several shorter moments itself, so it must hold together as one take.",
+    `- VIDEO slots: the whole ad is ONE continuous ~${input.clipSeconds}s take.`,
+    "  Write `videoScene` for EACH video slot — what is on screen during the",
+    "  window shown next to it — as consecutive beats of that single take. Keep",
+    "  the SAME place, person, product and look across every beat; only the",
+    "  framing and the small moment advance (a hand lifts the product, the camera",
+    "  pushes in). They are slices of one shot, not separate scenes, so they must",
+    "  run together seamlessly in the order listed.",
     "",
     "Return STRICT JSON only (no prose, no markdown fences):",
     "{",

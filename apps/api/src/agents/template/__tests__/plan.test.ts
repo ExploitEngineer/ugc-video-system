@@ -47,6 +47,21 @@ describe("planningSlots — what the model is even allowed to see", () => {
       "hero.jpg",
     ]);
   });
+
+  it("keeps EVERY video slot, so the plan can beat them out", () => {
+    // The old behavior showed only the first video slot; steering the master
+    // needs a scene per slot.
+    const multi = [
+      slot({ asset: "VIDEO", jobLayerName: "PH_1" }),
+      slot({ asset: "VIDEO", jobLayerName: "PH_2" }),
+      slot({ asset: "VIDEO", jobLayerName: "PH_3" }),
+    ];
+    expect(planningSlots(multi).map((s) => s.jobLayerName)).toEqual([
+      "PH_1",
+      "PH_2",
+      "PH_3",
+    ]);
+  });
 });
 
 // ── reconcilePlan ────────────────────────────────────────────────────────────
@@ -122,6 +137,26 @@ describe("reconcilePlan — our slots are the truth, the model is a suggestion",
     expect(out[2]?.fill).toBe(false);
     expect(out[2]?.imageSubject).toBeUndefined();
   });
+
+  it("keeps a videoScene for EVERY video slot", () => {
+    // Steering the master needs one beat per slot; reconcile must not collapse
+    // them to the first.
+    const videoSlots = [
+      slot({ asset: "VIDEO", jobLayerName: "PH_1" }),
+      slot({ asset: "VIDEO", jobLayerName: "PH_2" }),
+    ];
+    const out = reconcilePlan(
+      videoSlots,
+      reply([
+        { jobLayerName: "PH_1", asset: "VIDEO", role: "opener", videoScene: "the mug fills with coffee" },
+        { jobLayerName: "PH_2", asset: "VIDEO", role: "payoff", videoScene: "hands raise the mug to a smile" },
+      ]),
+    );
+    expect(out.map((s) => s.videoScene)).toEqual([
+      "the mug fills with coffee",
+      "hands raise the mug to a smile",
+    ]);
+  });
 });
 
 // ── the prompt ───────────────────────────────────────────────────────────────
@@ -146,8 +181,25 @@ describe("buildTemplatePlanPrompt", () => {
 
   it("passes the template's real clip length, not a hardcoded 15s", () => {
     const [system, user] = buildTemplatePlanPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
-    expect(system?.content).toContain("12 seconds long");
+    expect(system?.content).toContain("~12s take");
+    expect(system?.content).not.toContain("~15s");
     expect(user?.content).toContain("clip length 12s");
+  });
+
+  it("shows each video slot's window and asks for one continuous take", () => {
+    // A multi-slot template must plan a beat per slot, pinned to its window, as
+    // consecutive beats of ONE take — not one scene or a sequence of cuts.
+    const [system, user] = buildTemplatePlanPrompt({
+      ...base,
+      slots: [
+        { jobLayerName: "PH_1", asset: "VIDEO", startSec: 0, durationSec: 2 },
+        { jobLayerName: "PH_2", asset: "VIDEO", startSec: 2, durationSec: 3.3 },
+      ],
+    });
+    expect(user?.content).toContain("plays 0:00–0:02");
+    expect(user?.content).toContain("plays 0:02–0:05 (3.3s)");
+    expect(system?.content).toMatch(/ONE continuous/i);
+    expect(system?.content).toMatch(/for EACH video slot/i);
   });
 
   it("omits the image rules entirely when there are no image slots", () => {

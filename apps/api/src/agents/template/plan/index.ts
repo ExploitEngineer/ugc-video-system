@@ -32,22 +32,18 @@ const log = createLogger("template-plan");
  * `decorative` (a background) are withheld entirely — a generated photo in a
  * logo layer is wrong every time, so the model never gets the chance to argue.
  *
- * Only the FIRST video slot is shown, and it stands for the whole clip. There
- * is one 15-second master, and the template cuts it into pieces; showing the
- * model three video slots would invite three unrelated scenes when what we need
- * is one continuous shot. AUDIO slots receive the master's voiceover, nothing
+ * EVERY video slot is shown, each with its window on the 15-second master's
+ * timeline. There is still one continuous master, but the template cuts it into
+ * a piece per video slot, and each piece samples a different second of it (the
+ * slicer maps composition-time 1:1 onto master-time). So the model plans the
+ * clip as a run of beats — what is on screen during each slot's window — that
+ * together read as one take. AUDIO slots receive the master's voiceover, nothing
  * for the model to plan.
  */
 export function planningSlots(slots: TemplateSlot[]): TemplateSlot[] {
-  let seenVideo = false;
   return slots.filter((s) => {
     if (s.asset === "AUDIO") return false;
     if (s.asset === "IMAGE") return s.imageClass === "content";
-    if (s.asset === "VIDEO") {
-      if (seenVideo) return false;
-      seenVideo = true;
-      return true;
-    }
     return true;
   });
 }
@@ -59,6 +55,8 @@ const toPromptSlot = (s: TemplateSlot): PlanSlotInput => ({
   charBudget: s.charBudget,
   width: s.width,
   height: s.height,
+  startSec: s.startSec,
+  durationSec: s.durationSec,
 });
 
 /**
