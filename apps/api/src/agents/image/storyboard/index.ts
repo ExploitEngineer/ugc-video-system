@@ -60,11 +60,22 @@ interface RenderedStoryboard {
 async function renderStoryboard(
   ctx: SkillContext,
   input: StoryboardInput,
-  opts: { full60s?: boolean; segmentCount?: number } = {},
+  opts: {
+    full60s?: boolean;
+    segmentCount?: number;
+    /** TEMPLATE runs — one panel per beat, so the board matches the steered video. */
+    beats?: { scene: string }[];
+  } = {},
 ): Promise<RenderedStoryboard> {
   const full60s = Boolean(opts.full60s);
   const segmentCount = opts.segmentCount ?? 4;
-  const panelCount = full60s ? segmentCount * PANELS_PER_SEGMENT : 4;
+  // A template run renders exactly one panel per beat (2..6); non-template 15s
+  // stays 4; the 60s master is N×4.
+  const templateBeats =
+    !full60s && (opts.beats?.length ?? 0) >= 2 ? opts.beats : undefined;
+  const panelCount = full60s
+    ? segmentCount * PANELS_PER_SEGMENT
+    : (templateBeats?.length ?? 4);
   const log = createLogger("image", {
     run: ctx.runId,
     skill: full60s ? "storyboard-master" : "storyboard",
@@ -98,6 +109,7 @@ async function renderStoryboard(
     creativeBrief: ctx.creativeBrief,
     brandText: ctx.brandText,
     supportingCast: ctx.supportingCast,
+    templateBeats,
   });
   // The storyboard plan is the longest LLM output in the pipeline, so JSON mode
   // + a generous token ceiling are essential (a truncated reply = invalid JSON).
@@ -169,9 +181,12 @@ export async function storyboardGenerator(
   input: StoryboardInput,
 ): Promise<SkillResult<StoryboardSheet>> {
   const log = createLogger("image", { run: ctx.runId, skill: "storyboard" });
+  // Template runs steer both board and video off the same beats: render one
+  // panel per beat so the storyboard depicts exactly what the clip shows.
   const { bytes, mime, scenes, imagePrompt } = await renderStoryboard(
     ctx,
     input,
+    { beats: ctx.templateBeats },
   );
 
   const { assetId, assetUrl, artifact } = await persistSheet({
