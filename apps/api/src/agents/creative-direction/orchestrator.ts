@@ -22,6 +22,7 @@ import {
   type RunStatus,
   segmentCountFor,
   type Step,
+  templatePlanSchema,
 } from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
@@ -51,6 +52,7 @@ import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { templateAgent } from "../template/index.js";
+import { beatsToScenes, deriveTemplateBeats } from "../template/beats.js";
 import { videoAgent } from "../video/index.js";
 import { dispositionAfterLadder } from "../video/retry.js";
 import type { SkillContext } from "../types.js";
@@ -184,6 +186,16 @@ function buildCtx(
   uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
 ): SkillContext {
   const { openai, video } = providers();
+  // Template runs only — turn the plan's per-slot videoScene + the slots'
+  // timeline windows into the beats that steer the master. `template_plan` runs
+  // before the storyboard/video steps and ctx is rebuilt each driver iteration
+  // from a fresh run read, so both columns are present by the time this matters.
+  // Undefined for non-template runs, single-video-slot templates, and any run
+  // whose plan has not landed yet — the video path then stays generic.
+  const tpl = runTemplateSchema.safeParse(run.template).data;
+  const plan = templatePlanSchema.safeParse(run.templatePlan).data;
+  const templateBeats =
+    tpl && plan ? deriveTemplateBeats(tpl, plan) : undefined;
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
@@ -216,6 +228,11 @@ function buildCtx(
     // Chunk 4b — text-only supporting roles planned from the prompt (product types).
     supportingCast:
       (run.supportingCast as SkillContext["supportingCast"]) ?? undefined,
+    // Template pipeline — beats that steer the master + the plan concept (look
+    // context). Both undefined unless this is a template run with ≥ 2 resolved
+    // video slots and a landed plan.
+    templateBeats,
+    templateConcept: plan?.conceptSummary?.trim() || undefined,
     openai,
     video,
   };
@@ -413,18 +430,45 @@ async function executeStep(
       const productSheetRef: ImageRef | undefined = product
         ? { source: product.assetUrl, mime: "image/png" }
         : undefined;
-      // A template run generates the SAME 15s master as any other run. It is
-      // not cut to the template's length: `template_render` slices it into a
-      // piece per video slot instead, so the composition keeps its full runtime
-      // and every ad is built from the same amount of footage.
+      // A template run generates ONE 15s master that `template_render` slices
+      // into a piece per video slot, so the composition keeps its full runtime.
+      // When the template has ≥ 2 video slots and the plan authored their scenes
+      // (`ctx.templateBeats`), STEER that master: swap the generic storyboard
+      // scenes for the per-slot beats and hand videoBuilder the slots' timeline
+      // windows, so the continuous clip shows each slot's beat during the seconds
+      // that slot is cut from. `beatsToScenes` keeps the voiceover a coherent arc
+      // by borrowing each beat's transcript from the storyboard scene over its
+      // midpoint. Non-template / single-slot runs leave `templateBeats` undefined
+      // and generate the SAME master + even split as before.
       //
       // videoBuilder writes its own video step_events.
+      const beats = ctx.templateBeats;
+      const slotWindows = beats?.map((b) => ({
+        startSec: b.startSec,
+        durationSec: b.durationSec,
+      }));
+      // The storyboard now renders one panel per beat, so its scenes ARE the
+      // beats — with a real per-beat transcript authored for each. Use them
+      // directly when the counts line up. Fall back to projecting the beats onto
+      // the scenes only if the board diverged (a stale sheet, or a model that
+      // ignored the panel count), so the video never desyncs from the slots.
+      const videoScenes = !beats
+        ? sbScenes
+        : sbScenes.length === beats.length
+          ? sbScenes
+          : beatsToScenes(beats, sbScenes);
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
         hasPerson: Boolean(personRef),
         personFaceRef: personRef,
         productSheetRef,
-        scenes: sbScenes,
+        scenes: videoScenes,
+        slotWindows,
+        // The rendered sheet's own panel count (drives the clean-crop grid +
+        // board wording), which can differ from `videoScenes` only in the rare
+        // fallback where the storyboard produced a different count than beats.
+        boardPanelCount: sbScenes.length,
+        // ↑ sbScenes is the sheet; videoScenes may be projected from the beats.
         // Pin the presenter's identity in the video prompt. Empty for uploaded
         // persons (no text brief) — the gender-locked scene text carries it then.
         characterAnchor: ctx.personBrief,
