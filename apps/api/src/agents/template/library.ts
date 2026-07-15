@@ -27,6 +27,7 @@ import { createLogger } from "../../lib/log.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
 import type { TemplateRenderProvider } from "../../providers/template-render.js";
 import { type AepLayerIndex, parseAepLayersFromFile } from "./aep.js";
+import { MAX_TEMPLATE_SEC, MIN_TEMPLATE_SEC } from "./geometry.js";
 import { buildMetadata, buildStructure } from "./introspect.js";
 
 const log = createLogger("template-library");
@@ -260,20 +261,20 @@ export async function createTemplate(
 // ── introspect ───────────────────────────────────────────────────────────────
 
 /**
- * The most video slots we will fill. Not a technical limit — one 15s master is
- * sliced across all of them, so the cost is flat — but past this the slices are
- * too short to read as anything, and the template is probably not an ad.
+ * The most video slots we will fill. The footage master is sliced across all of
+ * them (`clips.ts`), so a slideshow template with many short slots is fine — but
+ * past this the slices are too short to read as anything (a 60s master / 60 slots
+ * ≈ 1s each), and the template is probably not an ad.
  */
-export const MAX_VIDEO_SLOTS = 10;
+export const MAX_VIDEO_SLOTS = 60;
 
 /**
  * Why a template cannot join the library, or null when it can. Pure, so the
  * rejection rules are unit-testable without a Nexrender account.
  *
- * SEVERAL video slots are fine. One 15s master is generated and cut into a
- * slice per slot, each of that slot's own length, so a 7s/2s/2s template costs
- * exactly the same as a single-slot one. Only a template with NOWHERE to put
- * the footage is unusable.
+ * SEVERAL video slots are fine. The footage master is cut into a slice per slot,
+ * each of that slot's own length, so a 7s/2s/2s template is fully covered. Only a
+ * template with NOWHERE to put the footage is unusable.
  */
 export function validateForLibrary(
   structure: TemplateStructure,
@@ -286,6 +287,19 @@ export function validateForLibrary(
   }
   if (!structure.mainComposition) {
     return "Could not determine which composition to render.";
+  }
+  // Templates run 8–60s. Below 8s there is not enough footage for a coherent ad;
+  // above 60s is past the footage cap (four ≤15s Seedance clips merged). Reject at
+  // upload so a bad length is never paid for. A template with no readable duration is
+  // allowed through — the render caps at `templateTotalSeconds` downstream.
+  const dur = metadata.durationSec;
+  if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
+    if (dur < MIN_TEMPLATE_SEC) {
+      return `This template is ${dur.toFixed(1)}s; templates must be at least ${MIN_TEMPLATE_SEC}s.`;
+    }
+    if (dur > MAX_TEMPLATE_SEC) {
+      return `This template is ${dur.toFixed(1)}s; templates must be at most ${MAX_TEMPLATE_SEC}s.`;
+    }
   }
   return null;
 }

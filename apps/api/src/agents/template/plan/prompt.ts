@@ -1,19 +1,18 @@
-// Template Plan prompt — the FIRST step of a template run, before any image or
-// video spend.
+// Template Blueprint prompt — the FIRST step of a template run, before any image
+// or video spend.
 //
-// One cheap call reads the template's slot inventory (what kinds, how big, what
-// the placeholder says) plus the ad brief, and decides what each slot should
-// contain. Every downstream agent then reads that plan, which is what keeps the
-// copy, the generated images and the clip describing the SAME ad instead of
-// three unrelated ones.
+// The model is shown TWO things: (1) a deterministic STRUCTURAL INVENTORY of the
+// template's slots + their timeline windows (what/where/at which second — exact,
+// not sampled), and (2) VISUAL FRAMES of the template playing its OWN placeholder
+// content. From those it produces a BLUEPRINT: a per-slot plan PLUS a template-
+// wide look bible and an on-screen-text-ownership decision, so the copy, the
+// stills and the clip all match the SAME template.
 //
-// The model NEVER sees `brand` or `decorative` image slots: the deterministic
-// `classifyImageSlot` heuristic removed them before this prompt is built, and it
-// cannot promote them back. It only arbitrates the ambiguously-named `content`
-// slots (`PH_2`, `Media_3` — which is most real templates).
+// No ad-type, no ad-style-as-authority anywhere: the template dictates the look.
+// The model NEVER sees `brand`/`decorative` image slots (removed upstream by
+// `classifyImageSlot`); it only arbitrates ambiguous `content` slots.
 
 import { formatBrand } from "../../../lib/brand.js";
-import type { ChatMessage } from "../../../providers/openai/index.js";
 
 export interface PlanSlotInput {
   jobLayerName: string;
@@ -25,25 +24,29 @@ export interface PlanSlotInput {
   /** IMAGE/VIDEO: the layer's pixel box, so the model knows hero vs. inset. */
   width?: number | null;
   height?: number | null;
-  /** VIDEO: seconds into the 15s master where this slot's piece begins. */
+  /** VIDEO: seconds into the master where this slot's piece begins. */
   startSec?: number | null;
   /** VIDEO: how long this slot is on screen, in seconds. */
   durationSec?: number | null;
 }
 
-export interface TemplatePlanPromptInput {
+export interface TemplateBlueprintPromptInput {
   userPrompt: string;
-  adType: string;
-  adStyle: string;
   brandText?: string;
   productBrief?: string;
   /** The clip length this template's composition asks for. */
   clipSeconds: number;
   aspectRatio: string;
   slots: PlanSlotInput[];
+  /** Whether frame 1 is the preview poster (vs. the first sampled frame). */
+  hasPoster: boolean;
+  /** Seconds each sampled frame was taken at, in attach order (after the poster). */
+  frameTimestampsSec: number[];
+  /** Ground-truth `#rrggbb` swatches sampled from the preview poster (may be empty). */
+  palette?: string[];
 }
 
-/** `1200x120` / `—` when the layer reports no box. */
+/** `1200x120` / `size unknown` when the layer reports no box. */
 const box = (w?: number | null, h?: number | null): string =>
   w && h ? `${w}x${h}px` : "size unknown";
 
@@ -76,53 +79,76 @@ function describeSlot(s: PlanSlotInput, i: number): string {
   return parts.join(" — ");
 }
 
-export function buildTemplatePlanPrompt(
-  input: TemplatePlanPromptInput,
-): ChatMessage[] {
+/** "Frame 1 = poster … Frame 2 = template at 0:02 …" — ties pixels to seconds. */
+function frameLegend(input: TemplateBlueprintPromptInput): string[] {
+  const lines: string[] = [];
+  let n = 1;
+  if (input.hasPoster) {
+    lines.push(`Frame ${n++} = the preview POSTER (a representative still).`);
+  }
+  for (const ts of input.frameTimestampsSec) {
+    lines.push(`Frame ${n++} = the template at ${clock(ts)}.`);
+  }
+  return lines;
+}
+
+/**
+ * Returns the system + user strings for the vision-analysis call. The provider
+ * attaches the poster + frames itself, so this only DESCRIBES what the model is
+ * looking at (the frame legend) and what to produce.
+ */
+export function buildTemplateBlueprintPrompt(
+  input: TemplateBlueprintPromptInput,
+): { system: string; user: string } {
   const hasImages = input.slots.some((s) => s.asset === "IMAGE");
   const hasText = input.slots.some((s) => s.asset === "TEXT");
+  const hasFrames = input.hasPoster || input.frameTimestampsSec.length > 0;
 
   const system = [
-    "You are planning how to fill a designer's After Effects template for ONE",
-    "specific ad. The template has slots: one or more video slots the ad clip",
-    "fills, image slots for stills, and text slots for on-screen copy.",
+    "You are analyzing a designer's finished After Effects template to produce a",
+    "production BLUEPRINT for ONE specific ad. The template has slots: video slots",
+    "the ad clip fills, image slots for stills, and text slots for on-screen copy.",
     "",
-    "Your job is to decide, for each slot, what it should contain — so that the",
-    "clip, the stills and the copy all describe the SAME ad. This plan is read by",
-    "every agent downstream, so be concrete and specific to THIS product.",
+    hasFrames
+      ? "You are shown VISUAL FRAMES of the template playing its OWN placeholder\ncontent. READ THE LOOK from them — palette, lighting, mood, pacing, camera and\ngraphic motion — and READ WHAT HAPPENS at each second. The frames show the\ntemplate's STYLE, not this ad's subject: never copy the placeholder's subject."
+      : "No preview frames are available, so reason about the look from the slot\ninventory and the brief alone.",
+    "",
+    "Decide, for each slot, what it should contain — so the clip, the stills and the",
+    "copy all describe the SAME ad. Be concrete and specific to THIS product.",
     "",
     "Rules:",
-    "- `role`: name what the slot is FOR in this ad, in a few words (\"the hero",
-    '  headline", "the closing CTA", "the product on a kitchen counter").',
+    "- `visualStyle`: ONE compact look-bible string capturing the template's palette,",
+    "  lighting, mood, pacing and motion, read from the frames. Every downstream",
+    "  agent matches this, so the generated footage and stills look like the template.",
+    input.palette?.length
+      ? "  A sampled colour palette is given below — your `visualStyle` MUST reflect those exact hues."
+      : "",
+    "- `onScreenText`: decide who owns on-screen text. If the template has TEXT slots",
+    '  it owns them → set `owner:"template"` and `requireCleanFootage:true` (the',
+    "  generated footage must carry NO text, captions, logos or end-cards — the",
+    '  template composites those). No TEXT slots → `owner:"none"`.',
     hasText
-      ? "- TEXT slots: write `copyIntent` — what the line should SAY and why. Do not\n  write the final words here; the copywriter does that. Respect the character\n  ceiling: a slot capped at 18 characters cannot hold a sentence."
+      ? "- TEXT slots: write `copyIntent` — what the line should SAY and why. Not the\n  final words. Respect the character ceiling: an 18-char slot cannot hold a sentence."
       : "",
     hasImages
-      ? [
-          "- IMAGE slots: set `fill` true when the slot should hold a photographic",
-          "  still of this ad's product or its world, and write `imageSubject`",
-          "  describing exactly what to depict. Set `fill` false when the slot is",
-          "  clearly NOT a photo — decorative furniture, a texture, a placeholder",
-          "  the design does not really use — and omit `imageSubject`. When unsure,",
-          "  prefer false: the template's own artwork is always a safe fallback,",
-          "  while a wrong generated image is not.",
-        ].join("\n")
+      ? "- IMAGE slots: set `fill` true when the slot should hold a photographic still of\n  this ad's product/world, and write `imageSubject`. Set `fill` false when it is\n  clearly not a photo, and omit `imageSubject`. When unsure, prefer false —\n  the template's own artwork is the safe fallback."
       : "",
-    `- VIDEO slots: the whole ad is ONE continuous ~${input.clipSeconds}s take.`,
-    "  Write `videoScene` for EACH video slot — what is on screen during the",
-    "  window shown next to it — as consecutive beats of that single take. Keep",
-    "  the SAME place, person, product and look across every beat; only the",
-    "  framing and the small moment advance (a hand lifts the product, the camera",
-    "  pushes in). They are slices of one shot, not separate scenes, so they must",
-    "  run together seamlessly in the order listed.",
+    `- VIDEO slots: the whole ad is ONE continuous ~${input.clipSeconds}s take. For`,
+    "  EACH video slot write `videoScene` (what is on screen during its window),",
+    "  `cameraAction` (one move or a hold) and `onScreenMoment` (what visibly happens",
+    "  in those seconds) — as consecutive beats of that single take. Keep the SAME",
+    "  place, person, product and look across every beat; only framing and the small",
+    "  moment advance. They are slices of one shot, not separate scenes.",
+    "- `audio`: `voiceover` = what the spoken line should convey (intent, not verbatim);",
+    "  `tone` = the voice character (age/gender/energy). Keep both short.",
     "",
     "Return STRICT JSON only (no prose, no markdown fences):",
     "{",
     '  "conceptSummary": "<one sentence: the through-line all slots share>",',
+    '  "visualStyle": "<the look bible>",',
+    `  "onScreenText": { "owner": "${hasText ? "template" : "none"}", "requireCleanFootage": true },`,
+    '  "audio": { "voiceover": "<what the VO conveys>", "tone": "<voice character>" },',
     '  "slots": [',
-    // Only describe the fields this template can actually use — naming
-    // `imageSubject` to a template with no image slots is noise the model has
-    // to reason past.
     `    { "jobLayerName": "<exact id from the list>", "asset": "${[
       hasText ? "TEXT" : "",
       hasImages ? "IMAGE" : "",
@@ -135,7 +161,7 @@ export function buildTemplatePlanPrompt(
     hasImages
       ? '      "fill": true, "imageSubject": "<IMAGE only, when fill is true>",'
       : "",
-    '      "videoScene": "<VIDEO only>" }',
+    '      "videoScene": "<VIDEO only>", "cameraAction": "<VIDEO only>", "onScreenMoment": "<VIDEO only>" }',
     "  ]",
     "}",
     "Include exactly one entry per slot listed below, using its exact jobLayerName.",
@@ -143,24 +169,26 @@ export function buildTemplatePlanPrompt(
     .filter(Boolean)
     .join("\n");
 
+  const legend = frameLegend(input);
   const user = [
     `AD PROMPT: ${input.userPrompt}`,
-    input.adStyle ? `Style: ${input.adStyle}` : "",
-    `Ad type: ${input.adType}`,
     input.productBrief ? `Product: ${input.productBrief}` : "",
     formatBrand(input.brandText),
     `Output shape: ${input.aspectRatio}, clip length ${input.clipSeconds}s`,
+    input.palette?.length
+      ? `TEMPLATE COLOUR PALETTE (sampled from the preview — the look you produce MUST use these hues): ${input.palette.join(", ")}`
+      : "",
     "",
+    ...(legend.length
+      ? ["FRAME LEGEND (the images attached to this message, in order):", ...legend, ""]
+      : []),
     "TEMPLATE SLOTS:",
     ...input.slots.map(describeSlot),
     "",
-    "Plan the fills now, as STRICT JSON.",
+    "Produce the blueprint now, as STRICT JSON.",
   ]
     .filter(Boolean)
     .join("\n");
 
-  return [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ];
+  return { system, user };
 }

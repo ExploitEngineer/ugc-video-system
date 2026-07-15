@@ -37,20 +37,29 @@ export interface BuildRenderInputParts {
   audioLayerName?: string;
 }
 
+/**
+ * One layer target: a slot or one of its placements (`instances`). Both carry the
+ * same four addressing fields, so media can be pushed for either.
+ */
+type MediaTarget = Pick<
+  TemplateSlot,
+  "composition" | "jobLayerName" | "targetBy" | "layerIndex"
+>;
+
 /** Media whose source will not match the designer's layer box exactly. */
 function pushMediaWithAutoscale(
   assets: TemplateJobAssetInput[],
-  slot: TemplateSlot,
+  target: MediaTarget,
   mediaType: "video" | "image",
   src: string,
 ): void {
-  const byIndex = slot.targetBy === "index" && slot.layerIndex != null;
+  const byIndex = target.targetBy === "index" && target.layerIndex != null;
   assets.push({
     kind: "media",
     mediaType,
-    composition: slot.composition,
-    layerName: slot.jobLayerName,
-    ...(byIndex ? { layerIndex: slot.layerIndex ?? undefined } : {}),
+    composition: target.composition,
+    layerName: target.jobLayerName,
+    ...(byIndex ? { layerIndex: target.layerIndex ?? undefined } : {}),
     src,
   });
 
@@ -65,8 +74,8 @@ function pushMediaWithAutoscale(
   // replaced, and the real source would land at the wrong size.
   assets.push({
     kind: "autoscale",
-    composition: slot.composition,
-    layerName: slot.jobLayerName,
+    composition: target.composition,
+    layerName: target.jobLayerName,
     // `fill` covers the layer and crops the overflow. Our sources never match
     // the layer exactly — Seedance renders only 16:9 or 9:16, and gpt-image-2
     // clamps aspects wider than 3:1 — so something must give. Cropped edges beat
@@ -107,7 +116,14 @@ export function buildRenderInput(
       case "VIDEO": {
         // An unsliced slot falls back to the whole master; AE trims it.
         const url = clipUrls.get(slot.jobLayerName) ?? masterClipUrl;
-        pushMediaWithAutoscale(assets, slot, "video", url);
+        // A placeholder re-used across scenes (or a split-screen) has multiple
+        // placements — fill EVERY one with the same slice, or the untargeted
+        // copies render the template's own solid (the blue block). A
+        // single-placement slot has no `instances` and fills once, as before.
+        const targets = slot.instances?.length ? slot.instances : [slot];
+        for (const target of targets) {
+          pushMediaWithAutoscale(assets, target, "video", url);
+        }
         break;
       }
       case "IMAGE": {

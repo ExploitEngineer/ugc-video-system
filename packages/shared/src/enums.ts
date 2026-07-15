@@ -56,26 +56,38 @@ export const stepSchema = z.enum([
   "merge",
   // ── `pipeline: "template"` steps. Automatic, never gated (template runs are
   // forced `mode: "automatic"`, `criticEnabled: false` at the create route).
-  // Full chain:
-  //   template_plan → [product_sheet ∥ person_sheet] → storyboard
-  //     → template_fill → template_images → video → template_render
+  // The template pipeline is SEPARATE from the video pipeline: it owns its own
+  // authoring steps and never runs the ad-type detector, the 2×2 storyboard, or
+  // the shared `video` step. Full chain:
+  //   template_plan → [product_sheet ∥ person_sheet] → template_keyframe
+  //     → template_fill → template_images → template_video → template_render
   //
-  // Runs FIRST, before any image/video spend: one cheap LLM call reads the
-  // template's slot inventory (kinds, geometry, placeholder text, clipSeconds)
-  // and the ad brief, then emits a per-slot plan (`runs.template_plan`). Every
-  // downstream agent reads it, which is what keeps the copy, the images and the
-  // clip describing the SAME ad instead of three unrelated ones.
+  // Runs FIRST, before any image/video spend: analyzes the template (its slot
+  // inventory + timeline windows, and — Phase 2 — its look/animation via vision)
+  // and emits a per-slot blueprint (`runs.template_plan`). Every downstream agent
+  // reads it, which keeps the copy, the images and the clip describing the SAME
+  // ad the template asks for.
   "template_plan",
-  // Writes every TEXT slot's value from the plan + the storyboard scenes
-  // (`runs.template_text_fill`). Placed after the storyboard so the copy can
-  // draw on the product brief and the spoken script, not just the raw prompt.
+  // The template pipeline's STORYBOARD: renders a labelled multi-panel sheet
+  // (one panel per beat) + a timestamped per-slot script from the blueprint's
+  // video scenes. The sheet (clean-cropped) is the Seedance shot guide, so the
+  // master holds a consistent look instead of drifting from a single frame.
+  // Template-owned: imports nothing from the ad-type registry or shared storyboard.
+  "template_keyframe",
+  // Writes every TEXT slot's value from the blueprint + the per-slot script
+  // (`runs.template_text_fill`). Placed after the keyframe so the copy can draw
+  // on the product brief and the spoken script, not just the raw prompt.
   "template_fill",
   // Generates the CONTENT image slots with gpt-image-2 (`template_image`
-  // assets), conditioned on the plan + product sheet + storyboard look. Slots
+  // assets), conditioned on the blueprint + product sheet + template look. Slots
   // classified `brand` (logo/icon) or `decorative` (background/texture) are
   // never generated — the template keeps its own art. Never hard-fails: a
   // failed slot falls back to the template's default asset.
   "template_images",
+  // The PLAIN Seedance clip (no baked text/graphics — the template composites
+  // those), driven by the blueprint + the keyframe's reference image + script,
+  // its length the template's own composition length. Template-owned prompt.
+  "template_video",
   // ...then the clip + those text values + those images are composited into the
   // template picked at run creation (`runs.template`), persisting a
   // `templated_video`.
@@ -236,6 +248,13 @@ export const runErrorCodeSchema = z.enum([
   // The `template_plan` LLM step failed (provider error / unparseable reply)
   // after its retry. Nothing downstream has run, so recovery restarts the run.
   "TEMPLATE_PLAN_FAILED",
+  // The `template_keyframe` step failed (LLM script / look-still render). The
+  // reference sheets already exist, so recovery re-runs only the keyframe.
+  "TEMPLATE_KEYFRAME_FAILED",
+  // The `template_video` step failed — the PLAIN Seedance clip for a template
+  // run. Distinct from the video-pipeline `VIDEO_*` codes so recovery rewinds to
+  // `template_images` (the clip only) rather than the shared video-regen path.
+  "TEMPLATE_VIDEO_FAILED",
   // The Nexrender template render failed or timed out (provider error, bad
   // template/layer mapping, or output never reached a terminal status).
   "TEMPLATE_RENDER_FAILED",

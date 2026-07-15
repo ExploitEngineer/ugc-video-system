@@ -50,6 +50,7 @@ const MAX_BEATS = 6;
 export function deriveTemplateBeats(
   tpl: RunTemplate,
   plan: TemplatePlan,
+  masterSec: number = MASTER_CLIP_SECONDS,
 ): TemplateBeat[] | undefined {
   const slots = fillableVideoSlots(tpl.slots);
   if (slots.length < 2) return undefined;
@@ -70,7 +71,7 @@ export function deriveTemplateBeats(
       scene: sceneByLayer.get(s.jobLayerName) ?? "",
     }))
     // A slot beginning at/after the master's end never reaches the screen.
-    .filter((b) => b.startSec < MASTER_CLIP_SECONDS)
+    .filter((b) => b.startSec < masterSec)
     .sort((a, b) => a.startSec - b.startSec);
 
   if (beats.length < 2) return undefined;
@@ -78,7 +79,7 @@ export function deriveTemplateBeats(
 
   beats = mergeShort(beats);
   beats = capBeats(beats, MAX_BEATS);
-  return makeContiguous(beats);
+  return makeContiguous(beats, masterSec);
 }
 
 /** Fold every beat shorter than `MIN_BEAT_SEC` into the beat before it. */
@@ -123,10 +124,13 @@ function capBeats(beats: TemplateBeat[], max: number): TemplateBeat[] {
  * fed to Seedance — the real slicer cuts each ORIGINAL slot window and is never
  * touched by this.
  */
-function makeContiguous(beats: TemplateBeat[]): TemplateBeat[] {
+function makeContiguous(
+  beats: TemplateBeat[],
+  masterSec: number,
+): TemplateBeat[] {
   return beats.map((b, i) => {
     const nextStart =
-      i < beats.length - 1 ? beats[i + 1].startSec : MASTER_CLIP_SECONDS;
+      i < beats.length - 1 ? beats[i + 1].startSec : masterSec;
     return { ...b, durationSec: Math.max(0.5, nextStart - b.startSec) };
   });
 }
@@ -142,6 +146,7 @@ function makeContiguous(beats: TemplateBeat[]): TemplateBeat[] {
 export function beatsToScenes(
   beats: TemplateBeat[],
   storyboard: StoryboardScene[],
+  masterSec: number = MASTER_CLIP_SECONDS,
 ): StoryboardScene[] {
   return beats.map((b, i) => {
     const mid = b.startSec + b.durationSec / 2;
@@ -150,7 +155,7 @@ export function beatsToScenes(
         ? storyboard[
             Math.min(
               storyboard.length - 1,
-              Math.max(0, Math.floor((mid / MASTER_CLIP_SECONDS) * storyboard.length)),
+              Math.max(0, Math.floor((mid / masterSec) * storyboard.length)),
             )
           ]
         : undefined;

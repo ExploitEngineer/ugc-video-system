@@ -27,16 +27,69 @@ import {
 export { MAX_CLIP_SEC, MIN_CLIP_SEC, SEEDANCE_DURATIONS, snapUp };
 
 /**
- * Every template run generates ONE clip of exactly this length, whatever the
- * template looks like, so every ad is built from the same amount of footage.
- *
- * It is also the length of the FINISHED ad: a template's video slots are sliced
- * out of this master 1:1 (`slices.ts`), each cut from the second it plays so the
- * footage stays in sync with the voiceover, and a composition longer than this
- * is cropped back to it (`capVideoDuration`) — anything the design places past
- * the 15s mark is dropped rather than compressed into frame.
+ * The Seedance per-clip cap (15s) and the default footage length when a template
+ * reports no duration. Footage longer than this is generated as several ≤15s
+ * segments (`planFootageSegments`) and merged, so this is NOT the whole-ad length
+ * — that is `templateTotalSeconds` (up to `MAX_TEMPLATE_SEC`).
  */
 export const MASTER_CLIP_SECONDS = MAX_CLIP_SEC; // 15
+
+/**
+ * The band a template's composition length must fall in to join the library.
+ *
+ * Below 8s there is not enough footage for a coherent ad. The upper bound is 60s:
+ * the delivered ad runs the template's REAL length, and the footage is generated to
+ * span it (`planFootageSegments` cuts it into ≤15s Seedance clips that are merged), so
+ * a 60s template costs up to four Seedance generations. Enforced at upload
+ * (`validateForLibrary`) so a bad length is rejected before any run pays for it.
+ */
+export const MIN_TEMPLATE_SEC = 8;
+export const MAX_TEMPLATE_SEC = 60;
+
+/** Convert a raw composition duration into a usable number, else a fallback. */
+const durOr = (raw: number | null | undefined, fallback: number): number =>
+  typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : fallback;
+
+/**
+ * The delivered AD / footage length for a template run: the template's OWN
+ * composition length (capped at `MAX_TEMPLATE_SEC`). The footage is generated to
+ * span this whole length (`planFootageSegments` splits it into ≤15s Seedance clips
+ * that are merged), and the composite is cropped to it — so a 22.8s template gives
+ * a ~22.8s ad built from REAL footage across its whole timeline, not a 15s loop.
+ */
+export function templateTotalSeconds(template: {
+  metadata?: { durationSec?: number | null } | null;
+}): number {
+  const dur = durOr(template.metadata?.durationSec, MASTER_CLIP_SECONDS);
+  return Math.min(dur, MAX_TEMPLATE_SEC);
+}
+
+/**
+ * Split the delivered footage length into the Seedance clips that build it.
+ *
+ * Seedance caps a single clip at 15s (`MAX_CLIP_SEC`), so footage longer than that
+ * is generated as several ≤15s clips and merged (`mergeSegmentUrls`). Each returned
+ * window is on the MASTER timeline (`startSec = i·each`) and its `durationSec` is a
+ * legal Seedance duration (`snapUp`); the total may slightly overshoot the template,
+ * which After Effects trims at composite.
+ *
+ *   ≤15s → one clip (no merge). >15s → the fewest EQUAL ≤15s clips that cover it
+ *   (22.8s → [12, 12]; 40s → [15, 15, 15]; 60s → [15, 15, 15, 15]).
+ */
+export function planFootageSegments(
+  fullSec: number,
+): { startSec: number; durationSec: number }[] {
+  const total = Math.max(MIN_CLIP_SEC, Math.min(fullSec, MAX_TEMPLATE_SEC));
+  if (total <= MAX_CLIP_SEC) {
+    return [{ startSec: 0, durationSec: snapUp(total) }];
+  }
+  const count = Math.ceil(total / MAX_CLIP_SEC);
+  const each = snapUp(total / count);
+  return Array.from({ length: count }, (_, i) => ({
+    startSec: i * each,
+    durationSec: each,
+  }));
+}
 
 // ── gpt-image-2 sizing ───────────────────────────────────────────────────────
 

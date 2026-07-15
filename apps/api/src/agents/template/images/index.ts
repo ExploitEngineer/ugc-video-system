@@ -139,7 +139,7 @@ export async function generateTemplateImages(ctx: SkillContext): Promise<void> {
   // The product sheet identity-locks the actual product. The STORYBOARD sheet is
   // deliberately NOT passed: it is a labelled contact sheet with burned-in panel
   // badges and caption bars, and feeding it as an edit reference paints those
-  // straight into the still. Look consistency comes from `adStyle` in words.
+  // straight into the still. Look consistency comes from the look-bible in words.
   const productSheet = await latestProductSheet(runId);
   const productRef = productSheet?.assetUrl
     ? [{ source: productSheet.assetUrl }]
@@ -154,6 +154,9 @@ export async function generateTemplateImages(ctx: SkillContext): Promise<void> {
       imageSubject,
       role,
       conceptSummary: plan?.conceptSummary || undefined,
+      // The look-bible (with the sampled palette) is how the still matches the
+      // template; fall back to the ad-style string when no bible was derived.
+      visualStyle: ctx.visualStyle ?? plan?.visualStyle ?? undefined,
       adStyle: ctx.adStyle,
       productBrief: ctx.productBrief,
       brandText: ctx.brandText,

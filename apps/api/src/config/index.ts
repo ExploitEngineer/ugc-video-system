@@ -99,6 +99,17 @@ const serverEnvSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Which provider ANALYZES the template in `template_plan`. `claude` (default)
+  // = Claude Sonnet vision over the preview poster + frames sampled from the
+  // preview clip (still images). `gemini` = true frame-by-frame .mp4 understanding
+  // (deferred — the provider is a stub) and only takes effect with a live
+  // GEMINI_API_KEY, else it degrades back to Claude.
+  TEMPLATE_VISION_PROVIDER: z.enum(["claude", "gemini"]).default("claude"),
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  // How many frames to sample from the preview clip for the Claude vision pass.
+  // Adapts to clip length (~1/sec) up to this cap; 0 disables sampling (poster
+  // only). Bounded so a long template can't blow the vision call's token budget.
+  TEMPLATE_VISION_FRAME_COUNT: z.coerce.number().int().min(0).max(16).default(12),
   /**
    * Shared secret for the `/admin/*` routes (template library management),
    * sent as an `x-admin-key` header. Auth (F8) is not started and the rest of

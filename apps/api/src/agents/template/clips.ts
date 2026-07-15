@@ -1,4 +1,4 @@
-// Cut the 15s master clip into one piece per video slot, and pull out its
+// Cut the full-length master clip into one piece per video slot, and pull out its
 // voiceover.
 //
 // Called from `template_render`, before the Nexrender job is assembled. Both
@@ -12,8 +12,9 @@ import type { RunTemplate } from "@ugc/shared";
 
 import { db, schema } from "../../db/index.js";
 import { createLogger } from "../../lib/log.js";
-import { extractAudio, sliceClip } from "../../lib/video/merge.js";
+import { extractAudio, sliceClipsFromMaster } from "../../lib/video/merge.js";
 import { persistAsset } from "../persist.js";
+import { templateTotalSeconds } from "./geometry.js";
 import { audioSlot, fillableVideoSlots } from "./introspect.js";
 import { planClipSlices } from "./slices.js";
 
@@ -85,52 +86,65 @@ export async function prepareTemplateClips(
     return { clipUrls: new Map() };
   }
 
-  const plans = planClipSlices(videoSlots);
+  const plans = planClipSlices(videoSlots, {
+    // The master now spans the template's full length (multi-segment merge), so slots
+    // slice 1:1 from their true time — the modulo-wrap in `planClipSlices` is a no-op.
+    masterSec: templateTotalSeconds(template),
+  });
   const done = await existingByLayer(runId, "template_clip");
   const clipUrls = new Map<string, string>();
 
   const slotByLayer = new Map(videoSlots.map((s) => [s.jobLayerName, s]));
 
-  // Cut sequentially. `sliceClip` shares the single-slot ffmpeg semaphore with
-  // the merge path, so parallelism here would only queue behind itself.
-  for (const plan of plans) {
+  // Reuse slices already on disk (idempotent resume); only cut the rest.
+  const todo = plans.filter((plan) => {
     const cached = done.get(plan.jobLayerName);
     if (cached) {
       clipUrls.set(plan.jobLayerName, cached);
-      continue;
+      return false;
     }
+    return true;
+  });
 
-    // Size the slice to the placeholder's own source. An unnamed layer — which
-    // is what a footage placeholder is — cannot be autoscaled by Nexrender, so
-    // the footage has to arrive already the right shape.
-    const slot = slotByLayer.get(plan.jobLayerName);
-    const targetSize =
-      slot?.width && slot?.height
-        ? { width: slot.width, height: slot.height }
-        : undefined;
-
-    const { bytes, mime } = await sliceClip(masterUrl, {
-      startSec: plan.startSec,
-      durationSec: plan.durationSec,
-      targetSize,
-    });
-    const { assetUrl } = await persistAsset({
-      runId,
-      kind: "template_clip",
-      bytes,
-      mime,
-      meta: {
-        jobLayerName: plan.jobLayerName,
+  if (todo.length > 0) {
+    // Cut ALL remaining slices from ONE download of the master. A slideshow template
+    // has dozens of video slots; re-downloading the master per slot would be dozens
+    // of full fetches (slow, and a network blip each time). Size each slice to the
+    // placeholder's own source — an unnamed footage layer can't be autoscaled by
+    // Nexrender, so the footage must arrive already the right shape.
+    const specs = todo.map((plan) => {
+      const slot = slotByLayer.get(plan.jobLayerName);
+      return {
         startSec: plan.startSec,
         durationSec: plan.durationSec,
-      },
+        targetSize:
+          slot?.width && slot?.height
+            ? { width: slot.width, height: slot.height }
+            : undefined,
+      };
     });
-    clipUrls.set(plan.jobLayerName, assetUrl);
-    log.info("✓ slice persisted", {
-      slot: plan.jobLayerName,
-      startSec: plan.startSec,
-      durationSec: plan.durationSec,
-    });
+    const cut = await sliceClipsFromMaster(masterUrl, specs);
+    for (let i = 0; i < todo.length; i++) {
+      const plan = todo[i] as (typeof todo)[number];
+      const { bytes, mime } = cut[i] as { bytes: Uint8Array; mime: string };
+      const { assetUrl } = await persistAsset({
+        runId,
+        kind: "template_clip",
+        bytes,
+        mime,
+        meta: {
+          jobLayerName: plan.jobLayerName,
+          startSec: plan.startSec,
+          durationSec: plan.durationSec,
+        },
+      });
+      clipUrls.set(plan.jobLayerName, assetUrl);
+      log.info("✓ slice persisted", {
+        slot: plan.jobLayerName,
+        startSec: plan.startSec,
+        durationSec: plan.durationSec,
+      });
+    }
   }
 
   // Always extracted, whether it will be injected into an audio layer or muxed

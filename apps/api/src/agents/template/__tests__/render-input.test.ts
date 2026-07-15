@@ -188,6 +188,46 @@ describe("buildRenderInput — slot filling", () => {
   });
 });
 
+// ── a placeholder re-used across scenes: fill EVERY placement ─────────────────
+
+describe("buildRenderInput — a re-used placeholder fills every placement", () => {
+  it("emits one media asset per instance, all with the same slice", () => {
+    // The blue-block bug: a placeholder comp placed in several scenes was
+    // targeted once, so the other copies rendered the template's own solid.
+    // Every placement must be filled with the slot's slice.
+    const s = slot({
+      asset: "VIDEO",
+      jobLayerName: "Photo/Video_04",
+      composition: "Scene_02",
+      targetBy: "index",
+      layerIndex: 8,
+      instances: [
+        { composition: "Scene_02", jobLayerName: "Photo/Video_04", targetBy: "index", layerIndex: 8 },
+        { composition: "Scene_04", jobLayerName: "Photo/Video_04", targetBy: "index", layerIndex: 8 },
+      ],
+    });
+    const input = build(template([s]), {
+      clipUrls: new Map([["Photo/Video_04", "https://cdn/slice.mp4"]]),
+    });
+    const media = input.assets.filter((a) => a.kind === "media");
+    expect(media).toHaveLength(2);
+    expect(media.map((a) => a.composition)).toEqual(["Scene_02", "Scene_04"]);
+    for (const m of media) {
+      expect(m).toMatchObject({ mediaType: "video", src: "https://cdn/slice.mp4" });
+    }
+    // Both target by index → no autoscale (an index layer can't be autoscaled).
+    expect(input.assets.some((a) => a.kind === "autoscale")).toBe(false);
+  });
+
+  it("fills once when the slot has no instances (single-placement)", () => {
+    const input = build(
+      template([slot({ asset: "VIDEO", jobLayerName: "clip.mp4" })]),
+      { clipUrls: new Map([["clip.mp4", CLIP]]) },
+    );
+    expect(input.assets.filter((a) => a.kind === "media")).toHaveLength(1);
+  });
+});
+
 // ── per-slot slices + the voiceover ──────────────────────────────────────────
 
 describe("buildRenderInput — each video slot gets its OWN slice", () => {

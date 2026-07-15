@@ -383,6 +383,19 @@ export const imageSlotClassSchema = z.enum(["content", "brand", "decorative"]);
 export type ImageSlotClass = z.infer<typeof imageSlotClassSchema>;
 
 /** One slot discovered by introspection (a fill-in point in the template). */
+/**
+ * One placement of a placeholder in the render tree. A designer often re-uses the
+ * SAME placeholder comp in several scenes (or twice in a split-screen), so each
+ * copy is a separate layer that must be targeted individually.
+ */
+export const templateSlotInstanceSchema = z.object({
+  composition: z.string(),
+  jobLayerName: z.string(),
+  targetBy: z.enum(["name", "index"]).default("name"),
+  layerIndex: z.number().int().positive().nullable().default(null),
+});
+export type TemplateSlotInstance = z.infer<typeof templateSlotInstanceSchema>;
+
 export const templateSlotSchema = z.object({
   /** Which kind of content this layer expects / Nexrender asset family. */
   asset: z.enum(["VIDEO", "IMAGE", "AUDIO", "TEXT"]),
@@ -452,6 +465,16 @@ export const templateSlotSchema = z.object({
    * seconds four times.
    */
   durationSec: z.number().positive().nullable().default(null),
+  /**
+   * VIDEO placeholder only: EVERY placement of this placeholder in the render
+   * tree, each independently targeted. A single (composition, layerIndex) fills
+   * only ONE copy, so a placeholder re-used across scenes (or a split-screen)
+   * leaves the other copies showing the template's own solid (the blue block).
+   * At render every instance gets the SAME slot media, so all copies fill. Absent
+   * on older snapshots / genuinely single-instance slots — the top-level
+   * (composition, targetBy, layerIndex) is then used directly.
+   */
+  instances: z.array(templateSlotInstanceSchema).optional(),
 });
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
 
@@ -579,8 +602,35 @@ export const templateSlotPlanSchema = z.object({
   fill: z.boolean().optional(),
   /** VIDEO: the hero scene the clip should show. */
   videoScene: z.string().optional(),
+  /** VIDEO: one camera move (or a hold) for this slot's beat. Vision analysis. */
+  cameraAction: z.string().optional(),
+  /** VIDEO: what visibly happens on screen during this slot's window. Vision analysis. */
+  onScreenMoment: z.string().optional(),
 });
 export type TemplateSlotPlan = z.infer<typeof templateSlotPlanSchema>;
+
+/**
+ * Who owns the ad's on-screen text. When the template has TEXT layers it owns
+ * them, and the generated footage must be CLEAN (no baked text/logos/end-cards);
+ * a template with none may let the footage carry copy. Decided by the vision
+ * analysis; defaults keep footage clean, which is the safe choice.
+ */
+export const templateOnScreenTextSchema = z.object({
+  owner: z.enum(["template", "video", "none"]).catch("template"),
+  requireCleanFootage: z.boolean().catch(true),
+});
+export type TemplateOnScreenText = z.infer<typeof templateOnScreenTextSchema>;
+
+/**
+ * A light audio plan. Audio ownership (template's own track vs Seedance's
+ * generated audio) is DEFERRED — for now Seedance's audio is always used, so
+ * this only carries what the voiceover should convey and how it should sound.
+ */
+export const templateAudioPlanSchema = z.object({
+  voiceover: z.string().catch(""),
+  tone: z.string().catch(""),
+});
+export type TemplateAudioPlan = z.infer<typeof templateAudioPlanSchema>;
 
 /**
  * `runs.template_plan` — written by the `template_plan` step, read by the
@@ -590,6 +640,26 @@ export type TemplateSlotPlan = z.infer<typeof templateSlotPlanSchema>;
 export const templatePlanSchema = z.object({
   conceptSummary: z.string().catch(""),
   slots: z.array(templateSlotPlanSchema).catch([]),
+  /**
+   * The template's LOOK read from its frames — palette, lighting, mood, pacing,
+   * motion — as one look-bible string. Injected as the shared look into the
+   * keyframe, the stills and the clip so they match the template. Absent on a
+   * text-only (pre-vision) plan. Persisted here AND mirrored to `runs.visual_style`
+   * so `ctx.visualStyle` carries it downstream.
+   */
+  visualStyle: z.string().optional(),
+  /** Who owns on-screen text (drives clean-footage). Absent ⇒ default clean. */
+  onScreenText: templateOnScreenTextSchema.optional(),
+  /** Light audio intent for the generated voiceover. */
+  audio: templateAudioPlanSchema.optional(),
+  /**
+   * Which analysis path produced this plan — for provenance/debugging. `text-only`
+   * = no vision (no preview to see); `poster` / `poster+frames` = Claude vision;
+   * `video` = the deferred Gemini path.
+   */
+  visionSource: z
+    .enum(["text-only", "poster", "poster+frames", "video"])
+    .optional(),
 });
 export type TemplatePlan = z.infer<typeof templatePlanSchema>;
 

@@ -92,9 +92,10 @@ describe("nextStep unchanged for the post-reference sequence", () => {
   });
 });
 
-// The v2 chain, end to end:
-//   template_plan → [product_sheet ∥ person_sheet] → storyboard
-//     → template_fill → template_images → video → template_render
+// The chain, end to end — the template pipeline is SEPARATE and never runs the
+// shared 2×2 storyboard or the `video` step:
+//   template_plan → [product_sheet ∥ person_sheet] → template_keyframe
+//     → template_fill → template_images → template_video → template_render
 describe("nextStep — template pipeline chain", () => {
   it("template_plan hands off to the parallel reference phase", () => {
     // `driveRun` treats a forward `person_sheet` as the product ∥ person phase.
@@ -103,40 +104,47 @@ describe("nextStep — template pipeline chain", () => {
     );
   });
 
-  it("storyboard → template_fill, so the copy sees the product brief + script", () => {
-    expect(nextStep("storyboard", false, false, "15s", "template")).toBe(
-      "template_fill",
+  it("the reference phase → template_keyframe (its own look step, not the 2×2 board)", () => {
+    expect(nextStep("person_sheet", false, false, "15s", "template")).toBe(
+      "template_keyframe",
     );
-    // ...and still → video on the normal pipeline.
-    expect(nextStep("storyboard", false, false, "15s", "video")).toBe("video");
   });
 
-  it("storyboard_inspection also routes to template_fill on a template run", () => {
-    // Template runs force criticEnabled:false so this never fires in practice,
-    // but the two flags must stay independent.
-    expect(
-      nextStep("storyboard_inspection", false, true, "15s", "template"),
-    ).toBe("template_fill");
+  it("template_keyframe → template_fill, so the copy sees the script", () => {
+    expect(nextStep("template_keyframe", false, false, "15s", "template")).toBe(
+      "template_fill",
+    );
+  });
+
+  it("the shared storyboard belongs to the video pipeline only", () => {
+    // Template runs never reach `storyboard`/`storyboard_inspection`; those stay
+    // pure video-pipeline steps.
+    expect(nextStep("storyboard", false, false, "15s", "video")).toBe("video");
+    expect(nextStep("storyboard", false, false, "15s", "template")).toBe("video");
     expect(nextStep("storyboard_inspection", false, true, "15s", "video")).toBe(
       "video",
     );
   });
 
-  it("template_fill → template_images → video (Seedance last, it costs most)", () => {
+  it("template_fill → template_images → template_video (Seedance last, it costs most)", () => {
     expect(nextStep("template_fill", false, false, "15s", "template")).toBe(
       "template_images",
     );
     expect(nextStep("template_images", false, false, "15s", "template")).toBe(
-      "video",
+      "template_video",
     );
   });
 
-  it("video → template_render on a template run, terminal on a normal one", () => {
-    expect(nextStep("video", false, false, "15s", "template")).toBe(
+  it("template_video → template_render", () => {
+    expect(nextStep("template_video", false, false, "15s", "template")).toBe(
       "template_render",
     );
+  });
+
+  it("the `video` step is terminal on every pipeline (template never reaches it)", () => {
     expect(nextStep("video", false, false, "15s")).toBeNull();
     expect(nextStep("video", false, false, "15s", "video")).toBeNull();
+    expect(nextStep("video", false, false, "15s", "template")).toBeNull();
   });
 
   it("template_render is always terminal", () => {
@@ -190,15 +198,16 @@ describe("nextStep — re-templating a finished ad", () => {
       "person_sheet",
     );
     expect(nextStep("template_images", false, false, "15s", "template")).toBe(
-      "video",
+      "template_video",
     );
   });
 
   it("leaves every non-template pipeline alone", () => {
     // The flag can only be set on a template run, but the graph must not depend
-    // on that being true.
+    // on that being true: the re-template SHORTCUT (→ template_render) must not
+    // fire on a video pipeline, so template_images still advances normally.
     expect(nextStep("template_images", false, false, "15s", "video", true)).toBe(
-      "video",
+      "template_video",
     );
     expect(nextStep("storyboard", false, false, "15s", "video", true)).toBe(
       "video",
@@ -206,12 +215,18 @@ describe("nextStep — re-templating a finished ad", () => {
   });
 
   it("still resolves each regenerate-template rewind checkpoint", () => {
-    // `rewindStepForTemplateRegen` returns null | "storyboard" | "video". A
-    // re-template that FAILS mid-chain has to be recoverable by that route.
-    expect(nextStep("storyboard", false, false, "15s", "template", true)).toBe(
+    // Every checkpoint `rewindStepForTemplateRegen` can return must advance
+    // correctly through the normal template graph.
+    expect(nextStep("person_sheet", false, false, "15s", "template")).toBe(
+      "template_keyframe",
+    );
+    expect(nextStep("template_keyframe", false, false, "15s", "template")).toBe(
       "template_fill",
     );
-    expect(nextStep("video", false, false, "15s", "template", true)).toBe(
+    expect(nextStep("template_images", false, false, "15s", "template")).toBe(
+      "template_video",
+    );
+    expect(nextStep("template_video", false, false, "15s", "template")).toBe(
       "template_render",
     );
   });
@@ -242,21 +257,21 @@ describe("nextStep — re-templating a finished ad", () => {
     expect(seen).toEqual([
       "template_plan",
       "person_sheet",
-      "storyboard",
+      "template_keyframe",
       "template_fill",
       "template_images",
-      "video",
+      "template_video",
       "template_render",
     ]);
   });
 });
 
 describe("resumeStepForVideoRegen — a template regen must not re-pay for images", () => {
-  it("rewinds a template run to template_images, whose next step is video", () => {
+  it("rewinds a template run to template_images, whose next step is template_video", () => {
     const step = resumeStepForVideoRegen("15s", "template");
     expect(step).toBe("template_images");
     // The whole point: the clip is regenerated, the stills and copy are not.
-    expect(nextStep(step, false, false, "15s", "template")).toBe("video");
+    expect(nextStep(step, false, false, "15s", "template")).toBe("template_video");
   });
 
   it("leaves the normal pipeline untouched", () => {
@@ -274,15 +289,29 @@ describe("rewindStepForTemplateRegen — the checkpoint depends on what failed",
     expect(rewindStepForTemplateRegen("TEMPLATE_PLAN_FAILED")).toBeNull();
   });
 
-  it("re-runs fill → images → video → render after a failed fill", () => {
+  it("re-runs only the keyframe after a failed keyframe", () => {
+    const step = rewindStepForTemplateRegen("TEMPLATE_KEYFRAME_FAILED");
+    expect(step).toBe("person_sheet");
+    expect(nextStep(step as Step, false, false, "15s", "template")).toBe(
+      "template_keyframe",
+    );
+  });
+
+  it("re-runs the copy after a failed fill", () => {
     const step = rewindStepForTemplateRegen("TEMPLATE_FILL_FAILED");
-    expect(step).toBe("storyboard");
+    expect(step).toBe("template_keyframe");
     expect(nextStep(step as Step, false, false, "15s", "template")).toBe("template_fill");
+  });
+
+  it("re-runs ONLY the clip after a failed video — copy + images are kept", () => {
+    const step = rewindStepForTemplateRegen("TEMPLATE_VIDEO_FAILED");
+    expect(step).toBe("template_images");
+    expect(nextStep(step as Step, false, false, "15s", "template")).toBe("template_video");
   });
 
   it("re-runs ONLY the render after a failed render — the clip is not re-paid", () => {
     const step = rewindStepForTemplateRegen("TEMPLATE_RENDER_FAILED");
-    expect(step).toBe("video");
+    expect(step).toBe("template_video");
     expect(nextStep(step as Step, false, false, "15s", "template")).toBe("template_render");
   });
 

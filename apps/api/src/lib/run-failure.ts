@@ -46,7 +46,11 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
   VIDEO_MERGE_FAILED:
     "We couldn't assemble the final video from its segments. Please try the run again.",
   TEMPLATE_PLAN_FAILED:
-    "We couldn't work out how to fill in that template. Please try again.",
+    "We couldn't analyze that template. Please try again.",
+  TEMPLATE_KEYFRAME_FAILED:
+    "We couldn't set up your template's look. Please try again.",
+  TEMPLATE_VIDEO_FAILED:
+    "We couldn't generate the footage for your template. Please try again.",
   TEMPLATE_RENDER_FAILED:
     "We couldn't render your video into that template. Try a different template, or skip the template step.",
   TEMPLATE_FILL_FAILED:
@@ -117,6 +121,24 @@ export function classifyRunError(
   if (err instanceof RunFailure) return err;
   const raw = err instanceof Error ? err.message : String(err);
   const code = CLASSIFIERS.find((c) => c.pattern.test(raw))?.code ?? defaultCode;
+  return new RunFailure(code, RUN_ERROR_MESSAGES[code], raw, { cause: err });
+}
+
+/**
+ * Wrap ANY error as a `RunFailure` with a FORCED code — skipping the provider-
+ * signature classifier. Use this at a throw-site that knows exactly which step
+ * failed and must keep that code, even when the raw text looks like a generic
+ * provider error. The template steps rely on this: a Seedance/gpt-image failure
+ * inside `template_video`/`template_keyframe` would otherwise reclassify to a
+ * `VIDEO_*`/`IMAGE_*` code, and the template retry (`rewindStepForTemplateRegen`,
+ * keyed on the `TEMPLATE_*` code) would then not know where to resume.
+ */
+export function runFailureWithCode(
+  code: RunErrorCode,
+  err: unknown,
+): RunFailure {
+  if (err instanceof RunFailure && err.code === code) return err;
+  const raw = err instanceof Error ? err.message : String(err);
   return new RunFailure(code, RUN_ERROR_MESSAGES[code], raw, { cause: err });
 }
 

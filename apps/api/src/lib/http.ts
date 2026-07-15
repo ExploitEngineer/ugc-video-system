@@ -18,6 +18,60 @@ const log = createLogger("http");
 /** HTTP statuses worth retrying — overload + transient gateway/server errors. */
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/**
+ * Transient network-layer failure codes — the connection failed or dropped, so
+ * the request either never landed or was cut off. `fetch` wraps these in a
+ * TypeError whose `.cause.code` carries the real code (undici), or a plain error
+ * exposes `.code` directly. Includes DNS temporary failures (`EAI_AGAIN`), which
+ * a flaky resolver throws while a long provider poll is in flight.
+ *
+ * Use for IDEMPOTENT retries (a poll GET, a download): re-issuing is always safe.
+ * A NON-idempotent POST needs the narrower connect-only check at its own boundary.
+ */
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+/** True when `err` is a transient network/DNS failure (see `NETWORK_ERROR_CODES`). */
+export function isTransientNetworkError(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  const code = e?.cause?.code ?? e?.code;
+  return typeof code === "string" && NETWORK_ERROR_CODES.has(code);
+}
+
+/**
+ * Connection-ESTABLISHMENT failure codes: the socket never opened, so the request
+ * never reached the server. Deliberately EXCLUDES mid-flight drops (`ECONNRESET` /
+ * `UND_ERR_SOCKET`) — those may have landed, so a NON-idempotent POST/DELETE must
+ * surface rather than risk a duplicate. Safe to retry for ANY method.
+ */
+const CONNECT_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+/**
+ * True only when `err` is a `fetch` failure whose connection never established.
+ * Safe to retry even a non-idempotent request — nothing reached the server.
+ */
+export function isTransientConnectError(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  const code = e?.cause?.code ?? e?.code;
+  return typeof code === "string" && CONNECT_ERROR_CODES.has(code);
+}
+
 export interface FetchRetryOptions {
   /** Total attempts (incl. the first). Default 4. */
   attempts?: number;
@@ -40,6 +94,14 @@ export interface FetchRetryOptions {
    * (429/5xx) are still retried regardless — the server told us to.
    */
   retryOnNetworkError?: boolean;
+  /**
+   * Retry a THROWN error ONLY when the connection never established
+   * (`isTransientConnectError`: `EAI_AGAIN`, `UND_ERR_CONNECT_TIMEOUT`, …). SAFE for
+   * a non-idempotent request — nothing reached the server, so nothing was created.
+   * Use with `retryOnNetworkError: false` to survive connect blips on a flaky
+   * DNS/network without risking a duplicate submit. Default false.
+   */
+  retryConnectErrors?: boolean;
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -60,6 +122,7 @@ export async function fetchWithRetry(
   const label = opts.label ?? "fetch";
   const timeoutMs = opts.timeoutMs ?? 60_000;
   const retryOnNetworkError = opts.retryOnNetworkError ?? true;
+  const retryConnectErrors = opts.retryConnectErrors ?? false;
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -84,7 +147,11 @@ export async function fetchWithRetry(
       });
       // Non-idempotent caller: the request may have reached the server before
       // the socket dropped, so retrying could duplicate it — surface instead.
-      if (!retryOnNetworkError) throw err;
+      // EXCEPTION: a connect-phase failure (the socket never opened) created
+      // nothing, so it is safe to retry even a non-idempotent request.
+      if (!retryOnNetworkError && !(retryConnectErrors && isTransientConnectError(err))) {
+        throw err;
+      }
       if (attempt === attempts) break;
     }
     // Capped exponential backoff + jitter, so parallel fan-out retries don't

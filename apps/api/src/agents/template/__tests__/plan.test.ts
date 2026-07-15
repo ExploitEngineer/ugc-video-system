@@ -4,7 +4,7 @@ import type { TemplatePlan, TemplateSlot } from "@ugc/shared";
 
 import { fitToBudget } from "../fill-text/index.js";
 import { planningSlots, reconcilePlan } from "../plan/index.js";
-import { buildTemplatePlanPrompt } from "../plan/prompt.js";
+import { buildTemplateBlueprintPrompt } from "../plan/prompt.js";
 
 const slot = (o: Partial<TemplateSlot> & Pick<TemplateSlot, "asset" | "jobLayerName">): TemplateSlot =>
   ({
@@ -161,66 +161,93 @@ describe("reconcilePlan — our slots are the truth, the model is a suggestion",
 
 // ── the prompt ───────────────────────────────────────────────────────────────
 
-describe("buildTemplatePlanPrompt", () => {
+describe("buildTemplateBlueprintPrompt", () => {
   const base = {
     userPrompt: "A calm promo for a ceramic mug",
-    adType: "product-demo",
-    adStyle: "warm morning light",
     clipSeconds: 12,
     aspectRatio: "16:9",
+    hasPoster: false,
+    frameTimestampsSec: [] as number[],
   };
 
   it("states the character ceiling for every text slot", () => {
-    const [, user] = buildTemplatePlanPrompt({
+    const { user } = buildTemplateBlueprintPrompt({
       ...base,
       slots: [{ jobLayerName: "Headline", asset: "TEXT", currentText: "Your Headline", charBudget: 18 }],
     });
-    expect(user?.content).toContain("MAX 18 characters");
-    expect(user?.content).toContain('placeholder: "Your Headline"');
+    expect(user).toContain("MAX 18 characters");
+    expect(user).toContain('placeholder: "Your Headline"');
   });
 
   it("passes the template's real clip length, not a hardcoded 15s", () => {
-    const [system, user] = buildTemplatePlanPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
-    expect(system?.content).toContain("~12s take");
-    expect(system?.content).not.toContain("~15s");
-    expect(user?.content).toContain("clip length 12s");
+    const { system, user } = buildTemplateBlueprintPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
+    expect(system).toContain("~12s take");
+    expect(system).not.toContain("~15s");
+    expect(user).toContain("clip length 12s");
+  });
+
+  it("never mentions an ad type — the template dictates the look", () => {
+    const { system, user } = buildTemplateBlueprintPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
+    expect(`${system}\n${user}`.toLowerCase()).not.toContain("ad type");
+  });
+
+  it("asks for a visualStyle look bible and an on-screen-text decision", () => {
+    const { system } = buildTemplateBlueprintPrompt({
+      ...base,
+      slots: [{ jobLayerName: "Headline", asset: "TEXT", currentText: "Hi", charBudget: 10 }],
+    });
+    expect(system).toContain('"visualStyle"');
+    expect(system).toContain('"onScreenText"');
+    // A template WITH text slots defaults to the template owning on-screen text.
+    expect(system).toContain('"owner": "template"');
+  });
+
+  it("numbers a frame legend for the poster + sampled frames", () => {
+    const { user } = buildTemplateBlueprintPrompt({
+      ...base,
+      hasPoster: true,
+      frameTimestampsSec: [0, 4],
+      slots: [{ jobLayerName: "clip", asset: "VIDEO" }],
+    });
+    expect(user).toContain("FRAME LEGEND");
+    expect(user).toContain("Frame 1 = the preview POSTER");
+    expect(user).toContain("Frame 2 = the template at 0:00");
+    expect(user).toContain("Frame 3 = the template at 0:04");
   });
 
   it("shows each video slot's window and asks for one continuous take", () => {
-    // A multi-slot template must plan a beat per slot, pinned to its window, as
-    // consecutive beats of ONE take — not one scene or a sequence of cuts.
-    const [system, user] = buildTemplatePlanPrompt({
+    const { system, user } = buildTemplateBlueprintPrompt({
       ...base,
       slots: [
         { jobLayerName: "PH_1", asset: "VIDEO", startSec: 0, durationSec: 2 },
         { jobLayerName: "PH_2", asset: "VIDEO", startSec: 2, durationSec: 3.3 },
       ],
     });
-    expect(user?.content).toContain("plays 0:00–0:02");
-    expect(user?.content).toContain("plays 0:02–0:05 (3.3s)");
-    expect(system?.content).toMatch(/ONE continuous/i);
-    expect(system?.content).toMatch(/for EACH video slot/i);
+    expect(user).toContain("plays 0:00–0:02");
+    expect(user).toContain("plays 0:02–0:05 (3.3s)");
+    expect(system).toMatch(/ONE continuous/i);
+    expect(system).toMatch(/EACH video slot/i);
   });
 
   it("omits the image rules entirely when there are no image slots", () => {
-    const [system] = buildTemplatePlanPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
-    expect(system?.content).not.toContain("imageSubject");
+    const { system } = buildTemplateBlueprintPrompt({ ...base, slots: [{ jobLayerName: "clip", asset: "VIDEO" }] });
+    expect(system).not.toContain("imageSubject");
   });
 
   it("tells the model to prefer NOT filling an image when unsure", () => {
-    const [system] = buildTemplatePlanPrompt({
+    const { system } = buildTemplateBlueprintPrompt({
       ...base,
       slots: [{ jobLayerName: "hero", asset: "IMAGE", width: 800, height: 800 }],
     });
-    expect(system?.content).toMatch(/prefer false/i);
+    expect(system).toMatch(/prefer false/i);
   });
 
   it("gives the model each media slot's pixel box", () => {
-    const [, user] = buildTemplatePlanPrompt({
+    const { user } = buildTemplateBlueprintPrompt({
       ...base,
       slots: [{ jobLayerName: "hero", asset: "IMAGE", width: 800, height: 600 }],
     });
-    expect(user?.content).toContain("800x600px");
+    expect(user).toContain("800x600px");
   });
 });
 

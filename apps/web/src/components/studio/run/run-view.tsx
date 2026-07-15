@@ -339,9 +339,14 @@ export function RunView({ runId }: { runId: string }) {
         )}
         {/* Only the options the USER picked live in the user's bubble. */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Chip icon={isMulti ? FilmIcon : ClockIcon}>
-            {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
-          </Chip>
+          {/* A template run's length is template-derived (not a user choice), and
+              `run.duration` is a placeholder enum for it — so show no duration chip;
+              the Template chip below labels it and the picker/brief show its runtime. */}
+          {!isTemplateRun && (
+            <Chip icon={isMulti ? FilmIcon : ClockIcon}>
+              {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
+            </Chip>
+          )}
           <Chip
             icon={
               run.aspectRatio === "16:9"

@@ -19,7 +19,7 @@
 // less. That makes this stage a genuine validation gate, not just cosmetics.
 
 import { env } from "../../config/index.js";
-import { fetchWithRetry } from "../../lib/http.js";
+import { isTransientNetworkError } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
 import { uploadTemplateObject } from "../../lib/storage.js";
 import { extractPoster } from "../../lib/video/merge.js";
@@ -34,6 +34,41 @@ import {
 } from "./library.js";
 
 const log = createLogger("template-preview");
+
+/**
+ * Decide what to do when a preview network operation (poll / download) hits a
+ * transient failure on a flaky connection. A non-network error rethrows (it's a
+ * real bug). A transient one leaves the template in `previewing` so the worker
+ * retries next tick (the `previewJobId` is persisted, so the retry re-polls the
+ * finished job and re-downloads — no second render), UNTIL the dead-man's-switch
+ * window since submission passes, at which point it fails terminally.
+ *
+ * Returns the row `previewTemplate` should hand back.
+ */
+async function retryOrFailPreview(
+  row: TemplateRow,
+  jobId: string,
+  what: string,
+  err: unknown,
+): Promise<TemplateRow> {
+  if (!isTransientNetworkError(err)) throw err;
+  const age = Date.now() - row.updatedAt.getTime();
+  if (age > env.NEXRENDER_POLL_TIMEOUT_MS) {
+    await failTemplate(
+      row.id,
+      `Preview ${what} unreachable for ${Math.round(env.NEXRENDER_POLL_TIMEOUT_MS / 60000)} minutes (job ${jobId}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return (await getTemplate(row.id)) ?? row;
+  }
+  log.warn(`preview ${what} unreachable — will retry next tick`, {
+    id: row.id,
+    jobId,
+    err:
+      (err as { cause?: { code?: string } })?.cause?.code ??
+      (err as Error).message,
+  });
+  return row; // status stays `previewing` → the worker retries
+}
 
 /**
  * Advance a `previewing` template by ONE step, then return.
@@ -80,7 +115,14 @@ export async function previewTemplate(
     return (await getTemplate(id)) ?? row;
   }
 
-  const result = await provider.pollRender({ jobId });
+  let result: Awaited<ReturnType<TemplateRenderProvider["pollRender"]>>;
+  try {
+    result = await provider.pollRender({ jobId });
+  } catch (err) {
+    // A transient network blip polling a job that may already be done must not
+    // fail the template — retry next tick.
+    return retryOrFailPreview(row, jobId, "poll", err);
+  }
 
   if (result.state === "failed") {
     await failTemplate(
@@ -104,29 +146,18 @@ export async function previewTemplate(
     return row; // still rendering
   }
 
-  // Completed. Nexrender's output URL expires, so re-host it right now.
-  log.info("preview completed — re-hosting", { id, jobId });
-  const res = await fetchWithRetry(result.videoUrl, undefined, {
-    label: "template-preview-download",
-  });
-  if (!res.ok) {
-    await failTemplate(id, `Could not download the preview render (${res.status}).`);
-    return (await getTemplate(id)) ?? row;
-  }
-  const bytes = new Uint8Array(await res.arrayBuffer());
+  // Completed. The render is large (Nexrender outputs `video_h264_vbr_15mbps`, so a
+  // 40s+ template exceeds the storage bucket's object-size limit), and the preview is
+  // just a library-card thumbnail — so reference the Nexrender output URL DIRECTLY
+  // rather than re-hosting the whole clip. Nexrender retains outputs ~14d; only the
+  // tiny poster JPEG is stored, so the card keeps a stable thumbnail after it expires.
+  log.info("preview completed — referencing the Nexrender URL", { id, jobId });
 
-  const video = await uploadTemplateObject({
-    templateId: id,
-    kind: "preview",
-    bytes,
-    contentType: "video/mp4",
-  });
-
-  // The poster is a nicety, not a requirement: a card can fall back to the
-  // video's own first frame. Never fail a good template over a missing JPEG.
+  // The poster is a nicety, not a requirement: a card can fall back to the video's
+  // own first frame. Never fail a good template over a missing JPEG.
   let poster: { url: string; storagePath: string } | null = null;
   try {
-    const frame = await extractPoster(video.url);
+    const frame = await extractPoster(result.videoUrl);
     poster = await uploadTemplateObject({
       templateId: id,
       kind: "poster",
@@ -141,8 +172,8 @@ export async function previewTemplate(
   }
 
   await setTemplate(id, {
-    previewVideoUrl: video.url,
-    previewVideoPath: video.storagePath,
+    previewVideoUrl: result.videoUrl,
+    previewVideoPath: null, // not re-hosted — the URL is Nexrender's own (expires ~14d)
     previewPosterUrl: poster?.url ?? null,
     previewPosterPath: poster?.storagePath ?? null,
     previewSource: "auto",

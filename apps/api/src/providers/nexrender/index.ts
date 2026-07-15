@@ -76,7 +76,14 @@ async function nexrenderFetch(
   const res = await fetchWithRetry(
     url,
     { ...init, headers },
-    { label: `nexrender ${path}`, retryOnNetworkError: method === "GET" },
+    {
+      label: `nexrender ${path}`,
+      // GET is idempotent → retry any network error. A POST is not, so retry only
+      // a CONNECT-phase blip (the socket never opened → nothing was created), which
+      // is what a flaky DNS/network throws (`UND_ERR_CONNECT_TIMEOUT`, `EAI_AGAIN`).
+      retryOnNetworkError: method === "GET",
+      retryConnectErrors: true,
+    },
   );
   const text = await res.text();
   if (!res.ok) {
@@ -117,7 +124,14 @@ export async function deleteNexrenderTemplate(templateId: string): Promise<void>
       method: "DELETE",
       headers: { Authorization: `Bearer ${env.NEXRENDER_API_KEY ?? ""}` },
     },
-    { label: "nexrender template delete", retryOnNetworkError: false, attempts: 2 },
+    {
+      label: "nexrender template delete",
+      // Not idempotent (a landed DELETE answers 404 on retry → false success), so
+      // only retry a CONNECT-phase blip where the request never reached the server.
+      retryOnNetworkError: false,
+      retryConnectErrors: true,
+      attempts: 2,
+    },
   );
 
   if (res.status === 204 || res.status === 404) {
@@ -278,6 +292,11 @@ function createNexrenderCloudProvider(): TemplateRenderProvider {
         assets: "assets" in body ? body.assets.length : 0,
         libraryPreview: Boolean(input.libraryPreview),
       });
+      // `POST /jobs` is non-idempotent (a socket that dropped mid-flight may have
+      // created a job), but `nexrenderFetch` retries a CONNECT-phase blip — the
+      // socket never opened, so nothing was created — which is where these failures
+      // land on a flaky network. So a transient connect timeout no longer fails the
+      // whole run after the video + slices were already paid for.
       const json = (await nexrenderFetch("/jobs", {
         method: "POST",
         body: JSON.stringify(body),

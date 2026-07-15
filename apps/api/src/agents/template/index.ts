@@ -28,11 +28,13 @@ import { persistAsset, persistSheet } from "../persist.js";
 import type { SkillContext } from "../types.js";
 import { prepareTemplateClips } from "./clips.js";
 import { fillTemplateText } from "./fill-text/index.js";
-import { MASTER_CLIP_SECONDS } from "./geometry.js";
+import { templateTotalSeconds } from "./geometry.js";
+import { buildTemplateKeyframe } from "./keyframe/index.js";
 import { dropAssetsByLayerName, parseMissingLayerName } from "./self-heal.js";
 import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
 import { buildRenderInput } from "./render-input.js";
+import { buildTemplateVideo } from "./video/index.js";
 
 type Video = typeof schema.videos.$inferSelect;
 
@@ -233,17 +235,16 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
       bytes = new Uint8Array(await res.arrayBuffer());
     }
 
-    // The product is always a 15s ad. A composition can run longer (many/long
-    // slots) and would otherwise render at full comp length, so crop the tail.
-    // Skip only when the comp is provably <= the master, to avoid a needless
-    // re-encode of the common short-template case.
+    // The delivered ad runs the TEMPLATE's own length (capped at
+    // MAX_TEMPLATE_SEC), not a forced 15s — the Seedance master is reused across
+    // late slots (`slices.ts`), so slots at 18s/20s show real footage. Crop only
+    // when the comp runs past that cap (an over-long grandfathered template),
+    // avoiding a needless re-encode of the common in-band case.
+    const adSec = templateTotalSeconds(template);
     const compSec = template.metadata.durationSec;
-    if (compSec == null || compSec > MASTER_CLIP_SECONDS) {
-      log.info("▶ cropping render to master length", {
-        compSec,
-        maxSec: MASTER_CLIP_SECONDS,
-      });
-      bytes = (await capVideoDuration(bytes, MASTER_CLIP_SECONDS)).bytes;
+    if (compSec == null || compSec > adSec) {
+      log.info("▶ cropping render to the template's length", { compSec, adSec });
+      bytes = (await capVideoDuration(bytes, adSec)).bytes;
     }
 
     const persisted = await persistSheet<Video>({
@@ -334,6 +335,8 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
 /** Template Agent barrel. */
 export const templateAgent = {
   planTemplate,
+  buildTemplateKeyframe,
+  buildTemplateVideo,
   applyTemplate,
   fillTemplateText,
   generateTemplateImages,

@@ -289,7 +289,10 @@ export function CreateRunForm({
               onBrandText={setBrandText}
             />
             <span className="text-muted-foreground hidden items-center pl-1 font-mono text-[11px] tabular-nums sm:inline-flex">
-              {duration} · {aspectRatio} · {MODE_LABEL[mode]}
+              {/* Template runs derive their length from the template, so we don't
+                  surface a clip duration here — only aspect + mode. */}
+              {template ? "" : `${duration} · `}
+              {aspectRatio} · {MODE_LABEL[mode]}
             </span>
           </div>
 

@@ -1,16 +1,17 @@
-import type { AssetKind } from "@ugc/shared";
 import type { SkillContext, SkillResult } from "../types.js";
 import type { ImageRef } from "../../providers/openai/index.js";
+import { pollVideoTolerant } from "../../providers/video.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { db, schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
-import { type Logger, createLogger } from "../../lib/log.js";
-import { padToProviderAspect } from "../../lib/image/normalize.js";
-import { cleanSheet2x2, cleanSheetGrid, panelGrid } from "../../lib/image/crop.js";
-import { uploadAsset } from "../../lib/storage.js";
+import { createLogger } from "../../lib/log.js";
+import {
+  cleanStoryboardRefUrl,
+  providerSafeRefUrl,
+} from "../../lib/provider-refs.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import {
   buildDeterministicVideoPrompt,
@@ -91,14 +92,6 @@ export interface VideoBuilderInput {
   segmentCount?: number;
   /** The OTHER segments' summaries — continuity context for the prompt. */
   otherSummaries?: string[];
-  /**
-   * TEMPLATE pipeline only — the beats' timeline windows (index-aligned with
-   * `scenes`), from `deriveTemplateBeats`. When present, the Seedance shot-list
-   * brackets come from these windows and the clip is forced to ONE continuous
-   * take so the master's seconds line up with the template's slot windows.
-   * Undefined for every non-template run — the prompt is then unchanged.
-   */
-  slotWindows?: { startSec: number; durationSec: number }[];
 }
 
 const DEFAULT_DURATION_SEC = 15;
@@ -122,103 +115,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * run hashes the SAME runId → the SAME seed, so the synthesized person/voice
  * stay consistent across the merged clips, while different runs still vary.
  */
-function stableSeed(s: string): number {
+export function stableSeed(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0) % 2147483647;
-}
-
-/**
- * Make a Seedance-bound reference URL provider-safe: (1) transcode to JPEG — 4K
- * sheets are now WebP, which BytePlus `CreateAsset` rejects; (2) pad aspect
- * ratios outside 0.4–2.5 into band — generated sheets/strips (which skip the
- * upload normalizer) occasionally drift out and fail the run with
- * `AspectRatioTooSmall/Large`. Upload a PROVIDER-ONLY copy when either applies
- * (the stored original — reused as an OpenAI reference + shown in the UI — stays
- * untouched, small WebP); an already-JPEG in-band ref and any fetch/encode
- * hiccup fall back to the original URL unchanged.
- */
-async function providerSafeRefUrl(
-  url: string,
-  runId: string,
-  kind: AssetKind,
-  log: Logger,
-): Promise<string> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return url;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const mime = res.headers.get("content-type") ?? "image/png";
-    // forceJpeg: WebP sheets must become JPEG for CreateAsset (+ some content
-    // image_url paths); padToProviderAspect also fixes any out-of-band aspect.
-    const norm = await padToProviderAspect(bytes, mime, { forceJpeg: true });
-    if (!norm.adjusted) return url;
-    const { url: safeUrl } = await uploadAsset({
-      runId,
-      kind,
-      bytes: norm.bytes,
-      contentType: norm.mime,
-    });
-    log.info("uploaded provider-safe (jpeg) ref copy", { kind });
-    return safeUrl;
-  } catch (err) {
-    // Never let a normalization hiccup mask the real generation — fall back to
-    // the raw URL and let CreateAsset speak if it's genuinely out of band.
-    log.warn("provider-safe ref normalization skipped", {
-      kind,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return url;
-  }
-}
-
-/**
- * Build the provider-facing storyboard reference: crop the LABELLED 2×2 sheet
- * into a CLEAN 2×2 (no scene badges / caption bars / gridlines) so those baked
- * annotations can't leak into the rendered clip, then normalize + upload a
- * provider-only copy. The stored labelled sheet (the UI/review artifact) is
- * untouched. Any fetch/crop/encode hiccup falls back to the labelled sheet via
- * `providerSafeRefUrl`, so a crop failure never fails the run.
- */
-async function cleanStoryboardRefUrl(
-  url: string,
-  runId: string,
-  log: Logger,
-  panelCount = 4,
-): Promise<string> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const raw = new Uint8Array(await res.arrayBuffer());
-    // A template sheet has one panel per beat (2..6) in a near-square grid; the
-    // normal 4-panel sheet keeps the proven 2×2 crop unchanged.
-    const cleaned =
-      panelCount === 4
-        ? await cleanSheet2x2(raw)
-        : await (async () => {
-            const { rows, cols } = panelGrid(panelCount);
-            return cleanSheetGrid(raw, rows, cols, panelCount);
-          })();
-    const norm = await padToProviderAspect(cleaned, "image/png", {
-      forceJpeg: true,
-    });
-    const { url: safeUrl } = await uploadAsset({
-      runId,
-      kind: "storyboard_sheet",
-      bytes: norm.bytes,
-      contentType: norm.mime,
-    });
-    log.info("uploaded cleaned storyboard ref copy (badges/captions cropped)");
-    return safeUrl;
-  } catch (err) {
-    log.warn("storyboard clean-crop skipped — using labelled sheet", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return providerSafeRefUrl(url, runId, "storyboard_sheet", log);
-  }
 }
 
 /**
@@ -291,7 +194,6 @@ export async function videoBuilder(
       hasProductSheet: Boolean(input.productSheetRef?.source),
       brandText: ctx.brandText,
       supportingCast: ctx.supportingCast,
-      slotWindows: input.slotWindows,
       boardPanelCount: input.boardPanelCount,
     });
     let llmVideoPrompt = "";
@@ -330,7 +232,6 @@ export async function videoBuilder(
           hasProductSheet: Boolean(input.productSheetRef?.source),
           brandText: ctx.brandText,
           supportingCast: ctx.supportingCast,
-          slotWindows: input.slotWindows,
           boardPanelCount: input.boardPanelCount,
         },
         { audioSafe },
@@ -450,11 +351,7 @@ export async function videoBuilder(
     // (demo pins the product rigid); ugc_authentic = one continuous take. Kept in
     // lockstep with buildVideoPrompt / buildDeterministicVideoPrompt so the
     // composed prompt can never carry a cut-vs-continuous contradiction.
-    // A template beat run (slotWindows present) forces ONE continuous take, so
-    // the appended directive must match the prompt bodies' forced-continuous mode.
-    const renderDirective = videoRenderDirective(ctx.adType, {
-      continuous: (input.slotWindows?.length ?? 0) > 0,
-    });
+    const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
     const composePrompt = (
       tier: "llm" | "deterministic",
@@ -524,7 +421,11 @@ export async function videoBuilder(
           attempt,
           tier,
         });
-        let result = await ctx.video.pollVideo(task);
+        // `pollVideoTolerant` absorbs a transient DNS/connect blip while polling
+        // (EAI_AGAIN etc.): the clip is still rendering on BytePlus, so it returns a
+        // synthetic "processing" and the loop re-polls the SAME task instead of
+        // discarding a paid generation. The deadline still bounds a total outage.
+        let result = await pollVideoTolerant(ctx.video, task, log);
         lastStatus = result.status ?? "running";
         // Split the wall-clock into BytePlus QUEUE wait vs actual RENDER: mark
         // the first poll that reports `running`. Tells us whether a slow run is
@@ -540,7 +441,7 @@ export async function videoBuilder(
             );
           }
           await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
-          result = await ctx.video.pollVideo(task);
+          result = await pollVideoTolerant(ctx.video, task, log);
           lastStatus = result.status ?? lastStatus;
           if (runningSince === undefined && lastStatus === "running") {
             runningSince = Date.now();

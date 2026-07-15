@@ -1,9 +1,13 @@
-// Template Plan skill — the `template_plan` step.
+// Template Plan skill — the `template_plan` step (the template's ANALYSIS step).
 //
-// Runs FIRST, before any image or video spend. One cheap call on the small model
-// turns the template's slot inventory + the ad brief into a per-slot plan that
-// every downstream agent reads. That single plan is what stops the copy, the
-// generated stills and the clip from describing three unrelated ads.
+// Runs FIRST, before any image or video spend. It SEES the template — the
+// preview poster plus frames sampled across the preview clip — through the
+// template-vision provider (Claude Sonnet v1; the Gemini .mp4 path is a deferred
+// seam), and combines what it sees with the deterministic slot inventory +
+// timeline windows into a per-slot BLUEPRINT plus a template-wide look bible.
+// Every downstream agent reads that blueprint, which stops the copy, the stills
+// and the clip from describing three unrelated ads AND makes them match the
+// template's own look.
 
 import { eq } from "drizzle-orm";
 
@@ -15,13 +19,20 @@ import {
   type TemplateSlotPlan,
 } from "@ugc/shared";
 
+import { env } from "../../../config/index.js";
 import { db, schema } from "../../../db/index.js";
+import { fetchWithRetry } from "../../../lib/http.js";
+import { dominantPalette } from "../../../lib/image/color.js";
 import { createLogger } from "../../../lib/log.js";
 import { classifyRunError } from "../../../lib/run-failure.js";
+import { sampleFrames } from "../../../lib/video/merge.js";
+import type { ImageRef } from "../../../providers/openai/index.js";
+import { createTemplateVisionProvider } from "../../../providers/template-vision/index.js";
 import { parseJsonObject } from "../../json.js";
 import type { SkillContext } from "../../types.js";
-import { MASTER_CLIP_SECONDS } from "../geometry.js";
-import { buildTemplatePlanPrompt, type PlanSlotInput } from "./prompt.js";
+import { templateTotalSeconds } from "../geometry.js";
+import { getTemplate } from "../library.js";
+import { buildTemplateBlueprintPrompt, type PlanSlotInput } from "./prompt.js";
 
 const log = createLogger("template-plan");
 
@@ -31,13 +42,7 @@ const log = createLogger("template-plan");
  * IMAGE slots the deterministic heuristic called `brand` (a logo) or
  * `decorative` (a background) are withheld entirely — a generated photo in a
  * logo layer is wrong every time, so the model never gets the chance to argue.
- *
- * EVERY video slot is shown, each with its window on the 15-second master's
- * timeline. There is still one continuous master, but the template cuts it into
- * a piece per video slot, and each piece samples a different second of it (the
- * slicer maps composition-time 1:1 onto master-time). So the model plans the
- * clip as a run of beats — what is on screen during each slot's window — that
- * together read as one take. AUDIO slots receive the master's voiceover, nothing
+ * EVERY video slot is shown; AUDIO slots receive the master's voiceover, nothing
  * for the model to plan.
  */
 export function planningSlots(slots: TemplateSlot[]): TemplateSlot[] {
@@ -63,14 +68,9 @@ const toPromptSlot = (s: TemplateSlot): PlanSlotInput => ({
  * Merge the model's reply onto OUR slot list, keyed by `jobLayerName`.
  *
  * The model's order, its slot count, and any slot it invents are all ignored:
- * every entry here comes from the template's real structure. A slot the model
- * skipped still gets a plan entry, just an empty one, so downstream agents can
- * rely on the plan having a row per slot.
- *
- * `fill` is decided deterministically rather than taken on trust: a slot is
- * generated only when the model actually described what to depict. "Fill this,
- * but I won't say with what" is not a plan, and the template's own artwork is
- * always the safer fallback.
+ * every entry comes from the template's real structure. `fill` is decided
+ * deterministically rather than taken on trust — a slot is generated only when
+ * the model actually described what to depict.
  */
 export function reconcilePlan(
   slots: TemplateSlot[],
@@ -99,16 +99,48 @@ export function reconcilePlan(
         imageSubject: fill ? subject : undefined,
       };
     }
-    return { ...base, videoScene: got?.videoScene?.trim() || undefined };
+    return {
+      ...base,
+      videoScene: got?.videoScene?.trim() || undefined,
+      cameraAction: got?.cameraAction?.trim() || undefined,
+      onScreenMoment: got?.onScreenMoment?.trim() || undefined,
+    };
   });
 }
 
 /**
- * Plan every fillable slot of this run's template.
- *
- * Persisted by the orchestrator to `runs.template_plan`. Never throws a raw
- * error: failures surface as `TEMPLATE_PLAN_FAILED`, which is a hard fail —
- * nothing downstream has run, so recovery restarts the run cheaply.
+ * Which seconds of the preview clip to sample. A DENSE strip — not a few
+ * snapshots — so the model reads the template's animation across the whole take:
+ * the midpoint of every video slot's window, t=0, and an even ~1/sec grid,
+ * deduped, spread and capped at the configured ceiling.
+ */
+function frameTimestamps(
+  slots: TemplateSlot[],
+  durationSec: number,
+  cap: number,
+): number[] {
+  if (cap <= 0) return [];
+  const set = new Set<number>([0]);
+  for (const s of slots) {
+    if (s.asset === "VIDEO" && s.startSec != null && s.durationSec != null) {
+      set.add(Math.round(Math.min(s.startSec + s.durationSec / 2, durationSec - 0.1)));
+    }
+  }
+  for (let t = 1; t < durationSec; t++) set.add(t);
+  const sorted = [...set]
+    .filter((t) => t >= 0 && t < durationSec)
+    .sort((a, b) => a - b);
+  if (sorted.length <= cap) return sorted;
+  // Keep an even spread across the timeline rather than the first `cap`.
+  const step = sorted.length / cap;
+  return Array.from({ length: cap }, (_, i) => sorted[Math.floor(i * step)] as number);
+}
+
+/**
+ * Analyze this run's template into a blueprint (persisted to `runs.template_plan`
+ * by the orchestrator). Never throws a raw error: failures surface as
+ * `TEMPLATE_PLAN_FAILED`, a hard fail — nothing downstream has run, so recovery
+ * restarts the run cheaply.
  */
 export async function planTemplate(ctx: SkillContext): Promise<TemplatePlan> {
   try {
@@ -119,53 +151,132 @@ export async function planTemplate(ctx: SkillContext): Promise<TemplatePlan> {
 
     const tpl = runTemplateSchema.parse(run.template);
     const slots = planningSlots(tpl.slots);
+    // Analyze against the FULL ad length so the frame sampling spans the whole preview
+    // and the blueprint's per-slot windows cover the entire timeline (not just 15s).
+    const durationSec = templateTotalSeconds(tpl);
 
-    // An all-decorative template (no text, no fillable image, just the clip) has
-    // nothing to plan beyond the video scene — but the video slot always exists,
-    // so `slots` is never empty here.
-    const messages = buildTemplatePlanPrompt({
+    // Preview media lives on the templates row, not the run snapshot — fetch it.
+    const templateRow = await getTemplate(tpl.templateId).catch(() => undefined);
+    const posterUrl = templateRow?.previewPosterUrl ?? undefined;
+    const previewVideoUrl = templateRow?.previewVideoUrl ?? undefined;
+
+    // Sample a dense frame strip across the whole preview clip. Best-effort — a
+    // missing / short / unreadable clip just degrades the vision, never fails.
+    const timestamps = previewVideoUrl
+      ? frameTimestamps(tpl.slots, durationSec, env.TEMPLATE_VISION_FRAME_COUNT)
+      : [];
+    const frames: ImageRef[] = timestamps.length
+      ? await sampleFrames(previewVideoUrl as string, timestamps, {
+          maxEdge: 512,
+        }).catch((err) => {
+          log.warn("frame sampling failed — analyzing on the poster alone", {
+            err: err instanceof Error ? err.message : String(err),
+          });
+          return [] as ImageRef[];
+        })
+      : [];
+    const poster: ImageRef | undefined = posterUrl
+      ? { source: posterUrl }
+      : undefined;
+    const visionSource: NonNullable<TemplatePlan["visionSource"]> =
+      frames.length > 0 ? "poster+frames" : poster ? "poster" : "text-only";
+
+    // Sample the template's real colour palette from the rendered poster — GROUND-TRUTH
+    // look anchors for the blueprint. The poster carries the template's grade/gradients/
+    // effects, so it is a better palette than the project file's raw solid colours.
+    // Best-effort: any fetch/decode hiccup just omits the palette.
+    let palette: string[] = [];
+    if (posterUrl) {
+      try {
+        const res = await fetchWithRetry(posterUrl, undefined, {
+          label: "template-poster-palette",
+        });
+        if (res.ok) {
+          palette = await dominantPalette(
+            new Uint8Array(await res.arrayBuffer()),
+            5,
+          );
+        }
+      } catch (err) {
+        log.warn("poster palette skipped", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const { system, user } = buildTemplateBlueprintPrompt({
       userPrompt: run.prompt,
-      adType: run.adType ?? "",
-      adStyle: run.adStyle ?? "",
       brandText: run.brandText ?? undefined,
       productBrief: run.productBrief ?? undefined,
-      // Always the master's length. The template's video slots are slices of it.
-      clipSeconds: MASTER_CLIP_SECONDS,
+      clipSeconds: durationSec,
       aspectRatio: tpl.metadata.aspectRatio ?? ctx.aspectRatio,
       slots: slots.map(toPromptSlot),
+      hasPoster: Boolean(poster),
+      // The legend is numbered poster-then-frames, so it only lists the frames
+      // that actually came back.
+      frameTimestampsSec: timestamps.slice(0, frames.length),
+      palette,
     });
 
-    // One retry with a larger ceiling on an unparseable reply — the same pattern
-    // every other one-shot skill in this codebase uses.
+    const provider = createTemplateVisionProvider(ctx.openai);
+    const analyzeWith = (maxTokens: number) =>
+      provider.analyze({
+        system,
+        user,
+        poster,
+        frames,
+        previewVideoUrl,
+        durationSec,
+        maxTokens,
+      });
+
+    // One retry with a larger ceiling on an unparseable reply — same pattern as
+    // every other one-shot skill in this codebase.
     let reply: TemplatePlan;
     try {
-      const raw = await ctx.openai.chat(messages, {
-        backend: "small",
-        jsonMode: true,
-        maxTokens: 1500,
-      });
-      reply = parseJsonObject<TemplatePlan>(raw, templatePlanSchema);
+      reply = parseJsonObject<TemplatePlan>(await analyzeWith(4000), templatePlanSchema);
     } catch {
-      log.warn("template plan: first reply unparseable — retrying");
-      const raw = await ctx.openai.chat(messages, {
-        backend: "small",
-        jsonMode: true,
-        maxTokens: 2500,
-      });
-      reply = parseJsonObject<TemplatePlan>(raw, templatePlanSchema);
+      log.warn("template blueprint: first reply unparseable — retrying");
+      reply = parseJsonObject<TemplatePlan>(await analyzeWith(6000), templatePlanSchema);
     }
 
     const planned = reconcilePlan(slots, reply);
-    const fills = planned.filter((s) => s.asset === "IMAGE" && s.fill).length;
-    log.info("✓ template planned", {
-      slots: planned.length,
-      imagesToGenerate: fills,
-    });
-
-    return {
+    const textSlots = tpl.slots.filter((s) => s.asset === "TEXT").length;
+    // Fold the sampled palette into the look-bible so every downstream agent (keyframe,
+    // images, video) carries the template's real colours even without re-running vision.
+    const styleText = reply.visualStyle?.trim() ?? "";
+    const paletteText = palette.length
+      ? `${styleText ? " " : ""}Colour palette (match these template hues): ${palette.join(", ")}.`
+      : "";
+    const visualStyle = (styleText + paletteText).trim() || undefined;
+    const blueprint: TemplatePlan = {
       conceptSummary: reply.conceptSummary?.trim() ?? "",
       slots: planned,
+      visualStyle,
+      // Default to the template owning text (clean footage) — the safe choice —
+      // when the model didn't decide, keyed on whether the template has TEXT slots.
+      onScreenText: reply.onScreenText ?? {
+        owner: textSlots > 0 ? "template" : "none",
+        requireCleanFootage: true,
+      },
+      audio: reply.audio
+        ? {
+            voiceover: reply.audio.voiceover?.trim() ?? "",
+            tone: reply.audio.tone?.trim() ?? "",
+          }
+        : undefined,
+      visionSource,
     };
+
+    const fills = planned.filter((s) => s.asset === "IMAGE" && s.fill).length;
+    log.info("✓ template analyzed", {
+      slots: planned.length,
+      imagesToGenerate: fills,
+      visionSource,
+      frames: frames.length,
+      visualStyle: Boolean(blueprint.visualStyle),
+    });
+    return blueprint;
   } catch (err) {
     throw classifyRunError(err, "TEMPLATE_PLAN_FAILED");
   }

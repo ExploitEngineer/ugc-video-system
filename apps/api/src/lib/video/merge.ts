@@ -457,6 +457,91 @@ export async function sliceClip(
   }
 }
 
+/** One slot's cut spec against a shared master (see `sliceClipsFromMaster`). */
+export interface SliceSpec {
+  startSec: number;
+  durationSec: number;
+  /** Resize the slice to exactly this, cropping rather than letterboxing. */
+  targetSize?: { width: number; height: number };
+}
+
+/**
+ * Cut MANY slices from ONE master, downloading the master a SINGLE time.
+ *
+ * `template_render` cuts a slice per video slot, and a slideshow template can have
+ * dozens. `sliceClip` re-downloads the master on every call, so N slots meant N
+ * downloads of a full 45–60s clip (slow, and N chances to hit a network blip). This
+ * fetches the master ONCE into a temp dir and ffmpeg-cuts each spec from the local
+ * file, holding the merge semaphore for the whole batch. Results come back in
+ * `specs` order. Same encode params + accurate output-seek as `sliceClip`.
+ */
+export async function sliceClipsFromMaster(
+  masterUrl: string,
+  specs: SliceSpec[],
+): Promise<{ bytes: Uint8Array; mime: string }[]> {
+  if (specs.length === 0) return [];
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-slices-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(masterUrl, input);
+    log.info("▶ slicing master into pieces", { count: specs.length });
+
+    // h264 needs even dimensions; a layer box can be fractional.
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    const out: { bytes: Uint8Array; mime: string }[] = [];
+    for (let i = 0; i < specs.length; i++) {
+      const spec = specs[i] as SliceSpec;
+      if (!(spec.durationSec > 0)) {
+        throw new Error(
+          `sliceClipsFromMaster: durationSec must be positive, got ${spec.durationSec}`,
+        );
+      }
+      const dest = join(dir, `out-${i}.mp4`);
+      const scaleCrop = spec.targetSize
+        ? [
+            "-vf",
+            `scale=${even(spec.targetSize.width)}:${even(spec.targetSize.height)}:force_original_aspect_ratio=increase,` +
+              `crop=${even(spec.targetSize.width)}:${even(spec.targetSize.height)},setsar=1`,
+          ]
+        : [];
+      await runFfmpegWithRetry(
+        [
+          "-y",
+          "-i", input,
+          "-ss", String(spec.startSec),
+          "-t", String(spec.durationSec),
+          "-an",
+          ...scaleCrop,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "20",
+          "-pix_fmt", "yuv420p",
+          "-threads", String(FFMPEG_THREADS),
+          "-movflags", "+faststart",
+          dest,
+        ],
+        `slice-${i}`,
+      );
+      const bytes = await readFile(dest);
+      if (bytes.length === 0) {
+        throw new Error(
+          `sliceClipsFromMaster: produced an empty file for [${spec.startSec}, ${spec.startSec + spec.durationSec}]`,
+        );
+      }
+      out.push({ bytes: new Uint8Array(bytes), mime: "video/mp4" });
+      // Free each slice eagerly so a 60-slot batch can't fill the temp dir.
+      await rm(dest, { force: true }).catch(() => {});
+    }
+    log.info("✓ sliced master into pieces", { count: out.length });
+    return out;
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /**
  * Grab a single frame from a video as a JPEG poster.
  *
@@ -506,6 +591,73 @@ export async function extractPoster(
 
     log.info("✓ poster extracted", { bytes: bytes.length });
     return { bytes: new Uint8Array(bytes), mime: "image/jpeg" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Sample a set of frames from a video at the given timestamps, each scaled to
+ * fit within `maxEdge`×`maxEdge` and returned as a JPEG data URI — the shape the
+ * chat providers inline directly (`ImageRef`).
+ *
+ * The template-vision analysis feeds these to Claude so it can read the
+ * template's LOOK and ANIMATION across the whole preview clip (a single poster
+ * shows no motion). Best-effort per frame: one bad seek is skipped, never fatal —
+ * the analysis degrades to whatever frames it did get. Downscaled hard, because
+ * a dozen full-res stills would blow the vision call's token budget.
+ */
+export async function sampleFrames(
+  videoUrl: string,
+  timestampsSec: number[],
+  opts: { maxEdge?: number } = {},
+): Promise<{ source: string; mime: string }[]> {
+  if (timestampsSec.length === 0) return [];
+  const maxEdge = opts.maxEdge ?? 512;
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-frames-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const frames: { source: string; mime: string }[] = [];
+    for (let i = 0; i < timestampsSec.length; i++) {
+      const ts = Math.max(0, timestampsSec[i] ?? 0);
+      const out = join(dir, `f${i}.jpg`);
+      try {
+        await runFfmpegWithRetry(
+          [
+            "-y",
+            ...(ts > 0 ? ["-ss", String(ts)] : []),
+            "-i", input,
+            "-frames:v", "1",
+            // Fit inside maxEdge×maxEdge, preserving aspect — bounds token cost.
+            "-vf", `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`,
+            "-q:v", "4",
+            "-threads", String(FFMPEG_THREADS),
+            out,
+          ],
+          "sample-frame",
+        );
+        const bytes = await readFile(out).catch(() => null);
+        if (bytes && bytes.length > 0) {
+          frames.push({
+            source: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`,
+            mime: "image/jpeg",
+          });
+        }
+      } catch (err) {
+        log.warn("frame sample failed — skipping", {
+          ts,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    log.info("✓ frames sampled", {
+      requested: timestampsSec.length,
+      got: frames.length,
+    });
+    return frames;
   } finally {
     release();
     await rm(dir, { recursive: true, force: true }).catch(() => {});

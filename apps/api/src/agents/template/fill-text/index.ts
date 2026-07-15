@@ -66,8 +66,6 @@ export async function fillTemplateText(
     const messages = buildTemplateTextFillPrompt({
       userPrompt: run.prompt,
       brandText: run.brandText ?? undefined,
-      adType: run.adType ?? "",
-      adStyle: run.adStyle ?? "",
       conceptSummary: plan?.conceptSummary || undefined,
       transcript,
       slots: textSlots.map((s) => ({

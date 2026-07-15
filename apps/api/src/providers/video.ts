@@ -6,6 +6,9 @@
 
 import type { AspectRatio } from "@ugc/shared";
 
+import { isTransientNetworkError } from "../lib/http.js";
+import type { Logger } from "../lib/log.js";
+
 /**
  * The ONLY clip lengths Seedance 2.0 accepts. A discrete set, not a range: 7, 9,
  * 11, 13 and 14 are rejected outright by ModelArk.
@@ -104,4 +107,38 @@ export interface VideoProvider {
   submitVideo(input: SubmitVideoInput): Promise<VideoTask>;
   /** Poll a previously submitted job. */
   pollVideo(task: VideoTask): Promise<VideoTaskResult>;
+}
+
+/**
+ * Poll a task, tolerating a transient network/DNS blip.
+ *
+ * A generation runs for MINUTES on the provider; a flaky resolver (`EAI_AGAIN`) or
+ * a dropped socket while POLLING must NOT discard a paid clip that is still being
+ * rendered. The task is identified by its id, so on a transient network error this
+ * returns a SYNTHETIC `processing` result — the caller's poll loop simply waits and
+ * re-polls the SAME task until it completes, fails for real, or the loop's own
+ * deadline fires. A non-network error (a real HTTP failure from the provider, e.g.
+ * task-not-found/auth) is rethrown unchanged.
+ *
+ * Polling is idempotent, so re-issuing is always safe — no risk of a duplicate job.
+ */
+export async function pollVideoTolerant(
+  video: VideoProvider,
+  task: VideoTask,
+  log: Logger,
+): Promise<VideoTaskResult> {
+  try {
+    return await video.pollVideo(task);
+  } catch (err) {
+    if (!isTransientNetworkError(err)) throw err;
+    log.warn("video poll unreachable — task still running, will retry", {
+      taskId: task.taskId,
+      err:
+        (err as { cause?: { code?: string } })?.cause?.code ??
+        (err as Error).message,
+    });
+    // Synthetic "still processing" (status omitted → the loop keeps the last known
+    // status). The loop's deadline bounds how long a total outage can stall it.
+    return { state: "processing" };
+  }
 }

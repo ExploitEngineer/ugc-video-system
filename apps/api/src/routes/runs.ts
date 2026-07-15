@@ -427,10 +427,11 @@ runs.post(
     // The template's composition dictates the output shape — never let a
     // mismatched pick letterbox or stretch inside it.
     if (metadata.aspectRatio) aspectRatio = metadata.aspectRatio;
-    // `duration` is the run's SEGMENT plan, not the clip length: a template run
-    // is always a single clip. The clip's real length is `metadata.clipSeconds`,
-    // derived from the template's own composition, and the video agent reads it
-    // from the snapshot rather than from this enum.
+    // `duration` here only selects the run's step timeline, NOT the output length.
+    // A template run's real length is the template's own composition duration
+    // (`templateTotalSeconds`), generated as one or more ≤15s Seedance clips and
+    // read from the snapshot by the video agent — never from this enum. Pinned to
+    // "15s" so the template step chain is chosen; the UI hides it for template runs.
     duration = "15s";
 
     // Powers the picker's "popular" sort. Best-effort: a failed counter must

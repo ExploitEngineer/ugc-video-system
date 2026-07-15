@@ -33,8 +33,6 @@ const wordCount = (s: string): number => s.trim().split(/\s+/).length;
 export interface TemplateTextFillPromptInput {
   userPrompt: string;
   brandText?: string;
-  adType: string;
-  adStyle: string;
   /** From `template_plan` — the through-line every slot shares. */
   conceptSummary?: string;
   /** The spoken script of the generated clip, so the copy echoes the ad. */
@@ -93,8 +91,6 @@ export function buildTemplateTextFillPrompt(
   const user = [
     `AD PROMPT: ${input.userPrompt}`,
     input.conceptSummary ? `Concept: ${input.conceptSummary}` : "",
-    input.adStyle ? `Style: ${input.adStyle}` : "",
-    `Ad type: ${input.adType}`,
     input.transcript ? `What the ad says out loud: "${input.transcript}"` : "",
     formatBrand(input.brandText),
     "",

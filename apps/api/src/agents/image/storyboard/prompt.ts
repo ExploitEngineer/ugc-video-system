@@ -13,7 +13,6 @@
 import type { AspectRatio } from "@ugc/shared";
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { IMAGE_LABEL_BY_RATIO } from "../../../providers/openai/constants.js";
-import { panelGrid } from "../../../lib/image/crop.js";
 import type { CreativeBrief, ProductUse, SupportingRole } from "../../types.js";
 import { getAdType } from "../../ad-types/registry.js";
 import { lookBase } from "../../ad-types/fragments/looks.js";
@@ -105,14 +104,6 @@ export interface StoryboardPromptInput {
    * panels. Ignored for service ads (the creative brief carries their cast).
    */
   supportingCast?: SupportingRole[];
-  /**
-   * TEMPLATE runs only — the ordered per-slot beats (`ctx.templateBeats`). When
-   * present (≥2), the sheet renders exactly one panel per beat, depicting that
-   * beat, so the board and the steered video tell the identical story. Drives an
-   * N-panel grid (`panelGrid`) instead of the fixed 4-panel 2×2. Falsy ⇒ the
-   * legacy 4-panel sheet, byte-identical.
-   */
-  templateBeats?: { scene: string }[];
 }
 
 export interface StoryboardScene {
@@ -178,7 +169,6 @@ export function buildStoryboardPrompt({
   creativeBrief,
   brandText,
   supportingCast,
-  templateBeats,
 }: StoryboardPromptInput): ChatMessage[] {
   const style = adStyle.trim() || "clean, neutral commercial";
   const resolutionLabel = IMAGE_LABEL_BY_RATIO[aspectRatio];
@@ -219,8 +209,6 @@ export function buildStoryboardPrompt({
     2: "two",
     3: "three",
     4: "four",
-    5: "five",
-    6: "six",
     8: "eight",
     12: "twelve",
     16: "sixteen",
@@ -246,31 +234,6 @@ export function buildStoryboardPrompt({
       totalPanels
     ] ?? "240-320";
 
-  // ── TEMPLATE mode: one panel per template beat (2..6), so the sheet depicts
-  // the SAME shots the steered video shows. A near-square N-panel grid; the
-  // legacy 4-panel 2×2 path (and master) are untouched. Mutually exclusive with
-  // isMaster (the template pipeline is 15s-only). ──
-  const isTemplate = !isMaster && (templateBeats?.length ?? 0) >= 2;
-  const tPanels = templateBeats?.length ?? 0;
-  const { rows: tRows, cols: tCols } = panelGrid(tPanels || 1);
-  const tWord = NUM_WORD[tPanels] ?? String(tPanels);
-  const tWordUpper = tWord.toUpperCase();
-  const tLastBadge = pad2(tPanels);
-  const tHasEmpty = tRows * tCols > tPanels;
-  const tGridPhrase =
-    tRows === 1 ? `a single row of ${tPanels}` : `a ${tRows}×${tCols} grid`;
-  // Row-major badge map, e.g. "row 1 = panels 01-03 left→right, row 2 = 04-05".
-  const tRowMap = Array.from({ length: tRows }, (_, r) => {
-    const start = r * tCols + 1;
-    const end = Math.min(tPanels, r * tCols + tCols);
-    const span = start === end ? pad2(start) : `${pad2(start)}-${pad2(end)}`;
-    return r === 0
-      ? `row 1 = panels ${span} left→right`
-      : `row ${r + 1} = ${span}`;
-  }).join(", ");
-  // ~15-22 words/panel, same density as the master.
-  const tWords = `${tPanels * 15}-${tPanels * 22}`;
-
   // STEP 2 opener — N×4 scenes of ONE continuous scene vs the 15s 4.
   const scriptStep = isMaster
     ? [
@@ -284,24 +247,14 @@ export function buildStoryboardPrompt({
         "(≤14 words), the spoken `transcript` (≤12 words), and a short",
         "`panelCaption`. The last two are DIFFERENT texts — never the same sentence:",
       ]
-    : isTemplate
-      ? [
-          `STEP 2 — SCRIPT. Produce exactly ${tWordUpper} scenes, no more, no less. \`index\``,
-          `runs 1..${tPanels} in play order — consecutive beats of ONE continuous ~15-second`,
-          "take (see ONE CONTINUOUS SCENE below). Each scene i depicts the matching BEAT i",
-          "listed in PLANNED BEATS, in that exact order. For each scene give: a",
-          "`cameraAngle` (≤4 words), the `actionMovement` (≤10 words), a `sceneDescription`",
-          "(≤14 words), the spoken `transcript` (≤12 words), and a short `panelCaption`. The",
-          "last two are DIFFERENT texts — never the same sentence:",
-        ]
-      : [
-          "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
-          "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
-          "continuous ~15s arc. For each scene give: a `cameraAngle` (≤4 words), the",
-          "`actionMovement` (≤10 words), a `sceneDescription` (≤14 words), the spoken",
-          "`transcript` (≤12 words), and a short `panelCaption`. The last two are",
-          "DIFFERENT texts — never the same sentence:",
-        ];
+    : [
+        "STEP 2 — SCRIPT. Produce exactly FOUR scenes, no more, no less. `index` runs",
+        "1, 2, 3, 4 in play order, each scene ~3-4 seconds, together forming one",
+        "continuous ~15s arc. For each scene give: a `cameraAngle` (≤4 words), the",
+        "`actionMovement` (≤10 words), a `sceneDescription` (≤14 words), the spoken",
+        "`transcript` (≤12 words), and a short `panelCaption`. The last two are",
+        "DIFFERENT texts — never the same sentence:",
+      ];
 
   // STEP 3 layout — N×4 grid vs the 15s 2×2.
   const gridLayout = isMaster
@@ -310,26 +263,15 @@ export function buildStoryboardPrompt({
         `  (${rows} rows × 4 columns), ROW-MAJOR reading order: ${rowMap} — with only thin,`,
         "  uniform plain separator borders between panels.",
       ]
-    : isTemplate
-      ? [
-          `- ONE single image, exactly ${tWordUpper} equal-size panels in ${tGridPhrase}`,
-          `  (${tRows} row${tRows > 1 ? "s" : ""} × ${tCols} column${tCols > 1 ? "s" : ""}), ROW-MAJOR reading order: ${tRowMap} —`,
-          "  with only thin, uniform plain separator borders between panels.",
-          ...(tHasEmpty
-            ? [
-                "  Leave the unused trailing cell a plain EMPTY panel (no image, no badge).",
-              ]
-            : []),
-        ]
-      : [
-          "- ONE single image, exactly FOUR equal-size panels in reading order — a",
-          "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
-          "  with only thin, uniform plain separator borders between panels.",
-        ];
+    : [
+        "- ONE single image, exactly FOUR equal-size panels in reading order — a",
+        "  clean 2×2 grid (top-left=1, top-right=2, bottom-left=3, bottom-right=4)",
+        "  with only thin, uniform plain separator borders between panels.",
+      ];
 
   // Distinct-SHOTS rule — variety must come from the CAMERA + moment, NOT from
   // changing the world (which would re-introduce the scene-jumping). 15s ⇒ empty.
-  const antiRepetition = isMaster || isTemplate
+  const antiRepetition = isMaster
     ? [
         "- Make every panel a DISTINCT SHOT of the SAME continuous scene: vary the",
         "  camera angle, shot type, framing and the small moment/action across panels",
@@ -346,15 +288,10 @@ export function buildStoryboardPrompt({
         `- A scene-number BADGE in a top corner of each panel: 01 through ${lastBadge}, in`,
         "  ROW-MAJOR reading order. Small, clean, legible.",
       ]
-    : isTemplate
-      ? [
-          `- A scene-number BADGE in a top corner of each panel: 01 through ${tLastBadge}, in`,
-          "  ROW-MAJOR reading order. Small, clean, legible.",
-        ]
-      : [
-          "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
-          "  reading order. Small, clean, legible.",
-        ];
+    : [
+        "- A scene-number BADGE in a top corner of each panel: 01, 02, 03, 04, in",
+        "  reading order. Small, clean, legible.",
+      ];
 
   // Panel-labelling block — the badge + a SINGLE uniform caption-bar style across
   // all panels (fixes per-panel colour drift). The ONE home for the label spec.
@@ -372,22 +309,16 @@ export function buildStoryboardPrompt({
   ];
 
   // Closing JSON-spec fragments (word budget, layout phrase, badge range, count).
-  const imagePromptWords = isMaster ? masterWords : isTemplate ? tWords : "60-90";
+  const imagePromptWords = isMaster ? masterWords : "60-90";
   const layoutPhrase = isMaster
     ? `the ${rows}×4 ${totalWordLower}-panel layout (row-major 01-${lastBadge}, all panels visually distinct) with thin`
-    : isTemplate
-      ? `the ${tGridPhrase} ${tWord}-panel layout (row-major 01-${tLastBadge}, all panels visually distinct) with thin`
-      : "the 2×2 four-panel layout with thin";
+    : "the 2×2 four-panel layout with thin";
   const badgeRangePhrase = isMaster
     ? `(01–${lastBadge}, in order)`
-    : isTemplate
-      ? `(01–${tLastBadge}, in order)`
-      : "(01–04, in order)";
+    : "(01–04, in order)";
   const scenesCountLine = isMaster
     ? `\`scenes\` MUST have exactly ${totalPanels} entries, in order. Set every scene's \`adStyle\``
-    : isTemplate
-      ? `\`scenes\` MUST have exactly ${tPanels} entries, in order. Set every scene's \`adStyle\``
-      : "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`";
+    : "`scenes` MUST have exactly 4 entries, in order. Set every scene's `adStyle`";
 
   // Master: the N×4 panels are ONE coherent continuous scene (no per-segment
   // summaries — the arc is authored from the user prompt + briefs).
@@ -414,18 +345,7 @@ export function buildStoryboardPrompt({
             ]
           : []),
       ]
-    : isTemplate
-      ? [
-          "",
-          `ONE CONTINUOUS SCENE — these ${tWord} panels are a SINGLE ~15-second take of ONE`,
-          `coherent scene, NOT ${tWord} different scenes. Across ALL ${tWord} keep the SAME`,
-          "person, wardrobe and hair, the SAME product, the SAME location and the SAME",
-          "lighting/look. Only the CAMERA (shot type, angle, distance) and the small",
-          `moment/action move from panel to panel; panels 1→${tPanels} flow as ONE continuous`,
-          "shoot of the SAME scene. Build this arc from the PLANNED BEATS above — render",
-          "each beat as its panel, in order; do NOT split it into separate vignettes.",
-        ]
-      : [];
+    : [];
 
   // User-block "produce the script" line — N×4 master vs the 15s 4.
   const produceLine = isMaster
@@ -436,20 +356,12 @@ export function buildStoryboardPrompt({
           `badge (01–${lastBadge}) and its panelCaption bar, in row-major order; no other text`,
           "and no arrows.",
         ]
-      : isTemplate
-        ? [
-            `Review them, then produce the ${tPanels}-scene script (with spoken transcripts`,
-            "and a brief panelCaption per scene) and the composite storyboard-sheet plan —",
-            `exactly ${tPanels} keyframe panels in ${tGridPhrase}, each LABELLED with its number`,
-            `badge (01–${tLastBadge}) and its panelCaption bar, in row-major order; no other`,
-            "text and no arrows.",
-          ]
-        : [
-            "Review them, then produce the 4-scene script (with spoken transcripts and a",
-            "brief panelCaption per scene) and the composite storyboard-sheet plan —",
-            "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
-            "its panelCaption bar, in order; no other text and no arrows.",
-          ];
+      : [
+          "Review them, then produce the 4-scene script (with spoken transcripts and a",
+          "brief panelCaption per scene) and the composite storyboard-sheet plan —",
+          "exactly 4 keyframe panels, each LABELLED with its number badge (01–04) and",
+          "its panelCaption bar, in order; no other text and no arrows.",
+        ];
 
   // Authoritative causal use-sequence fields (empty-string safe). `hasUse` gates
   // the whole known-sequence path; `hasPrep` gates the prep/persist lines (false
@@ -748,21 +660,6 @@ export function buildStoryboardPrompt({
       ]
     : [];
 
-  // TEMPLATE beats — the ad's chosen template defines what each of its video
-  // slots shows, and the video is steered to those beats. The storyboard must
-  // render the SAME beats, panel i → beat i, so the board and the clip match.
-  // Same "render this exact sequence" mechanism as the service PLANNED STORY.
-  const plannedBeatsBlock = isTemplate
-    ? [
-        "PLANNED BEATS (the ad's template defines these shots — RENDER THIS EXACT",
-        "sequence, beat i → panel i, in order; do NOT invent, reorder, add or drop):",
-        ...templateBeats!.map((b, i) => `  ${i + 1}. ${b.scene}`.trimEnd()),
-        "These are consecutive moments of ONE continuous take (same place, person,",
-        "product and look) — only the shot and the small action advance between them.",
-        "",
-      ]
-    : [];
-
   // Chunk 4b — text-only supporting roles (product types only; the service brief
   // already carries its own cast). Rendered from text, never a reference sheet.
   const supportRoles = brief
@@ -799,7 +696,6 @@ export function buildStoryboardPrompt({
     ...(uploadedProductFocus.length ? [...uploadedProductFocus, ""] : []),
     ...(characterAnchor.length ? [...characterAnchor, ""] : []),
     ...plannedStoryBlock,
-    ...plannedBeatsBlock,
     ...typeBlock,
     ...hookBlock,
     "",

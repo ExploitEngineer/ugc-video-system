@@ -217,6 +217,14 @@ export function toRunDetailDto(
       "segment_video",
       "merge",
     );
+    // The template pipeline owns its authoring steps — it never runs the shared
+    // 2×2 storyboard, the Critic inspections, or the video-pipeline `video` step.
+    skippedSteps.push(
+      "storyboard",
+      "storyboard_inspection",
+      "product_inspection",
+      "video",
+    );
     // Before the plan exists we can only say the step is POSSIBLE (some slot is
     // a content image). Once it exists, the plan is authoritative: it may have
     // declined every slot, in which case the Image Agent has nothing to do and
@@ -233,8 +241,10 @@ export function toRunDetailDto(
   } else {
     skippedSteps.push(
       "template_plan",
+      "template_keyframe",
       "template_fill",
       "template_images",
+      "template_video",
       "template_render",
     );
   }

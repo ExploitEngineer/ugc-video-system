@@ -9,6 +9,7 @@ import {
   gptImageSizeForSlot,
   MAX_CLIP_SEC,
   MIN_CLIP_SEC,
+  planFootageSegments,
   SEEDANCE_DURATIONS,
   slotAspectRatio,
   snapUp,
@@ -63,6 +64,69 @@ describe("snapUp — Seedance accepts a discrete duration set, not a range", () 
 });
 
 // ── the master clip length ───────────────────────────────────────────────────
+
+describe("planFootageSegments — split the full footage into ≤15s Seedance clips", () => {
+  const total = (segs: { durationSec: number }[]) =>
+    segs.reduce((a, s) => a + s.durationSec, 0);
+
+  it("returns ONE clip for a ≤15s template (no merge)", () => {
+    expect(planFootageSegments(8)).toEqual([{ startSec: 0, durationSec: 8 }]);
+    expect(planFootageSegments(12)).toEqual([{ startSec: 0, durationSec: 12 }]);
+    expect(planFootageSegments(15)).toEqual([{ startSec: 0, durationSec: 15 }]);
+  });
+
+  it("splits a >15s template into equal contiguous ≤15s clips", () => {
+    // 22.79 → two 12s clips (24s master, AE trims the surplus).
+    expect(planFootageSegments(22.79)).toEqual([
+      { startSec: 0, durationSec: 12 },
+      { startSec: 12, durationSec: 12 },
+    ]);
+    expect(planFootageSegments(30)).toEqual([
+      { startSec: 0, durationSec: 15 },
+      { startSec: 15, durationSec: 15 },
+    ]);
+    // 40 → three 15s clips (45s master, cropped to 40 downstream).
+    expect(planFootageSegments(40)).toEqual([
+      { startSec: 0, durationSec: 15 },
+      { startSec: 15, durationSec: 15 },
+      { startSec: 30, durationSec: 15 },
+    ]);
+    // 60 (the cap) → four 15s clips.
+    expect(planFootageSegments(60)).toEqual([
+      { startSec: 0, durationSec: 15 },
+      { startSec: 15, durationSec: 15 },
+      { startSec: 30, durationSec: 15 },
+      { startSec: 45, durationSec: 15 },
+    ]);
+  });
+
+  it("clamps past the max template length", () => {
+    // Anything beyond MAX_TEMPLATE_SEC (60) is clamped to it → four 15s clips.
+    expect(planFootageSegments(90)).toEqual(planFootageSegments(60));
+  });
+
+  it("every segment is a legal Seedance duration and ≤15s", () => {
+    for (let d = MIN_CLIP_SEC; d <= 60; d += 0.37) {
+      for (const s of planFootageSegments(d)) {
+        expect(s.durationSec).toBeLessThanOrEqual(MAX_CLIP_SEC);
+        expect(SEEDANCE_DURATIONS).toContain(s.durationSec as never);
+      }
+    }
+  });
+
+  it("is contiguous and covers at least the requested length", () => {
+    for (const d of [8, 16, 19, 22.79, 27, 30, 40, 45, 60]) {
+      const segs = planFootageSegments(d);
+      for (let i = 1; i < segs.length; i++) {
+        expect(segs[i]!.startSec).toBeCloseTo(
+          segs[i - 1]!.startSec + segs[i - 1]!.durationSec,
+          5,
+        );
+      }
+      expect(total(segs)).toBeGreaterThanOrEqual(Math.min(d, 60) - 1e-6);
+    }
+  });
+});
 
 describe("MASTER_CLIP_SECONDS", () => {
   it("is a fixed 15s, whatever the template looks like", () => {

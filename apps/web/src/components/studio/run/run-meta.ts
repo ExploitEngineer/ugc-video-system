@@ -32,19 +32,20 @@ export const STEP_ORDER_MULTI: Step[] = [
 ];
 
 /**
- * The `template` pipeline timeline. NOT the base order with steps appended —
- * `template_plan` runs FIRST (before any image or video spend), and the copy +
- * images are written between the storyboard and the clip. Single-clip only, so
- * there is no multi-segment variant.
+ * The `template` pipeline timeline. Fully SEPARATE from the video pipeline — it
+ * uses its OWN authoring steps (`template_keyframe` for the clean look-still +
+ * script, `template_video` for the plain clip) and never the shared `storyboard`
+ * or `video` steps. `template_plan` runs FIRST (before any image or video spend).
+ * Single-clip only, so there is no multi-segment variant.
  */
 export const STEP_ORDER_TEMPLATE: Step[] = [
   "template_plan",
   "product_sheet",
   "person_sheet",
-  "storyboard",
+  "template_keyframe",
   "template_fill",
   "template_images",
-  "video",
+  "template_video",
   "template_render",
 ];
 
@@ -185,11 +186,13 @@ export const STEP_LABEL: Record<Step, string> = {
   segment_video: "Segment videos",
   merge: "Final merged video",
   // pipeline:"template" only — automatic, never gated (see plan.ts)
-  template_plan: "Planning your template ad",
+  template_plan: "Analyzing your template",
+  template_keyframe: "Setting your template's look",
   // "fill" in the step id is ambiguous — it reads as if it fills everything.
   // It only writes the TEXT layers; the images and the clip are separate steps.
   template_fill: "Writing the template's text",
   template_images: "Designing your template images",
+  template_video: "Filming your template's footage",
   template_render: "Assembling your template ad",
 };
 
@@ -222,9 +225,11 @@ export const STEP_AGENT: Record<Step, StepAgent> = {
   segment_video: { skill: "Video Builder", agent: "Video Agent" },
   merge: { skill: "Merge", agent: "Video Agent" },
   // pipeline:"template" only — automatic, never gated (see plan.ts)
-  template_plan: { skill: "Template Planner", agent: "Template Agent" },
+  template_plan: { skill: "Template Analyst", agent: "Template Agent" },
+  template_keyframe: { skill: "Template Look", agent: "Template Agent" },
   template_fill: { skill: "Template Copywriter", agent: "Template Agent" },
   template_images: { skill: "Template Image Designer", agent: "Image Agent" },
+  template_video: { skill: "Template Video Builder", agent: "Template Agent" },
   template_render: { skill: "Template Compositor", agent: "Template Agent" },
 };
 

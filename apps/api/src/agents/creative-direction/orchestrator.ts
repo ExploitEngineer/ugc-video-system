@@ -18,11 +18,9 @@
 import {
   detectPlaceholders,
   isMultiSegment,
-  runTemplateSchema,
   type RunStatus,
   segmentCountFor,
   type Step,
-  templatePlanSchema,
 } from "@ugc/shared";
 import { and, eq, notInArray } from "drizzle-orm";
 import { env } from "../../config/index.js";
@@ -52,7 +50,6 @@ import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
 import { templateAgent } from "../template/index.js";
-import { beatsToScenes, deriveTemplateBeats } from "../template/beats.js";
 import { videoAgent } from "../video/index.js";
 import { dispositionAfterLadder } from "../video/retry.js";
 import type { SkillContext } from "../types.js";
@@ -186,16 +183,6 @@ function buildCtx(
   uploads: { productUpload?: ImageRef; personUpload?: ImageRef },
 ): SkillContext {
   const { openai, video } = providers();
-  // Template runs only — turn the plan's per-slot videoScene + the slots'
-  // timeline windows into the beats that steer the master. `template_plan` runs
-  // before the storyboard/video steps and ctx is rebuilt each driver iteration
-  // from a fresh run read, so both columns are present by the time this matters.
-  // Undefined for non-template runs, single-video-slot templates, and any run
-  // whose plan has not landed yet — the video path then stays generic.
-  const tpl = runTemplateSchema.safeParse(run.template).data;
-  const plan = templatePlanSchema.safeParse(run.templatePlan).data;
-  const templateBeats =
-    tpl && plan ? deriveTemplateBeats(tpl, plan) : undefined;
   return {
     runId: run.id,
     adStyle: run.adStyle ?? FALLBACK_AD_STYLE,
@@ -211,12 +198,14 @@ function buildCtx(
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     duration: run.duration,
-    // Multi-segment only — the locked visual-style bible. Each driveRun loop
-    // iteration re-reads the run and rebuilds ctx, so by the time
-    // segment_storyboard/segment_video run it is populated.
-    visualStyle: isMultiSegment(run.duration)
-      ? (run.visualStyle ?? undefined)
-      : undefined,
+    // The locked look bible. Multi-segment (60s) runs plan it in the narrative
+    // outline; TEMPLATE runs derive it from the template's own frames in
+    // `template_plan` (persisted to `runs.visual_style`). Both feed the same
+    // channel so the keyframe + clip prompts match the intended look.
+    visualStyle:
+      isMultiSegment(run.duration) || run.pipeline === "template"
+        ? (run.visualStyle ?? undefined)
+        : undefined,
     // Service ads only — the creative-director brief (cast + scenes + hook + CTA),
     // planned by the `creative_brief` step and read back here on the next loop.
     creativeBrief:
@@ -228,11 +217,6 @@ function buildCtx(
     // Chunk 4b — text-only supporting roles planned from the prompt (product types).
     supportingCast:
       (run.supportingCast as SkillContext["supportingCast"]) ?? undefined,
-    // Template pipeline — beats that steer the master + the plan concept (look
-    // context). Both undefined unless this is a template run with ≥ 2 resolved
-    // video slots and a landed plan.
-    templateBeats,
-    templateConcept: plan?.conceptSummary?.trim() || undefined,
     openai,
     video,
   };
@@ -430,45 +414,14 @@ async function executeStep(
       const productSheetRef: ImageRef | undefined = product
         ? { source: product.assetUrl, mime: "image/png" }
         : undefined;
-      // A template run generates ONE 15s master that `template_render` slices
-      // into a piece per video slot, so the composition keeps its full runtime.
-      // When the template has ≥ 2 video slots and the plan authored their scenes
-      // (`ctx.templateBeats`), STEER that master: swap the generic storyboard
-      // scenes for the per-slot beats and hand videoBuilder the slots' timeline
-      // windows, so the continuous clip shows each slot's beat during the seconds
-      // that slot is cut from. `beatsToScenes` keeps the voiceover a coherent arc
-      // by borrowing each beat's transcript from the storyboard scene over its
-      // midpoint. Non-template / single-slot runs leave `templateBeats` undefined
-      // and generate the SAME master + even split as before.
-      //
-      // videoBuilder writes its own video step_events.
-      const beats = ctx.templateBeats;
-      const slotWindows = beats?.map((b) => ({
-        startSec: b.startSec,
-        durationSec: b.durationSec,
-      }));
-      // The storyboard now renders one panel per beat, so its scenes ARE the
-      // beats — with a real per-beat transcript authored for each. Use them
-      // directly when the counts line up. Fall back to projecting the beats onto
-      // the scenes only if the board diverged (a stale sheet, or a model that
-      // ignored the panel count), so the video never desyncs from the slots.
-      const videoScenes = !beats
-        ? sbScenes
-        : sbScenes.length === beats.length
-          ? sbScenes
-          : beatsToScenes(beats, sbScenes);
+      // videoBuilder writes its own video step_events. Template runs never reach
+      // this step — they use the separate `template_video` builder.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
         hasPerson: Boolean(personRef),
         personFaceRef: personRef,
         productSheetRef,
-        scenes: videoScenes,
-        slotWindows,
-        // The rendered sheet's own panel count (drives the clean-crop grid +
-        // board wording), which can differ from `videoScenes` only in the rare
-        // fallback where the storyboard produced a different count than beats.
-        boardPanelCount: sbScenes.length,
-        // ↑ sbScenes is the sheet; videoScenes may be projected from the beats.
+        scenes: sbScenes,
         // Pin the presenter's identity in the video prompt. Empty for uploaded
         // persons (no text brief) — the gender-locked scene text carries it then.
         characterAnchor: ctx.personBrief,
@@ -702,7 +655,17 @@ async function executeStep(
       if (runRow?.templatePlan) return {};
       await writeStepEvent({ runId, step, status: "started" });
       const plan = await templateAgent.planTemplate(ctx);
-      await setRun(runId, { templatePlan: plan });
+      // Persist the blueprint. Its vision-derived look bible is mirrored onto
+      // `runs.visual_style` (→ `ctx.visualStyle`, read by the keyframe + clip) and
+      // `runs.ad_style` (→ `ctx.adStyle`, read by the reference sheets + stills),
+      // so every generated asset matches the template's own look WITHOUT the
+      // ad-type detector.
+      await setRun(runId, {
+        templatePlan: plan,
+        ...(plan.visualStyle
+          ? { visualStyle: plan.visualStyle, adStyle: plan.visualStyle }
+          : {}),
+      });
       const images = plan.slots.filter(
         (s) => s.asset === "IMAGE" && s.fill,
       ).length;
@@ -712,6 +675,25 @@ async function executeStep(
         status: "passed",
         payload: { slots: plan.slots.length, imagesToGenerate: images },
       });
+      return {};
+    }
+
+    case "template_keyframe": {
+      // pipeline:"template" only. Renders ONE clean look-reference image (no
+      // baked text/logos/UI) and authors a timestamped per-slot script from the
+      // plan's video scenes. Writes its own started/passed/failed events and
+      // persists a `storyboard_sheet` (image + scenes) that template_fill and
+      // template_video read. Template-owned — no ad-type, no 2×2 board.
+      await templateAgent.buildTemplateKeyframe(ctx);
+      return {};
+    }
+
+    case "template_video": {
+      // pipeline:"template" only. The PLAIN Seedance clip (no baked graphics —
+      // the template composites those), its length the template's own
+      // composition length. Writes its own step events; hard-fails on error
+      // (recovery rewinds to template_images via regenerate-template).
+      await templateAgent.buildTemplateVideo(ctx);
       return {};
     }
 
@@ -932,7 +914,16 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
   // deferred into the parallel reference phase (concurrent with the product
   // sheet), so the product sheet — which needs neither the brief nor its vision
   // call — starts at once.
-  if (run.status === "queued") {
+  if (run.status === "queued" && run.pipeline === "template") {
+    // The template pipeline is driven ENTIRELY by the picked template — it never
+    // runs the ad-type detector, so `adType`/`adStyle`/`hooks` stay null and no
+    // ad-type logic threads into any template prompt. Flip to running so the
+    // driver loop enters `template_plan` (its analysis step) directly.
+    logRun(runId, "▶ template run — skipping ad-type detection", tag);
+    if (!(await setRunIfActive(runId, { status: "running", currentStep: null }))) {
+      return; // cancelled during setup — leave it terminal
+    }
+  } else if (run.status === "queued") {
     const ctx = buildCtx(run, uploads);
     logRun(runId, "▶ interpreting ad style …", tag);
     try {
@@ -1156,7 +1147,11 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // the dispatch below). That equivalence is what lets a template run put
     // `template_plan` in front of the phase: before this, the phase was welded
     // to `currentStep === null` and nothing could precede it.
-    const isService = (run.adType ?? "") === "service";
+    // Template runs skip the detector, so `adType` is null — but guard explicitly
+    // so a template run can never be routed down the service `creative_brief`
+    // path; its reference phase flows straight into `template_keyframe`.
+    const isService =
+      run.pipeline !== "template" && (run.adType ?? "") === "service";
     if (run.currentStep === null) {
       // A template run plans first, before any image or video spend.
       step = run.pipeline === "template"
@@ -1242,9 +1237,8 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
 
     // ── Completion. `template_render` is always terminal (pipeline:"template").
     // The plain final clip is ready at `video` (15s) or `merge` (multi) for the
-    // normal `video` pipeline; a `template` run instead falls through below to
-    // advance into `template_fill` (nextStep maps video → template_fill →
-    // template_render — never gated, per the "full auto" design).
+    // normal `video` pipeline; a `template` run instead advances through its own
+    // chain (template_video → template_render — never gated, "full auto").
     const finalClipStep: Step = isMultiSegment(run.duration) ? "merge" : "video";
     if (
       step === "template_render" ||

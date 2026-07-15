@@ -40,6 +40,12 @@ const STEP_ASSET_KIND: Partial<Record<Step, AssetKind>> = {
   // shown in their own gallery in the run view.
   segment_storyboard: "storyboard_master",
   merge: "final_video",
+  // Template pipeline — its own steps own their artifacts (the shared storyboard/
+  // video rows are NOT in STEP_ORDER_TEMPLATE, so there is no double-render). The
+  // keyframe persists a `storyboard_sheet` (the clean look-still) and the clip a
+  // `final_video`, reusing those kinds for the backend loaders.
+  template_keyframe: "storyboard_sheet",
+  template_video: "final_video",
   // The Nexrender template output (optional final step).
   template_render: "templated_video",
 };

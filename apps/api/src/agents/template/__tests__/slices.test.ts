@@ -73,14 +73,16 @@ describe("planClipSlices — the real mixkit template this change exists for", (
 });
 
 describe("planClipSlices — a composition longer than the master", () => {
-  it("maps 1:1 and leaves a past-master slot for the 15s crop to drop", () => {
-    // The master is 15s and the ad is cropped to 15s downstream, so a slot the
-    // design places at 20s is never shown. It is NOT compressed onto the master
-    // (that would desync every earlier slot from the linear voiceover): the
-    // visible slot stays 1:1, the past-master slot clamps to the master's tail.
+  it("reuses master footage for a slot past the master (wraps, not a frozen tail)", () => {
+    // The master is the ≤15s Seedance clip, but the ad now runs the template's
+    // real length, so a slot the design places at 20s must still show REAL
+    // footage. A within-master slot stays 1:1; a past-master slot REUSES clip
+    // footage by wrapping (20 % 15 = 5), rather than clamping to a 0.1s frozen
+    // tail — the linear voiceover sync for the within-master slots is untouched.
     const plan = planClipSlices([at("a", 0, 4), at("b", 20, 4)]);
     expect(plan[0]).toEqual({ jobLayerName: "a", startSec: 0, durationSec: 4 });
-    expect(plan[1]?.startSec).toBeCloseTo(M - 0.1, 5); // 14.9 — a tail sliver, cropped away
+    expect(plan[1]?.startSec).toBeCloseTo(20 % M, 5); // 5 — wrapped into the clip
+    expect(plan[1]?.durationSec).toBeCloseTo(4, 5);
   });
 
   it("never lets a slice run past the end of the master", () => {

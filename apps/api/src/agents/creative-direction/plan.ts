@@ -98,11 +98,16 @@ export function nextStep(
   // storyboard. (The `narrative_outline` step is retired — the master is
   // authored as ONE coherent scene from the prompt, so there are no per-segment
   // summaries to plan.)
-  const afterReference: Step = criticEnabled
-    ? "product_inspection"
-    : multi
-      ? "segment_storyboard"
-      : "storyboard";
+  // A template run has its OWN authoring chain after the reference phase — the
+  // clean look-still + per-slot script — never the shared 2×2 storyboard.
+  const afterReference: Step =
+    pipeline === "template"
+      ? "template_keyframe"
+      : criticEnabled
+        ? "product_inspection"
+        : multi
+          ? "segment_storyboard"
+          : "storyboard";
   const afterProductInspection: Step = multi
     ? "segment_storyboard"
     : "storyboard";
@@ -117,51 +122,43 @@ export function nextStep(
       return afterReference;
     case "product_inspection":
       return afterProductInspection;
-    // A `pipeline: "template"` run writes its on-screen copy AFTER the
-    // storyboard, so the copywriter can draw on the product brief and the
-    // spoken script instead of guessing from the raw prompt. Template runs
-    // force `criticEnabled: false`, so the inspection branch never applies to
-    // them — the guard is kept anyway so the two flags stay independent.
+    // The shared storyboard belongs to the video pipeline only; a template run
+    // never reaches it (it uses `template_keyframe` instead).
     case "storyboard":
-      return pipeline === "template"
-        ? "template_fill"
-        : criticEnabled
-          ? "storyboard_inspection"
-          : "video";
+      return criticEnabled ? "storyboard_inspection" : "video";
     case "storyboard_inspection":
-      return pipeline === "template" ? "template_fill" : "video";
+      return "video";
     // `template_plan` runs FIRST (see `firstStep`), before any image or video
-    // spend, because its per-slot output shapes every downstream agent. The
-    // reference phase follows it: `driveRun` treats a forward `person_sheet`
-    // as the parallel product ∥ person phase.
+    // spend, because it analyzes the template and shapes every downstream agent.
+    // The reference phase follows it: `driveRun` treats a forward `person_sheet`
+    // as the parallel product ∥ person phase, then `template_keyframe`.
     //
     // RE-TEMPLATING short-circuits straight to the copywriter. The user swapped
-    // the template on a finished ad, so the reference sheets and the storyboard
-    // already exist and are template-independent. Re-running the storyboard
-    // would be worse than wasteful: it writes a NEW transcript, and the copy
-    // would then be written against a script the kept master clip never spoke.
-    // Nothing between here and `template_fill` reads `runs.template_plan`.
+    // the template on a finished ad, so the reference sheets and the keyframe
+    // already exist and are template-independent. Re-running the keyframe would
+    // rewrite the script the kept master clip never spoke.
     case "template_plan":
       return reTemplate ? "template_fill" : "person_sheet";
+    // The clean look-still + per-slot script, then the copywriter (which reads
+    // that script), then the image slots.
+    case "template_keyframe":
+      return "template_fill";
     case "template_fill":
       return "template_images";
-    // Images before video: Seedance is the most expensive call in the pipeline
-    // and belongs as late as possible, so everything that can fail cheaply
-    // fails before it.
-    //
-    // When re-templating, the master clip already exists and is entirely
-    // template-independent. Skip `video` OUTRIGHT rather than leaning on its
-    // `persistedFinalVideo` guard, so no phantom `video` step lands on the
-    // timeline for a clip nobody regenerated.
+    // Images before the clip: Seedance is the most expensive call, so everything
+    // that can fail cheaply fails before it. Re-templating skips the clip
+    // OUTRIGHT — the master already exists and is template-independent.
     case "template_images":
-      return reTemplate ? "template_render" : "video";
-    // Once the final clip exists, a template run composites it (plus the AI
-    // copy + images) into the template picked at run creation — never gated,
-    // since the template was validated before the run existed. A normal
-    // `video`-pipeline run is complete here.
-    case "video":
-      return pipeline === "template" ? "template_render" : null;
+      return reTemplate ? "template_render" : "template_video";
+    // Once the clip exists, composite it (plus the AI copy + images) into the
+    // template picked at run creation — never gated (the template was validated
+    // before the run existed).
+    case "template_video":
+      return "template_render";
     case "template_render":
+      return null;
+    // A normal `video`-pipeline run is complete after the clip.
+    case "video":
       return null;
     // Multi-segment pipeline: master storyboard (+ row crops) → N videos → merge.
     // `narrative_outline` is dormant (never sequenced) but kept in the enum.
@@ -248,9 +245,9 @@ export function resumeStepForVideoRegen(
   pipeline: Pipeline = "video",
 ): Step {
   // A template run's chain puts the copywriter and the image agent BEFORE the
-  // clip. Rewinding to the storyboard would re-run both — re-paying gpt-image-2
+  // clip. Rewinding to the keyframe would re-run both — re-paying gpt-image-2
   // for every slot — when all the user asked for is a new clip. `template_images`
-  // is the checkpoint whose next step is `video`.
+  // is the checkpoint whose next step is `template_video`.
   if (pipeline === "template") return "template_images";
   return isMultiSegment(duration) ? "segment_storyboard" : "storyboard_inspection";
 }
@@ -272,14 +269,22 @@ export function rewindStepForTemplateRegen(
     // the driver back through `template_plan`.
     case "TEMPLATE_PLAN_FAILED":
       return null;
+    // The reference sheets exist; re-run only the keyframe.
+    // `nextStep("person_sheet")` for a template run is `template_keyframe`.
+    case "TEMPLATE_KEYFRAME_FAILED":
+      return "person_sheet";
     // The copy failed, so the images and the clip had not run yet.
-    // `nextStep("storyboard")` is `template_fill`.
+    // `nextStep("template_keyframe")` is `template_fill`.
     case "TEMPLATE_FILL_FAILED":
-      return "storyboard";
+      return "template_keyframe";
+    // Images exist; re-run only the clip.
+    // `nextStep("template_images")` is `template_video`.
+    case "TEMPLATE_VIDEO_FAILED":
+      return "template_images";
     // Everything generated fine; only the composite failed.
-    // `nextStep("video")` is `template_render` — the clip is NOT re-generated.
+    // `nextStep("template_video")` is `template_render` — the clip is kept.
     case "TEMPLATE_RENDER_FAILED":
-      return "video";
+      return "template_video";
     default:
       return undefined;
   }

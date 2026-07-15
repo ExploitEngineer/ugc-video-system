@@ -34,7 +34,7 @@ const RESOLUTION_EDGES: Record<string, { long: number; short: number }> = {
  * letterbox so the lossless concat can never hit a resolution mismatch.
  * Unrecognized resolution settings fall back to native-size segments.
  */
-function targetSizeFor(
+export function targetSizeFor(
   aspectRatio: AspectRatio,
 ): { width: number; height: number } | undefined {
   const edges = RESOLUTION_EDGES[env.BYTEPLUS_VIDEO_RESOLUTION];

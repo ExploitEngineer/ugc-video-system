@@ -87,10 +87,16 @@ export function planClipSlices(
     : fallbackStarts(lengths, master);
 
   return slots.map((slot, i) => {
-    // Keep the TRUE start so the footage stays locked to the linear voiceover;
-    // only SHORTEN the slice when it would overrun the master (After Effects
-    // holds the last frame), never slide the start back — that is the desync.
-    const startSec = round(Math.max(0, Math.min(starts[i] ?? 0, master - MIN_SLICE)));
+    const rawStart = starts[i] ?? 0;
+    // A slot whose window begins at/after the source clip's length REUSES clip
+    // footage by wrapping (modulo) back into it, so a template longer than the
+    // ≤15s master still shows real footage in its late slots instead of a frozen
+    // tail. Slots within the master keep their true start (footage stays locked
+    // to the linear voiceover). Only SHORTEN a slice that would overrun the
+    // master (After Effects holds the last frame), never slide a within-master
+    // start back — that is the desync.
+    const wrapped = timed && rawStart >= master ? rawStart % master : rawStart;
+    const startSec = round(Math.max(0, Math.min(wrapped, master - MIN_SLICE)));
     const durationSec = round(
       Math.max(MIN_SLICE, Math.min(lengths[i] ?? master, master - startSec)),
     );

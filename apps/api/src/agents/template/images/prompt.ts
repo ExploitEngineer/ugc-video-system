@@ -40,6 +40,8 @@ export interface TemplateImagePromptInput {
   role?: string;
   /** The through-line every slot in this template shares. */
   conceptSummary?: string;
+  /** The vision look-bible (+ sampled palette) — how the still MATCHES the template. */
+  visualStyle?: string;
   adStyle?: string;
   productBrief?: string;
   brandText?: string;
@@ -62,7 +64,10 @@ export function buildTemplateImagePrompt(
 
   if (input.role) lines.push(`This still is ${input.role} in the ad.`);
   if (input.conceptSummary) lines.push(`The ad's through-line: ${input.conceptSummary}`);
-  if (input.adStyle) lines.push(`Look and mood: ${input.adStyle}.`);
+  // The look-bible (with the sampled colour palette) is how the still MATCHES the
+  // template; fall back to the ad-style string when no bible was derived.
+  const look = input.visualStyle?.trim() || input.adStyle?.trim();
+  if (look) lines.push(`Match this template look and colour palette exactly: ${look}.`);
 
   if (input.hasProductRef) {
     // The reference image is the product's identity. Words cannot re-specify a
@@ -90,6 +95,8 @@ export function buildTemplateImagePrompt(
     "Soft, directional, physically plausible light with gentle falloff and a",
     "neutral white balance. Natural colour, true skin and material tones, no",
     "orange or magenta cast. Real depth of field. Clean, uncluttered composition.",
+    "If a person appears, render smooth, healthy, even skin with balanced tone —",
+    "soft and real, never waxy, plastic, airbrushed or over-textured.",
     "",
     "No text, no logos, no watermarks, no captions, no borders, no collage, no",
     "split panels — a single uninterrupted photograph.",

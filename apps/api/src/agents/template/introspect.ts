@@ -27,6 +27,7 @@ import type {
   SlotCounts,
   TemplateMetadata,
   TemplateSlot,
+  TemplateSlotInstance,
   TemplateStructure,
 } from "@ugc/shared";
 import type {
@@ -208,6 +209,9 @@ export function buildStructure(
   const slots: TemplateSlot[] = [];
   const ignored: Record<string, number> = {};
   const seen = new Set<string>();
+  // One VIDEO slot per placeholder COMP (a comp re-used across scenes is a single
+  // slot that fills every placement), keyed by the child comp id.
+  const videoPlaceholderComps = new Set<string>();
   const add = (slot: TemplateSlot) => {
     const key = `${slot.asset}|${slot.composition}|${slot.jobLayerName}`;
     if (seen.has(key)) return;
@@ -385,19 +389,59 @@ export function buildStructure(
           target ?? l,
         );
       } else {
-        const window = windows.get(l.aeid);
+        // A placeholder comp is USUALLY EMPTY: the designer expects you to drop
+        // footage into it, so there is no inner layer to replace. Target the
+        // outer `av/comp` layer instead, in the comp that places it. Nexrender's
+        // own ExtendScript calls `layer.replaceSource(theImport, true)` with no
+        // guard on the current source type, so swapping a precomp layer's source
+        // for an mp4 is legal After Effects.
+        //
+        // CRUCIALLY, a placeholder comp is often RE-USED — placed in several
+        // scenes, or twice in a split-screen. Each placement is its own layer:
+        // targeting only one leaves the rest showing the template's own solid
+        // (the blue block). So build ONE slot per placeholder comp (the plan/copy
+        // author it once) carrying EVERY placement, and fill them all at render.
+        const scid = String(l.source_comp_id);
+        if (videoPlaceholderComps.has(scid)) continue;
+        videoPlaceholderComps.add(scid);
+
+        const placements = layers.filter(
+          (x) =>
+            (lower(x.layer_type) === "av" || lower(x.layer_type) === "avlayer") &&
+            lower(x.source_type) === "comp" &&
+            isPlaceholder(x.name) &&
+            String(x.source_comp_id) === scid,
+        );
+        // When the child comp HAS an inner media layer, replacing it fills every
+        // placement at once (they share the comp) — one instance. When the child
+        // is EMPTY, each placement must be targeted in its own parent comp.
+        const instances: TemplateSlotInstance[] = [];
+        const seenInst = new Set<string>();
+        for (const p of placements) {
+          const inst: TemplateSlotInstance = target
+            ? { composition: childComp, jobLayerName: target.name, ...targetOf(target) }
+            : { composition: nameOf(p.composition_id), jobLayerName: p.name, ...targetOf(p) };
+          const key = `${inst.composition}|${inst.targetBy}|${inst.layerIndex ?? inst.jobLayerName}`;
+          if (seenInst.has(key)) continue;
+          seenInst.add(key);
+          instances.push(inst);
+        }
+        // Primary placement = the earliest on screen; it drives the slice window.
+        const primary =
+          placements
+            .slice()
+            .sort(
+              (a, b) =>
+                (windows.get(a.aeid)?.startSec ?? Number.POSITIVE_INFINITY) -
+                (windows.get(b.aeid)?.startSec ?? Number.POSITIVE_INFINITY),
+            )[0] ?? l;
+        const window = windows.get(primary.aeid);
         add({
           asset: "VIDEO",
-          // A placeholder comp is USUALLY EMPTY: the designer expects you to drop
-          // footage into it, so there is no inner layer to replace. Target the
-          // outer `av/comp` layer instead, in the comp that places it. Nexrender's
-          // own ExtendScript calls `layer.replaceSource(theImport, true)` with no
-          // guard on the current source type, so swapping a precomp layer's source
-          // for an mp4 is legal After Effects.
-          composition: target ? childComp : comp,
-          layerName: target ? target.name : l.name,
-          jobLayerName: target ? target.name : l.name,
-          ...targetOf(target ?? l),
+          composition: target ? childComp : nameOf(primary.composition_id),
+          layerName: target ? target.name : primary.name,
+          jobLayerName: target ? target.name : primary.name,
+          ...targetOf(target ?? primary),
           injectVia: "asset",
           // The ORIGINAL SOURCE's size, which for a placeholder is its child
           // composition. `replaceSource` keeps the layer's authored transform, so
@@ -410,6 +454,8 @@ export function buildStructure(
           // NOT the placeholder comp's own `duration`, which is routinely 60s for
           // a scene that runs for two.
           durationSec: positiveOrNull(window?.durationSec),
+          // Only when the placeholder truly has multiple distinct placements.
+          ...(instances.length > 1 ? { instances } : {}),
         });
       }
       continue;
