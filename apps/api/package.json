@@ -25,6 +25,7 @@
     "template:probe": "tsx scripts/probe-template-render.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.11.0",
     "@hono/node-server": "^1.19.14",
     "@supabase/supabase-js": "^2.106.2",
     "@ugc/shared": "workspace:*",
@@ -37,6 +38,7 @@
     "postgres": "^3.4.9",
     "sharp": "^0.34.5",
     "tsx": "^4.7.1",
+    "undici": "^8.7.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

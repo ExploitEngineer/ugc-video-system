@@ -106,10 +106,19 @@ const serverEnvSchema = z.object({
   // GEMINI_API_KEY, else it degrades back to Claude.
   TEMPLATE_VISION_PROVIDER: z.enum(["claude", "gemini"]).default("claude"),
   GEMINI_API_KEY: z.string().min(1).optional(),
+  // Which Gemini model runs the video analysis when TEMPLATE_VISION_PROVIDER=gemini.
+  // Env-swappable — any video-capable Gemini slug (gemini-2.5-pro for the richest
+  // read, gemini-2.5-flash for a cheaper/faster pass).
+  GEMINI_VISION_MODEL: z.string().default("gemini-2.5-pro"),
   // How many frames to sample from the preview clip for the Claude vision pass.
   // Adapts to clip length (~1/sec) up to this cap; 0 disables sampling (poster
   // only). Bounded so a long template can't blow the vision call's token budget.
-  TEMPLATE_VISION_FRAME_COUNT: z.coerce.number().int().min(0).max(16).default(12),
+  TEMPLATE_VISION_FRAME_COUNT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(16)
+    .default(12),
   /**
    * Shared secret for the `/admin/*` routes (template library management),
    * sent as an `x-admin-key` header. Auth (F8) is not started and the rest of
@@ -159,6 +168,42 @@ const serverEnvSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1500),
+  // Large-media downloads (renders, clips, masters) are governed by a STALL
+  // timeout, not a total-duration cap: abort only after this many ms of NO
+  // received bytes (a silent socket), so a healthy slow-but-progressing 100MB+
+  // download is never killed mid-transfer. See lib/download.ts.
+  MEDIA_DOWNLOAD_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120_000),
+  // Absolute backstop for a single media download so a bytes-trickle can't hang
+  // forever. Generous — the stall timeout is the real guard.
+  MEDIA_DOWNLOAD_MAX_MS: z.coerce.number().int().positive().default(1_800_000),
+  // Whole-download attempts, each on a fresh connection. A stall is usually a
+  // network TRANSITION (a resume's DHCP lease, a wifi reconnect) rather than a
+  // dead host, and it outlives a couple of quick retries — so retry a few times
+  // with a seconds-scale backoff instead of giving up in under 5s.
+  MEDIA_DOWNLOAD_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  // Hold an OS sleep inhibitor while a run is in flight (best-effort, needs
+  // systemd — a no-op elsewhere). A run costs real OpenAI/BytePlus money and
+  // takes ~20min, which is far longer than a laptop's idle-suspend timer: one
+  // `systemctl suspend` mid-run kills every socket the worker holds and can
+  // fail the run outright. See lib/sleep-inhibitor.ts.
+  WORKER_INHIBIT_SLEEP: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Files larger than this are NOT uploaded to Supabase Storage — the hosted
+  // project rejects an object over its global cap (~50MB by default, raisable
+  // only on a paid plan). A render past this is kept at the provider's own URL
+  // (e.g. the ~14d Nexrender output) so a big video is still viewable rather than
+  // failing the run on the upload. Raise this once you raise the Supabase limit.
+  STORAGE_UPLOAD_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(50 * 1024 * 1024),
   // Max concurrent Seedance segment-video tasks per 60s run (fan-out throttle).
   // Lower if BytePlus rejects parallel tasks; 4 = all segments at once.
   SEGMENT_VIDEO_CONCURRENCY: z.coerce.number().int().positive().default(4),
