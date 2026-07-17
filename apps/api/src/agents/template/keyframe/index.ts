@@ -34,23 +34,59 @@ import {
   resolvePersonRef,
 } from "../../creative-direction/inputs.js";
 import { writeStepEvent } from "../../events.js";
-import type { StoryboardScene } from "../../image/storyboard/prompt.js";
+import type { SceneSpeaker, StoryboardScene } from "../../image/storyboard/prompt.js";
 import { parseJsonObject } from "../../json.js";
 import { persistSheet } from "../../persist.js";
 import type { SkillContext } from "../../types.js";
 import { deriveTemplateBeats } from "../beats.js";
-import { templateTotalSeconds } from "../geometry.js";
-import { buildTemplateKeyframePrompt, KEYFRAME_PANELS } from "./prompt.js";
+import { templateKeyframePanels, templateTotalSeconds } from "../geometry.js";
+import { buildTemplateKeyframePrompt } from "./prompt.js";
 
 /** The strict-JSON shape the LLM returns. */
 interface KeyframeReply {
   sheetImagePrompt: string;
+  /** Everyone who speaks, authored once. Optional: an older/leaner reply omits it. */
+  cast?: { id?: string; role?: string; voice?: string }[];
   scenes: {
     sceneDescription: string;
+    /** The `id` of the cast member who says `spokenLine`. */
+    speaker?: string;
     spokenLine?: string;
     cameraAction?: string;
     panelCaption?: string;
   }[];
+}
+
+/**
+ * The cast is reproduced VERBATIM in every segment's Seedance prompt, so bound it
+ * here rather than trusting the model: a chatty reply must not be able to inflate
+ * the video prompt, which is held to a tight word budget.
+ */
+const MAX_CAST = 3;
+const MAX_ROLE_CHARS = 24;
+const MAX_VOICE_CHARS = 90;
+
+/**
+ * Clean the authored cast: trim, cap, drop entries missing an id/role/voice, and
+ * de-dupe ids.
+ *
+ * Returns [] when the model authored none — the video step then takes the
+ * single-voice path, i.e. today's exact behaviour. Deliberately does NOT invent a
+ * fallback cast by parsing gender out of `personBrief`: a misparse would apply the
+ * WRONG voice confidently, which is worse than letting Seedance infer. Degrade to
+ * today, never to wrong.
+ */
+export function toCast(raw: KeyframeReply["cast"]): SceneSpeaker[] {
+  const out = new Map<string, SceneSpeaker>();
+  for (const c of raw ?? []) {
+    const id = c.id?.trim().toUpperCase();
+    const role = c.role?.trim().slice(0, MAX_ROLE_CHARS);
+    const voice = c.voice?.trim().slice(0, MAX_VOICE_CHARS);
+    if (!id || !role || !voice || out.has(id)) continue;
+    out.set(id, { id, role, voice });
+    if (out.size >= MAX_CAST) break;
+  }
+  return [...out.values()];
 }
 
 /** A beat window fed to the prompt (a subset of `TemplateBeat`). */
@@ -60,18 +96,19 @@ interface Beat {
   scene: string;
 }
 
-/** One entry of the fixed four-scene arc. */
+/** One entry of the panel arc. */
 type KeyframeScene = KeyframeReply["scenes"][number];
 
 /**
- * Coerce the model's reply to EXACTLY four scenes — the board is a fixed 2×2.
- * Trim any extras and pad from the beats (or the concept) so a short/failed reply
- * never leaves an empty panel.
+ * Coerce the model's reply to EXACTLY `panelCount` scenes (the duration-derived
+ * panel count). Trim any extras and pad from the beats (or the concept) so a
+ * short/failed reply never leaves an empty panel.
  */
-function toFourScenes(
+function toNScenes(
   parsed: KeyframeReply["scenes"] | undefined,
   beats: Beat[],
   concept: string,
+  panelCount: number,
 ): KeyframeScene[] {
   const base: KeyframeScene[] =
     parsed && parsed.length
@@ -85,8 +122,8 @@ function toFourScenes(
           cameraAction: i === 0 ? "slow push-in" : "gentle hold",
           panelCaption: `SHOT ${i + 1}`,
         }));
-  const out = base.slice(0, KEYFRAME_PANELS);
-  while (out.length < KEYFRAME_PANELS) {
+  const out = base.slice(0, panelCount);
+  while (out.length < panelCount) {
     const last = out[out.length - 1];
     out.push({
       sceneDescription: last?.sceneDescription ?? concept,
@@ -127,6 +164,10 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
     // The board's arc + the beats span the FULL ad length (the footage is now built
     // to the template's real duration via multi-segment merge), not a single ≤15s clip.
     const clipSeconds = templateTotalSeconds(tpl);
+    // Panel count scales with the ad's LENGTH (4 per 15s, like the normal pipeline),
+    // laid out in a near-square grid — so a longer template gets more distinct
+    // keyframes instead of one scene stretched across 4 panels.
+    const { panelCount, rows, cols } = templateKeyframePanels(clipSeconds);
 
     // 4. Derive the beat list (one per video slot). Undefined for a single-slot
     //    or no-scene template → synthesize one beat covering the whole take.
@@ -160,7 +201,11 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
       hasProduct: Boolean(ctx.hasProduct),
       hasPerson: Boolean(ctx.hasPerson),
       personBrief: ctx.personBrief,
+      supportingCast: ctx.supportingCast,
       beats,
+      panelCount,
+      rows,
+      cols,
     });
 
     const ceilings = [2000, 3000];
@@ -189,14 +234,17 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
       : run.adStyle?.trim()
         ? ` Match this look: ${run.adStyle.trim()}.`
         : "";
-    // The board is ALWAYS a fixed 4-panel 2×2 (decoupled from the slot count): four
-    // keyframes of the ONE continuous take, at full per-panel resolution. The
-    // per-slot timing is mapped onto these four scenes downstream (`beatsToScenes`
-    // in the video step), so a 6-slot template no longer collapses to a low-res grid.
-    const scenes = toFourScenes(parsed?.scenes, beats, concept);
+    // N keyframes of the ONE continuous take, in a near-square grid sized to the ad's
+    // length (more panels for a longer ad). The per-slot timing is mapped onto these
+    // scenes downstream (`beatsToScenes` in the video step).
+    const scenes = toNScenes(parsed?.scenes, beats, concept, panelCount);
+    // WHO speaks. Authored once by the model; [] when it authored none, which
+    // leaves every scene speaker-less and the video step on its single-voice path.
+    const cast = toCast(parsed?.cast);
+    const byId = new Map(cast.map((c) => [c.id, c]));
     const sheetImagePrompt =
       parsed?.sheetImagePrompt?.trim() ||
-      `A storyboard board: one single image with four equal photographic panels in a 2×2 grid, thin white borders, read left-to-right then top-to-bottom; the four panels are consecutive keyframes of this ad's ONE continuous take (opening → close): ${concept}.${styleHint} Soft diffused light, neutral white balance, true colour, natural 85mm/35mm perspective; keep the same place, person, product and lighting across all four panels — only the camera and the moment advance. A small number badge in each panel's top-left and one caption bar along its bottom; no other graphics, no baked headline, logo, price or UI.`;
+      `A storyboard board: one single image with ${panelCount} equal photographic panels in a ${rows}×${cols} grid, thin white borders, read left-to-right then top-to-bottom; the ${panelCount} panels are consecutive keyframes of this ad's ONE continuous take (opening → close): ${concept}.${styleHint} Soft diffused light, neutral white balance, true colour, natural 85mm/35mm perspective; keep the same place, person, product and lighting across every panel — only the camera and the moment advance. A small number badge in each panel's top-left and one caption bar along its bottom; no other graphics, no baked headline, logo, price or UI.`;
 
     // Letter the authored panel captions verbatim into the bottom bars — the model
     // otherwise invents its own.
@@ -211,8 +259,11 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
 
     log.info("▶ keyframe scripted", {
       beats: beats.length,
-      panels: KEYFRAME_PANELS,
+      panels: panelCount,
+      grid: `${rows}×${cols}`,
       fallback: !parsed,
+      cast: cast.length,
+      voices: cast.map((c) => `${c.role}=${c.voice}`).join(" | ") || "none",
     });
 
     // 6. Render the labelled storyboard sheet, referencing the product sheet (+
@@ -233,18 +284,32 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
     });
     const bytes = await neutralizeCast(rawBytes);
 
-    // 7. Project the four-scene arc onto the `StoryboardScene[]` shape the downstream
+    // 7. Project the panel arc onto the `StoryboardScene[]` shape the downstream
     //    template steps read (one scene per panel, opening → close). The video step
-    //    maps the template's N slot-windows onto these four scenes (`beatsToScenes`).
-    const mapped: StoryboardScene[] = scenes.map((s, i) => ({
-      index: i,
-      cameraAngle: s.cameraAction ?? "",
-      actionMovement: "",
-      sceneDescription: s.sceneDescription ?? concept,
-      panelCaption: s.panelCaption ?? "",
-      transcript: s.spokenLine ?? "",
-      adStyle: run.adStyle ?? "",
-    }));
+    //    maps the template's slot-windows onto these scenes (`beatsToScenes`).
+    //    Each scene also carries WHO speaks its line. The cast is authored once,
+    //    but it is denormalized onto every scene because `scenes` jsonb is the only
+    //    payload that reaches `template_video` (via `latestStoryboardSheet`) — and
+    //    both `beatsToScenes` and `beatsForSegment` RE-SLICE this array, so a
+    //    speaker travelling inside its scene survives both. The video step dedupes
+    //    it back to one legend, so the repetition never reaches Seedance.
+    const mapped: StoryboardScene[] = scenes.map((s, i) => {
+      const speaker = s.speaker?.trim()
+        ? byId.get(s.speaker.trim().toUpperCase())
+        : undefined;
+      return {
+        index: i,
+        cameraAngle: s.cameraAction ?? "",
+        actionMovement: "",
+        sceneDescription: s.sceneDescription ?? concept,
+        panelCaption: s.panelCaption ?? "",
+        transcript: s.spokenLine ?? "",
+        adStyle: run.adStyle ?? "",
+        // Key ABSENT (not undefined) when unknown, so a no-speaker scene is
+        // byte-identical in jsonb to every row written before speakers existed.
+        ...(speaker ? { speaker } : {}),
+      };
+    });
 
     // 8. Persist: storage → assets(storyboard_sheet) → storyboard_sheets.
     const { assetId } = await persistSheet({
@@ -275,7 +340,7 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
       runId: ctx.runId,
       step: "template_keyframe",
       status: "passed",
-      payload: { scenes: mapped.length },
+      payload: { scenes: mapped.length, cast: cast.length },
     });
   } catch (err) {
     // 10. Surface a classified failure with the code FORCED to the template step

@@ -185,6 +185,28 @@ const serverEnvSchema = z.object({
   // dead host, and it outlives a couple of quick retries — so retry a few times
   // with a seconds-scale backoff instead of giving up in under 5s.
   MEDIA_DOWNLOAD_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  // Inject `template_images`' generated stills into the template render.
+  //
+  // This was OFF, and the cost of that was total: every still the pipeline
+  // generated was PAID FOR and then dropped, so an image slot could never be
+  // anything but the template's own artwork. It was off because Nexrender
+  // rejected our image assets ("assetRedefinition must include src, layerName,
+  // and filename") and one bad asset aborts the WHOLE job — the alternative to
+  // "no stills" was "no render".
+  //
+  // ON now, because both halves of that rejection are addressed and the downside
+  // is no longer the ad:
+  //   - the stills are PNG, not WebP. After Effects cannot import WebP without a
+  //     third-party plugin, and the template spec bans those (`images/index.ts`).
+  //   - an index-targeted image now carries a `name`, so it has the filename the
+  //     rejection asks for (`providers/nexrender/index.ts`).
+  //   - if it is STILL refused, `self-heal.ts` drops the stills and re-renders,
+  //     landing exactly where this flag being `false` landed.
+  // Set `false` to skip them entirely without a code change.
+  TEMPLATE_RENDER_INJECT_IMAGES: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   // Hold an OS sleep inhibitor while a run is in flight (best-effort, needs
   // systemd — a no-op elsewhere). A run costs real OpenAI/BytePlus money and
   // takes ~20min, which is far longer than a laptop's idle-suspend timer: one

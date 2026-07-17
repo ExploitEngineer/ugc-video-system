@@ -35,3 +35,40 @@ export function dropAssetsByLayerName(
 ): TemplateJobAssetInput[] {
   return assets.filter((a) => a.layerName !== layerName);
 }
+
+/**
+ * True when Nexrender refused an asset outright rather than failing to find a
+ * layer:
+ *
+ *   "@nexrender/action-encode: assetRedefinition must include src, layerName,
+ *    and filename"
+ *
+ * This is the error that kept generated stills switched off behind
+ * `TEMPLATE_RENDER_INJECT_IMAGES`. It names no layer, so `parseMissingLayerName`
+ * cannot help and the whole job dies — which is why the flag existed: the
+ * alternative to "no stills" was "no render".
+ */
+export function isAssetRejectionError(error: string | undefined | null): boolean {
+  return /assetRedefinition must include/i.test(error ?? "");
+}
+
+/**
+ * Drop every generated still, plus any `nx:layer-autoscale` left with nothing to
+ * scale. The render then completes with its video and text, and those slots keep
+ * the template's own artwork — the same fallback an image slot whose generation
+ * failed already takes.
+ *
+ * This is what makes injecting stills SAFE to attempt: a wrong guess about the
+ * asset contract costs the stills, not the ad.
+ */
+export function dropImageAssets(
+  assets: TemplateJobAssetInput[],
+): TemplateJobAssetInput[] {
+  const kept = assets.filter((a) => !(a.kind === "media" && a.mediaType === "image"));
+  // An autoscale is meaningless without the media it follows, and a stale one
+  // would rescale whatever placeholder is still sitting in the layer.
+  const stillTargeted = new Set(
+    kept.filter((a) => a.kind === "media").map((a) => a.layerName),
+  );
+  return kept.filter((a) => a.kind !== "autoscale" || stillTargeted.has(a.layerName));
+}

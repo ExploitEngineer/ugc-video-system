@@ -16,6 +16,7 @@
 
 import type { ChatMessage } from "../../../providers/openai/index.js";
 import { formatBrand } from "../../../lib/brand.js";
+import type { SceneSpeaker } from "../../image/storyboard/prompt.js";
 
 /** One beat of the single continuous take. */
 export interface TemplateVideoScene {
@@ -25,6 +26,8 @@ export interface TemplateVideoScene {
   transcript: string;
   /** Optional single camera move for this beat. */
   cameraAction?: string;
+  /** Who says `transcript`. Absent ⇒ unattributed ⇒ the single-voice path. */
+  speaker?: SceneSpeaker;
 }
 
 export interface TemplateVideoPromptInput {
@@ -49,6 +52,52 @@ export interface TemplateVideoPromptInput {
   scenes: TemplateVideoScene[];
   /** Per-beat timeline windows into the master (index-aligned with `scenes`). */
   slotWindows: { startSec: number; durationSec: number }[];
+  /**
+   * Everyone who speaks, deduped RUN-wide — drives the voicing mode.
+   *
+   * Run-level, never derived from this segment's own scenes: a segment where only
+   * one person happens to talk must still carry the same block, or the ad flips
+   * voicing mode halfway through.
+   */
+  cast?: SceneSpeaker[];
+}
+
+/**
+ * The distinct speakers who actually SAY something, in first-appearance order.
+ * Only a speaker with a line earns a voice — describing a silent extra spends
+ * tokens and invites the model to voice them.
+ */
+export function castOf(scenes: TemplateVideoScene[]): SceneSpeaker[] {
+  const out = new Map<string, SceneSpeaker>();
+  for (const s of scenes) {
+    if (!s.speaker?.id || !s.transcript?.trim()) continue;
+    if (!out.has(s.speaker.id)) out.set(s.speaker.id, s.speaker);
+  }
+  return [...out.values()];
+}
+
+/**
+ * The FROZEN voice block — built ONCE per run and reused UNCHANGED in every
+ * segment's prompt.
+ *
+ * Deliberately NOT routed through the LLM. `composeVideoBody` rewrites the shot
+ * list into `videoPrompt`, and it WOULD paraphrase a descriptor placed there —
+ * segment 1 "a warm woman in her late 20s", segment 2 "a friendly young female
+ * voice" — which is exactly the cross-segment drift a merged ad must not have.
+ * `research/04` is explicit that an IDENTICAL VERBATIM descriptor per segment is
+ * the only mitigation, so this is emitted as a deterministic prefix alongside
+ * `rolesText`, which is byte-identical across segments for the same reason.
+ *
+ * Returns "" when nobody speaks ⇒ the prompt is unchanged from before speakers.
+ */
+export function buildVoiceBlock(cast: SceneSpeaker[]): string {
+  if (cast.length === 0) return "";
+  if (cast.length === 1) {
+    const only = cast[0] as SceneSpeaker;
+    return `Voice — ${only.role}: ${only.voice}. ONE single voice for the whole clip, mouth visible while speaking, never overlapping voices. `;
+  }
+  const legend = cast.map((c) => `${c.role}: ${c.voice}`).join("; ");
+  return `Voices — ${legend}. Each quoted line is spoken ONLY by the person named before it, in exactly that voice — never swap these voices between them; one voice at a time, never overlapping, mouth visible while that person speaks. `;
 }
 
 /**
@@ -94,9 +143,13 @@ function shotList(input: TemplateVideoPromptInput): string[] {
     const bracket = `[${fmtTime(start)}-${fmtTime(end)}]`;
     const desc = s.sceneDescription?.trim() || "continue the scene naturally";
     const cam = s.cameraAction?.trim() ? ` ${s.cameraAction.trim()}.` : "";
-    const said = s.transcript?.trim()
-      ? ` (voiceover: "${s.transcript.trim()}")`
-      : "";
+    // The speaker's `role` IS the per-line key — a self-describing noun phrase
+    // ("the woman"), not an opaque symbol, so the model binds it straight to the
+    // person on screen with no legend lookup. Costs the same ~2 tokens the old
+    // hardcoded "voiceover" did, and an unattributed line still renders that exact
+    // legacy string.
+    const who = s.speaker?.role?.trim() || "voiceover";
+    const said = s.transcript?.trim() ? ` (${who}: "${s.transcript.trim()}")` : "";
     return `${bracket} ${desc}${cam}${said}`;
   });
 }
@@ -143,8 +196,13 @@ export function buildTemplateVideoPrompt(
     conceptSummary?.trim() ? `Concept: ${conceptSummary.trim()}.` : "",
     formatBrand(brandText),
     `Frame for ${frameLabel(aspectRatio)}. Soft natural light, neutral white balance, real photographic motion.`,
-    "Put any spoken line in double quotes, 5-10 words; ONE single voice for the whole clip, mouth visible while speaking, never overlapping voices.",
-    "HARD LIMIT — the whole videoPrompt is 60–100 words; front-load the first beat, one short clause per beat (one action + one smooth camera move).",
+    // The voices themselves are described by the FROZEN block in `index.ts`, never
+    // here: this text goes to the LLM, which paraphrases, and a second competing
+    // descriptor would contradict the block and drift between segments.
+    (input.cast?.length ?? 0) > 1
+      ? 'Put every spoken line in double quotes, 5-10 words, and KEEP its speaker prefix EXACTLY as written in the beat (e.g. `the woman: "..."`) — never drop a prefix, never reassign a line to a different speaker, never let two people speak at once. Do NOT describe what any voice sounds like.'
+      : "Put any spoken line in double quotes, 5-10 words; ONE single voice for the whole clip, mouth visible while speaking, never overlapping voices. Do NOT describe what the voice sounds like.",
+    `HARD LIMIT — the whole videoPrompt is ${(input.cast?.length ?? 0) > 1 ? "60–90" : "60–100"} words; front-load the first beat, one short clause per beat (one action + one smooth camera move).`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
@@ -203,7 +261,9 @@ export function buildDeterministicTemplateVideoPrompt(
     `Generate ONE continuous, photorealistic live-action take (~${durationSec}s, no hard cuts) that fills the whole frame throughout and moves smoothly through the beats below, each a distinct moment. ` +
     `${personPin}${productPin}${stylePin}` +
     `${shots}. ` +
-    `Keep the same product, person and overall look/setting across the take while framing and action advance; one smooth camera move per beat; put any spoken line in double quotes with ONE single voice throughout, never overlapping voices.${brandTail} ` +
+    // No voice clause here: `index.ts` prepends the frozen voice block to THIS body
+    // too, so restating it would double up and, for a two-speaker ad, contradict it.
+    `Keep the same product, person and overall look/setting across the take while framing and action advance; one smooth camera move per beat; put any spoken line in double quotes.${brandTail} ` +
     `Frame for ${frameLabel(aspectRatio)}. Soft natural light, neutral white balance. Plain live-action footage only — the template adds every caption, logo and graphic on top, so keep the frame free of on-screen text, UI and end-cards.`
   );
 }

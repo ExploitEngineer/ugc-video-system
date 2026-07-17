@@ -285,7 +285,10 @@ describe("buildStructure — a placeholder comp whose only layer is TEXT", () =>
   ];
   const layers = [
     layer({ composition_id: 1, aeid: 10, name: "Placeholder _Text", source_type: "comp", source_comp_id: 2, in_point: 0, out_point: 3, start_time: 0 }),
-    layer({ composition_id: 2, aeid: 11, name: "placeholder ", layer_type: "text", source_type: null, width: 882, height: 88 }),
+    // in/out are load-bearing, not decoration: a layer whose out_point never
+    // passes its in_point is one After Effects never draws, and `buildStructure`
+    // now drops such a slot rather than pay to fill something invisible.
+    layer({ composition_id: 2, aeid: 11, name: "placeholder ", layer_type: "text", source_type: null, width: 882, height: 88, in_point: 0, out_point: 3 }),
   ];
   const slots = buildStructure(comps, layers).slots;
 
@@ -326,6 +329,42 @@ describe("buildStructure — a placeholder comp whose only layer is TEXT", () =>
     expect(
       buildStructure(comps, shapeOnly).slots.filter((s) => s.asset === "VIDEO"),
     ).toHaveLength(0);
+  });
+});
+
+// ── slots the main composition never places ──────────────────────────────────
+
+describe("buildStructure — an orphan comp is not a slot", () => {
+  // The real shape: a finished ad built FROM a template pack keeps the pack's demo
+  // comps (`PUT YOUR IMAGE TEXT 1`, `PUT YOUR VIDEO`) lying beside the real work,
+  // unplaced and invisible. Across every healthy template in the library, zero
+  // slots lack a window; the one finished ad had 53 of 83.
+  const comps = [
+    comp({ aeid: 1, name: "Main_Comp", width: 1920, height: 1080, duration: 12 }),
+    comp({ aeid: 2, name: "Used", width: 1920, height: 1080, duration: 12 }),
+    comp({ aeid: 3, name: "PUT YOUR VIDEO", width: 1920, height: 1080, duration: 12 }),
+  ];
+  const layers = [
+    layer({ composition_id: 1, aeid: 10, name: "Used", source_type: "comp", source_comp_id: 2, in_point: 0, out_point: 5, start_time: 0 }),
+    layer({ composition_id: 2, aeid: 11, name: "PH_1.mp4", width: 1920, height: 1080, in_point: 0, out_point: 5 }),
+    // Comp 3 is in the project but no layer places it — it renders nowhere.
+    layer({ composition_id: 3, aeid: 12, name: "DELETE THIS.mp4", width: 1920, height: 1080, in_point: 0, out_point: 5 }),
+  ];
+
+  it("drops it, and counts it so the admin still sees it was seen", () => {
+    const s = buildStructure(comps, layers);
+    expect(s.slots.map((x) => x.jobLayerName)).toEqual(["PH_1.mp4"]);
+    expect(s.ignored?.unreachable).toBe(1);
+  });
+
+  it("keeps EVERY slot when the resolver placed nothing at all", () => {
+    // An empty `windows` means we found no main composition and placed nothing.
+    // Dropping every slot on the back of our OWN failure is the destructive move
+    // this module avoids everywhere else — a template would silently lose its
+    // slots, read as "no spot for a video", and fail.
+    const orphaned = buildStructure([comps[2]], [layers[2]]);
+    expect(orphaned.slots).toHaveLength(1);
+    expect(orphaned.ignored?.unreachable).toBeUndefined();
   });
 });
 

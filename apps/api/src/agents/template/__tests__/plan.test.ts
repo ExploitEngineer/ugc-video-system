@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { TemplatePlan, TemplateSlot } from "@ugc/shared";
 
-import { fitToBudget } from "../fill-text/index.js";
+import { countEchoedFills, fitToBudget } from "../fill-text/index.js";
 import { planningSlots, reconcilePlan } from "../plan/index.js";
 import { buildTemplateBlueprintPrompt } from "../plan/prompt.js";
 
@@ -215,6 +215,18 @@ describe("buildTemplateBlueprintPrompt", () => {
     expect(user).toContain("Frame 3 = the template at 0:04");
   });
 
+  it("video mode says it is watching the clip and drops the frame legend", () => {
+    const { system, user } = buildTemplateBlueprintPrompt({
+      ...base,
+      videoMode: true,
+      slots: [{ jobLayerName: "clip", asset: "VIDEO" }],
+    });
+    expect(system).toContain("WATCHING the actual rendered template clip");
+    expect(system).not.toContain("shown VISUAL FRAMES");
+    expect(system).not.toContain("No preview frames");
+    expect(user).not.toContain("FRAME LEGEND");
+  });
+
   it("shows each video slot's window and asks for one continuous take", () => {
     const { system, user } = buildTemplateBlueprintPrompt({
       ...base,
@@ -285,5 +297,52 @@ describe("fitToBudget — the ceiling is enforced, not requested", () => {
   it("leaves the line alone when there is no budget", () => {
     const long = "a".repeat(500);
     expect(fitToBudget(long, undefined, "x")).toBe(long);
+  });
+});
+
+// ── countEchoedFills ─────────────────────────────────────────────────────────
+
+describe("countEchoedFills — the copy that gives away a non-template", () => {
+  const slot = (jobLayerName: string, currentText: string) => ({ jobLayerName, currentText });
+
+  it("counts a real run's finished-ad copy handed straight back", () => {
+    // Verbatim from run 5807d90b: every one of a bank's own headlines returned
+    // unchanged. `charBudget` is the placeholder's length ×1.15, so asking the
+    // model to match a finished headline's shape makes echoing its best answer.
+    const slots = [
+      slot("FIRSTmoney Smart Personal Loan", "FIRSTmoney Smart Personal Loan"),
+      slot("Designed for Your Next Move", "Designed for Your Next Move"),
+      slot("9.99%", "9.99%"),
+    ];
+    const fills = slots.map((s) => ({ jobLayerName: s.jobLayerName, value: s.currentText }));
+    expect(countEchoedFills(fills, slots)).toBe(3);
+  });
+
+  it("does not count real copy written over a template's placeholder", () => {
+    const slots = [slot("Headline", "YOUR HEADLINE HERE"), slot("CTA", "CTA TEXT")];
+    const fills = [
+      { jobLayerName: "Headline", value: "Brew calm every morning" },
+      { jobLayerName: "CTA", value: "Order now" },
+    ];
+    expect(countEchoedFills(fills, slots)).toBe(0);
+  });
+
+  it("ignores case and surrounding space — an echo is an echo", () => {
+    const slots = [slot("a", "Sure!")];
+    expect(countEchoedFills([{ jobLayerName: "a", value: "  sure!  " }], slots)).toBe(1);
+  });
+
+  it("does not count a slot whose placeholder was blank", () => {
+    // An empty placeholder cannot be echoed, and `fitToBudget` would leave the
+    // written value alone anyway.
+    const slots = [slot("a", "")];
+    expect(countEchoedFills([{ jobLayerName: "a", value: "" }], slots)).toBe(0);
+  });
+
+  it("counts a reply that never mapped, which looks identical from here", () => {
+    // Every slot falls back to its placeholder — worth the same warning.
+    const slots = [slot("a", "Hmm..."), slot("b", "SURE!")];
+    const fills = slots.map((s) => ({ jobLayerName: s.jobLayerName, value: s.currentText }));
+    expect(countEchoedFills(fills, slots)).toBe(2);
   });
 });

@@ -59,6 +59,18 @@ async function existingByLayer(
 }
 
 /**
+ * The main composition's own box — the last resort for a slot that reports none.
+ * A full-frame slice in a layer that wanted a small one is wrong, but it is
+ * wrong at the right aspect, which the master's raw 16:9 need not be.
+ */
+function fallbackSize(
+  template: RunTemplate,
+): { width: number; height: number } | undefined {
+  const { width, height } = template.metadata ?? {};
+  return width && height ? { width, height } : undefined;
+}
+
+/**
  * Prepare the footage for every video slot, plus the voiceover.
  *
  * Each slot receives the second of the master it actually occupies in the
@@ -114,14 +126,24 @@ export async function prepareTemplateClips(
     // Nexrender, so the footage must arrive already the right shape.
     const specs = todo.map((plan) => {
       const slot = slotByLayer.get(plan.jobLayerName);
-      return {
-        startSec: plan.startSec,
-        durationSec: plan.durationSec,
-        targetSize:
-          slot?.width && slot?.height
-            ? { width: slot.width, height: slot.height }
-            : undefined,
-      };
+      // An index-targeted layer gets NO autoscale — `nx:layer-autoscale` takes a
+      // layerName and has no index form — so pre-sizing is the only thing standing
+      // between the master's native 1920×1080 and a layer whose transform was
+      // authored for something else. Every media slot in the library today reports
+      // its box, so this fallback is insurance, not a workaround: without it a
+      // missing box means no sizing AND no autoscale, which fails silently and
+      // looks exactly like a bad render rather than a missing number.
+      const size =
+        slot?.width && slot?.height
+          ? { width: slot.width, height: slot.height }
+          : fallbackSize(template);
+      if (!(slot?.width && slot?.height)) {
+        log.warn("slot reports no box — sizing the slice to the composition", {
+          slot: plan.jobLayerName,
+          ...(size ?? {}),
+        });
+      }
+      return { startSec: plan.startSec, durationSec: plan.durationSec, targetSize: size };
     });
     const cut = await sliceClipsFromMaster(masterUrl, specs);
     for (let i = 0; i < todo.length; i++) {
@@ -162,13 +184,33 @@ export async function prepareTemplateClips(
       })
     ).assetUrl;
 
-  if (audio) {
+  // An audio layer is usable ONLY if Nexrender can address it by name. An
+  // unnamed one is addressable by stacking index alone, and while index targeting
+  // is fine for footage, the encode action rejects an audio asset that carries no
+  // layerName and kills the WHOLE render:
+  //   "@nexrender/action-encode: assetRedefinition must include src, layerName,
+  //    and filename"
+  // Every template that has rendered successfully happened to have no audio slot
+  // at all, which is why this only surfaced on a template with seven.
+  //
+  // Falling back to the mux is not a downgrade: `audioSlot` returns the FIRST
+  // audio layer, and a template's audio layers are its own sound design ("TING
+  // SOUND EFFECT.mp3", "Busy Cafe Restaurant Ambiance.mp3"), not a voiceover
+  // slot. Injecting speech into one would overwrite a sound effect and leave the
+  // voiceover chopped to that effect's few frames.
+  if (audio && audio.targetBy !== "index") {
     log.info("✓ voiceover routed to the template's audio layer", {
       slot: audio.jobLayerName,
     });
     return { clipUrls, audioUrl, audioLayerName: audio.jobLayerName };
   }
 
-  log.info("no audio layer — voiceover will be muxed over the render");
+  if (audio) {
+    log.info("audio layer is unnamed — voiceover will be muxed over the render", {
+      slot: audio.jobLayerName,
+    });
+  } else {
+    log.info("no audio layer — voiceover will be muxed over the render");
+  }
   return { clipUrls, audioUrl };
 }

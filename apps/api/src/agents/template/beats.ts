@@ -167,6 +167,10 @@ export function beatsToScenes(
       panelCaption: src?.panelCaption ?? "",
       transcript: src?.transcript ?? "",
       adStyle: src?.adStyle ?? "",
+      // The speaker travels WITH the borrowed transcript — a line must not be
+      // re-orphaned here, or every multi-video-slot template (the common case)
+      // silently loses its per-line voicing with no error.
+      ...(src?.speaker ? { speaker: src.speaker } : {}),
     };
   });
 }

@@ -63,6 +63,13 @@ const MIN_SLICE = 0.1;
  * Slots with no window — an older snapshot, or a template whose layers Nexrender
  * could not place — fall back to laying the slices end to end, and spreading
  * them across the master when they do not fit.
+ *
+ * That fallback is decided PER SLOT, not for the whole list. It used to be
+ * `slots.every(...)`: one windowless slot threw away the real timing of every
+ * other slot and cut the entire template on an even split. That is not a
+ * theoretical case — a 40-slot template with a single unplaced layer had all 40
+ * slices cut wrong, and a slot's whole reason to exist is being cut from the
+ * second it actually plays.
  */
 export function planClipSlices(
   slots: TemplateSlot[],
@@ -71,23 +78,11 @@ export function planClipSlices(
   const master = opts.masterSec ?? MASTER_CLIP_SECONDS;
   if (slots.length === 0) return [];
 
-  const timed = slots.every(
-    (s) => s.startSec != null && s.durationSec != null && s.durationSec > 0,
-  );
+  const isTimed = (s: TemplateSlot): boolean =>
+    s.startSec != null && s.durationSec != null && s.durationSec > 0;
 
-  const lengths = timed
-    ? // A slot longer than the whole master gets the whole master. After Effects
-      // holds its last frame — a brief freeze beats looping back mid-shot.
-      slots.map((s) => Math.min(s.durationSec ?? master, master))
-    : fallbackLengths(slots, master);
-
-  // 1:1 — a slot's own composition-time start IS its offset into the master.
-  const starts = timed
-    ? slots.map((s) => Math.max(0, s.startSec ?? 0))
-    : fallbackStarts(lengths, master);
-
-  return slots.map((slot, i) => {
-    const rawStart = starts[i] ?? 0;
+  /** Clamp a raw start/length onto the master. `wrap` only ever applies to a real window. */
+  const cut = (slot: TemplateSlot, rawStart: number, rawLen: number, wrap: boolean): SlicePlan => {
     // A slot whose window begins at/after the source clip's length REUSES clip
     // footage by wrapping (modulo) back into it, so a template longer than the
     // ≤15s master still shows real footage in its late slots instead of a frozen
@@ -95,12 +90,40 @@ export function planClipSlices(
     // to the linear voiceover). Only SHORTEN a slice that would overrun the
     // master (After Effects holds the last frame), never slide a within-master
     // start back — that is the desync.
-    const wrapped = timed && rawStart >= master ? rawStart % master : rawStart;
+    const wrapped = wrap && rawStart >= master ? rawStart % master : rawStart;
     const startSec = round(Math.max(0, Math.min(wrapped, master - MIN_SLICE)));
-    const durationSec = round(
-      Math.max(MIN_SLICE, Math.min(lengths[i] ?? master, master - startSec)),
-    );
+    const durationSec = round(Math.max(MIN_SLICE, Math.min(rawLen, master - startSec)));
     return { jobLayerName: slot.jobLayerName, startSec, durationSec };
+  };
+
+  // NOTHING resolved — an old snapshot, or a project Nexrender could not place at
+  // all. There is no real timing to preserve, so the whole-list schemes (end to
+  // end, else spread) are the only sensible answer.
+  if (!slots.some(isTimed)) {
+    const lengths = fallbackLengths(slots, master);
+    const starts = fallbackStarts(lengths, master);
+    return slots.map((slot, i) => cut(slot, starts[i] ?? 0, lengths[i] ?? master, false));
+  }
+
+  // At least one window resolved, so the timing is real and worth keeping. Each
+  // slot that HAS a window is cut 1:1 from its own second of the master. A slot
+  // that does not follows the one before it, which keeps the take continuous and
+  // never disturbs a neighbour that knows where it belongs.
+  const evenShare = master / slots.length;
+  let cursor = 0;
+  return slots.map((slot) => {
+    if (isTimed(slot)) {
+      const start = Math.max(0, slot.startSec ?? 0);
+      // A slot longer than the whole master gets the whole master. After Effects
+      // holds its last frame — a brief freeze beats looping back mid-shot.
+      const len = Math.min(slot.durationSec ?? master, master);
+      cursor = start + len;
+      return cut(slot, start, len, true);
+    }
+    const len = Math.min(Math.max(slot.durationSec ?? evenShare, 0), master);
+    const start = cursor;
+    cursor = start + len;
+    return cut(slot, start, len, false);
   });
 }
 

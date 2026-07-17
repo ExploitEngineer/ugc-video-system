@@ -46,12 +46,29 @@ function extFor(contentType: string): string {
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_BACKOFF_MS = 800;
 /**
- * Hard ceiling per upload attempt. The Supabase client has no upload timeout, so
- * a silently-stalled connection (opens, never responds) would hang the caller
+ * Ceiling per upload attempt. The Supabase client has no upload timeout, so a
+ * silently-stalled connection (opens, never responds) would hang the caller
  * forever. On timeout we surface a synthetic transient error so the attempt is
  * retried, then fails cleanly — never an eternal hang.
+ *
+ * It MUST scale with the payload. A flat 120s is not a stall detector, it is a
+ * throughput budget: it silently demands that whatever we upload sustain
+ * `bytes / 120s`, so the bigger the file the more likely a healthy connection is
+ * called dead. A finished template composite is the largest artifact this
+ * pipeline produces (full-quality h264 over the template's whole runtime) — a
+ * real 43MB one timed out three times on a link that had just uploaded the
+ * Seedance master fine, and the run was lost AFTER the render had already
+ * succeeded and been paid for.
+ *
+ * The floor still covers small assets; past that we allow a deliberately
+ * pessimistic ~100KB/s (a ~1Mbit uplink), so a genuine stall is still caught in
+ * bounded time while a slow-but-alive link is left alone.
  */
-const UPLOAD_TIMEOUT_MS = 120_000;
+const UPLOAD_TIMEOUT_FLOOR_MS = 120_000;
+const UPLOAD_MIN_BYTES_PER_MS = 100; // ~100 KB/s
+export function uploadTimeoutFor(byteLength: number): number {
+  return Math.max(UPLOAD_TIMEOUT_FLOOR_MS, Math.ceil(byteLength / UPLOAD_MIN_BYTES_PER_MS));
+}
 
 /**
  * A bare undici/network failure (the `fetch failed` / connection-reset / timeout
@@ -127,6 +144,7 @@ async function uploadBytes(
   contentType: string,
 ): Promise<UploadAssetResult> {
   let lastMessage = "";
+  const timeoutMs = uploadTimeoutFor(bytes.byteLength);
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
     // A timeout resolves to a synthetic transient error (matches
     // TRANSIENT_UPLOAD_ERROR → retried).
@@ -140,10 +158,12 @@ async function uploadBytes(
           () =>
             resolve({
               error: {
-                message: `storage upload timed out after ${UPLOAD_TIMEOUT_MS}ms (network)`,
+                message:
+                  `storage upload timed out after ${timeoutMs}ms ` +
+                  `(${Math.round(bytes.byteLength / 1e6)}MB, network)`,
               },
             }),
-          UPLOAD_TIMEOUT_MS,
+          timeoutMs,
         );
       }),
     ]).finally(() => {

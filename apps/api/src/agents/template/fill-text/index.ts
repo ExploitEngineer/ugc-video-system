@@ -15,6 +15,7 @@ import {
   type TemplateTextFillEntry,
 } from "@ugc/shared";
 import { db, schema } from "../../../db/index.js";
+import { createLogger } from "../../../lib/log.js";
 import { classifyRunError } from "../../../lib/run-failure.js";
 import { latestStoryboardSheet } from "../../creative-direction/inputs.js";
 import { parseJsonObject } from "../../json.js";
@@ -32,6 +33,8 @@ const templateTextFillReplySchema = z.object({
     .catch([]),
 });
 type TemplateTextFillReply = z.infer<typeof templateTextFillReplySchema>;
+
+const log = createLogger("template-fill");
 
 /**
  * Write every TEXT slot's value for this run's template. Any slot the model
@@ -108,7 +111,7 @@ export async function fillTemplateText(
     // merely requested in the prompt: an overrun renders clipped in After
     // Effects, and a model that ignores the ceiling must not be able to break
     // the designer's layout.
-    return textSlots.map((s) => ({
+    const fills = textSlots.map((s) => ({
       jobLayerName: s.jobLayerName,
       value: fitToBudget(
         byName.get(s.jobLayerName)?.trim() || "",
@@ -116,9 +119,54 @@ export async function fillTemplateText(
         s.currentText ?? "",
       ),
     }));
+
+    const echoed = countEchoedFills(fills, textSlots);
+    if (echoed >= Math.ceil(textSlots.length * ECHO_WARN_RATIO) && echoed > 1) {
+      log.warn(
+        "copy is mostly the template's OWN words handed back — this project looks like a finished ad rather than a template, or the model's reply never mapped",
+        { echoed, of: textSlots.length },
+      );
+    }
+    return fills;
   } catch (err) {
     throw classifyRunError(err, "TEMPLATE_FILL_FAILED");
   }
+}
+
+/** Warn once this share of a template's copy comes back unchanged. */
+const ECHO_WARN_RATIO = 0.6;
+
+/**
+ * How many written lines are just the template's own words handed back.
+ *
+ * The signature of a NON-TEMPLATE input, not a lazy model. `charBudget` is the
+ * placeholder's own length ×1.15 and the prompt asks the model to match the
+ * placeholder's shape — so when the "placeholder" is finished ad copy
+ * ("FIRSTmoney Smart Personal Loan"), the model is being asked for something of
+ * that exact length, on that exact subject, in that exact shape. Echoing is then
+ * its BEST answer, and a real run shipped all 42 of a bank's own headlines
+ * verbatim. A real template's placeholders read as "YOUR HEADLINE HERE" and are
+ * never worth echoing.
+ *
+ * It also catches the unrelated case where the reply never mapped by
+ * `jobLayerName` at all: every slot falls back to its placeholder, which looks
+ * identical from here and is equally worth knowing about.
+ *
+ * `validateAuthoredForTemplating` is the real fix — it rejects such a project at
+ * upload. This is the tripwire for one already in the library.
+ */
+export function countEchoedFills(
+  fills: TemplateTextFillEntry[],
+  slots: Array<{ jobLayerName: string; currentText?: string | null }>,
+): number {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const current = new Map(
+    slots.map((s) => [s.jobLayerName, norm(s.currentText ?? "")] as const),
+  );
+  return fills.filter((f) => {
+    const placeholder = current.get(f.jobLayerName);
+    return Boolean(placeholder) && norm(f.value) === placeholder;
+  }).length;
 }
 
 /**

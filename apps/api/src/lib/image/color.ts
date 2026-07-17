@@ -111,10 +111,21 @@ export async function dominantPalette(
 
 /**
  * Mildly neutralize a global colour cast (chiefly the gpt-image warm bias) on a
- * generated sheet. Returns corrected WebP bytes, or the input unchanged when the
+ * generated sheet. Returns the corrected bytes, or the input unchanged when the
  * correction is negligible or anything fails.
+ *
+ * `format` decides who the bytes are FOR, and it is not cosmetic. A storyboard
+ * sheet is read by Seedance, so WebP's size wins. A template still is imported by
+ * After Effects, which has no WebP support without a third-party plugin — and the
+ * template spec forbids those. Handing AE a `.webp` is handing it a file it cannot
+ * open. Note this only covers the re-encode: a caller wanting PNG must ALSO ask
+ * the provider for PNG, because a negligible correction returns the input bytes
+ * untouched, in whatever format they arrived as.
  */
-export async function neutralizeCast(bytes: Uint8Array): Promise<Uint8Array> {
+export async function neutralizeCast(
+  bytes: Uint8Array,
+  opts: { format?: "webp" | "png" } = {},
+): Promise<Uint8Array> {
   try {
     const { channels } = await sharp(Buffer.from(bytes)).stats();
     const [r, g, b] = channels;
@@ -129,11 +140,13 @@ export async function neutralizeCast(bytes: Uint8Array): Promise<Uint8Array> {
     ];
     // Skip the re-encode when the correction is negligible (<1.5% on every channel).
     if (gains.every((x) => Math.abs(x - 1) < 0.015)) return bytes;
-    const out = await sharp(Buffer.from(bytes))
-      .removeAlpha() // sheets are opaque; guarantees 3 channels for .linear
-      .linear(gains, [0, 0, 0])
-      .webp({ quality: 100 })
-      .toBuffer();
+    const corrected = sharp(Buffer.from(bytes))
+      .removeAlpha() // sheets and stills are opaque; guarantees 3 channels for .linear
+      .linear(gains, [0, 0, 0]);
+    const out = await (opts.format === "png"
+      ? corrected.png()
+      : corrected.webp({ quality: 100})
+    ).toBuffer();
     log.debug("✓ neutralized cast", {
       gains: gains.map((x) => x.toFixed(3)).join(","),
     });

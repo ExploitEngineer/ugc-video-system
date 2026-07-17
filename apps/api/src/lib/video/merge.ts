@@ -24,7 +24,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegPath from "ffmpeg-static";
-import { fetchWithRetry } from "../http.js";
+import { streamDownload } from "../download.js";
 import { createLogger } from "../log.js";
 
 const log = createLogger("merge");
@@ -112,13 +112,26 @@ function release(): void {
   if (next) next();
 }
 
-async function fetchToFile(url: string, dest: string): Promise<void> {
-  const res = await fetchWithRetry(url, undefined, { label: "segment-download" });
-  if (!res.ok) throw new Error(`segment download failed: ${res.status} ${url}`);
-  await writeFile(dest, new Uint8Array(await res.arrayBuffer()));
+// Stream a media URL to disk with a stall (idle) timeout — never a total-duration
+// cap, so a healthy large render/clip download is never aborted mid-transfer.
+async function fetchToFile(
+  url: string,
+  dest: string,
+  opts: { label?: string; headers?: Record<string, string> } = {},
+): Promise<void> {
+  await streamDownload(url, dest, {
+    label: opts.label ?? "media-download",
+    ...(opts.headers ? { headers: opts.headers } : {}),
+  });
 }
 
-function runFfmpeg(args: string[], label: string): Promise<void> {
+/**
+ * Run ffmpeg. Resolves the process's STDERR — where ffmpeg prints everything it
+ * knows about the input, including the container's `Duration:` header, which is
+ * the only way to read a media file's length here (see `probeVideoDuration`).
+ * Callers that only care about the output file ignore the value.
+ */
+function runFfmpeg(args: string[], label: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
       reject(new Error("ffmpeg-static binary path is null"));
@@ -151,7 +164,7 @@ function runFfmpeg(args: string[], label: string): Promise<void> {
           ),
         );
       } else if (code === 0) {
-        resolve();
+        resolve(stderr);
       } else if (signal != null || code == null) {
         // Killed by a signal (close reports code=null) — on a busy/small host
         // this is almost always the kernel OOM killer.
@@ -174,9 +187,9 @@ function runFfmpeg(args: string[], label: string): Promise<void> {
  * memory pressure usually clears. Real encode failures (nonzero exit) are
  * deterministic and not retried.
  */
-async function runFfmpegWithRetry(args: string[], label: string): Promise<void> {
+async function runFfmpegWithRetry(args: string[], label: string): Promise<string> {
   try {
-    await runFfmpeg(args, label);
+    return await runFfmpeg(args, label);
   } catch (err) {
     // Retry ONLY a signal/OOM kill (usually transient memory pressure). A
     // TIMEOUT means the pass is genuinely stuck — retrying just holds the single
@@ -184,8 +197,7 @@ async function runFfmpegWithRetry(args: string[], label: string): Promise<void> 
     // run's merge + audio-extract. A nonzero `exit` is deterministic, not retried.
     if (err instanceof FfmpegError && err.kind === "signal") {
       log.warn(`ffmpeg (${label}) ${err.kind} — retrying once`, { err: err.message });
-      await runFfmpeg(args, label);
-      return;
+      return await runFfmpeg(args, label);
     }
     throw err;
   }
@@ -554,6 +566,46 @@ export async function sliceClipsFromMaster(
  * instead of decoding up to it). If the clip is shorter than the seek target
  * that yields no frames, so we retry from the very start.
  */
+/** `  Duration: 00:00:21.00, start: 0.000000, bitrate: 5067 kb/s` */
+const DURATION_RE = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/;
+
+/**
+ * The REAL length of a video, in seconds. Null when the container reports none
+ * (`Duration: N/A`) or the header can't be read.
+ *
+ * There is no ffprobe to call: `ffmpeg-static` ships exactly one binary, `ffmpeg`
+ * (a system ffprobe may exist on a dev box, but depending on it works locally and
+ * breaks in the container). So ask ffmpeg itself:
+ *   - `-t 0` decodes NOTHING (`frame=0`, ~90ms on a 36s clip vs ~1.5s for a full
+ *     decode) while still printing the container header we want;
+ *   - `-f null -` gives it the output it insists on, so it exits 0. Plain
+ *     `ffmpeg -i FILE` prints the same header but exits 1, and `runFfmpeg`
+ *     rejects any non-zero code.
+ *
+ * Used to learn a TEMPLATE's true length: After Effects renders a composition's
+ * WORK AREA, not its `duration` property, and Nexrender's API exposes no work
+ * area — so the only honest answer is to measure what it actually rendered.
+ */
+export async function probeVideoDuration(videoUrl: string): Promise<number | null> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-probe-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const stderr = await runFfmpegWithRetry(
+      ["-hide_banner", "-i", input, "-t", "0", "-f", "null", "-"],
+      "probe-duration",
+    );
+    const m = DURATION_RE.exec(stderr);
+    if (!m) return null;
+    const sec = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+    return Number.isFinite(sec) && sec > 0 ? sec : null;
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function extractPoster(
   videoUrl: string,
   atSeconds = 1,

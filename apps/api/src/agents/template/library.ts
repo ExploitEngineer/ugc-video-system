@@ -269,6 +269,24 @@ export async function createTemplate(
 export const MAX_VIDEO_SLOTS = 60;
 
 /**
+ * Why a template cannot join the library, and whether that verdict is damning
+ * enough to hand the uploaded bytes back.
+ *
+ * `discard` exists because the two are NOT the same question. Nexrender failing
+ * to parse a project is a fact about the project. Every rule below is a fact
+ * about OUR classifier — and a classifier is a thing we change. Discarding on one
+ * of those means a regression in `introspect.ts` silently destroys an upload that
+ * `POST /:id/reintrospect` (free, GETs only) would otherwise rescue. Bytes left
+ * in Nexrender's store are cheap and an admin's `DELETE /:id` still reaps them.
+ */
+export interface TemplateRejection {
+  /** Shown to the admin, so it must say what to DO, not just what is wrong. */
+  reason: string;
+  /** Hand the upload back to Nexrender. Only for verdicts we cannot be wrong about. */
+  discard: boolean;
+}
+
+/**
  * Why a template cannot join the library, or null when it can. Pure, so the
  * rejection rules are unit-testable without a Nexrender account.
  *
@@ -279,29 +297,153 @@ export const MAX_VIDEO_SLOTS = 60;
 export function validateForLibrary(
   structure: TemplateStructure,
   metadata: TemplateMetadata,
-): string | null {
+): TemplateRejection | null {
+  const unfillable = validateReplaceableFootage(structure);
+  if (unfillable) return unfillable;
+
   const videoSlots = metadata.slotCounts.video;
-  if (videoSlots === 0) return "This template has no spot for a video.";
+  // NOT discardable: this count is what OUR classifier could reach and place
+  // (`buildStructure` drops slots the main comp never places), so a bug here
+  // reads as "no spot for a video" on a template that has plenty.
+  if (videoSlots === 0) {
+    return {
+      reason: "This template has no spot for a video that the main composition actually places.",
+      discard: false,
+    };
+  }
   if (videoSlots > MAX_VIDEO_SLOTS) {
-    return `This template has ${videoSlots} video slots; at most ${MAX_VIDEO_SLOTS} are supported.`;
+    return {
+      reason: `This template has ${videoSlots} video slots; at most ${MAX_VIDEO_SLOTS} are supported.`,
+      discard: false,
+    };
   }
   if (!structure.mainComposition) {
-    return "Could not determine which composition to render.";
+    return {
+      reason: "Could not determine which composition to render.",
+      discard: false,
+    };
   }
-  // Templates run 8–60s. Below 8s there is not enough footage for a coherent ad;
-  // above 60s is past the footage cap (four ≤15s Seedance clips merged). Reject at
-  // upload so a bad length is never paid for. A template with no readable duration is
-  // allowed through — the render caps at `templateTotalSeconds` downstream.
+  // The 8–60s LENGTH gate does NOT live here — it needs a length we can trust, and
+  // at this point we only have the composition's `duration` property, which lies
+  // (see `durationSec`). Judging an upload on it was actively harmful: a rejection
+  // DISCARDS the uploaded bytes (`discardRemoteTemplate` below), so a comp that
+  // under-reports lost the file over a number that was never true. The real gate is
+  // `validateMeasuredDuration`, run in `preview.ts` against the measured render.
+  //
+  // All that survives here is a cost fuse: a comp declaring longer than this is not
+  // an ad template, it is a mistake, and we are about to pay to render it.
   const dur = metadata.durationSec;
-  if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
-    if (dur < MIN_TEMPLATE_SEC) {
-      return `This template is ${dur.toFixed(1)}s; templates must be at least ${MIN_TEMPLATE_SEC}s.`;
-    }
-    if (dur > MAX_TEMPLATE_SEC) {
-      return `This template is ${dur.toFixed(1)}s; templates must be at most ${MAX_TEMPLATE_SEC}s.`;
-    }
+  if (typeof dur === "number" && Number.isFinite(dur) && dur > MAX_COMP_PREFILTER_SEC) {
+    return {
+      reason: `This composition declares ${dur.toFixed(0)}s, which is far past any ad length — check the project file.`,
+      discard: false,
+    };
   }
   return null;
+}
+
+/**
+ * Reject a project whose footage is mostly NOT ours to replace — a finished ad
+ * wearing a template's clothes.
+ *
+ * Nexrender mutates only the layers our job body names, so every media layer we
+ * could not classify renders exactly as authored, forever. Feed the pipeline a
+ * completed ad and the output is a frankenstein: our clip in whatever holes we
+ * recognised, the original's footage, logo and copy everywhere else. That is not
+ * a degraded result, it is an unusable one — and it is someone else's ad.
+ *
+ * THE TEST IS COVERAGE, NOT INTENT. "Is this a template?" cannot be answered by
+ * naming, and trying was wrong twice over: real stock templates ship their demo
+ * footage under its own filename (`wedding`'s only slot is
+ * `mixkit-bride-...-18206.mp4`), so they look exactly like a finished ad's baked
+ * footage; and `isPlaceholder` matched a finished ad's `Phone` comp on `/^ph/`.
+ * What actually matters is not what the designer meant, it is what we can reach:
+ * a project whose every footage layer is replaceable WORKS as a template, whoever
+ * made it and whatever they called it.
+ *
+ * So we count the media that renders and that we can never touch. `av/file(no-ext)`
+ * is a file-backed layer whose name carries no extension — which means the designer
+ * RENAMED it ("Scene 2 - cafe wide"), which a hand-finished project does and a
+ * stock template does not. Measured across the whole library, the separation is
+ * total: the one finished ad has 35 such layers against 12 replaceable slots;
+ * every real template has ZERO. (`nested-comp` looks tempting and is NOT a signal —
+ * healthy templates carry 50 of them.)
+ *
+ * Non-discarding: a false reject costs a re-read, a false discard costs the upload.
+ */
+export function validateReplaceableFootage(
+  structure: TemplateStructure,
+): TemplateRejection | null {
+  const slots = structure.slots ?? [];
+  // Nothing to judge — `validateForLibrary`'s own rules cover an empty project.
+  if (slots.length === 0) return null;
+
+  // Media that will render and that no job asset can ever address.
+  const untouchable = structure.ignored?.["av/file(no-ext)"] ?? 0;
+  // Media we can actually fill. Orphans are already gone (`buildStructure`).
+  const replaceable = slots.filter(
+    (s) => s.asset === "VIDEO" || s.asset === "IMAGE",
+  ).length;
+  if (untouchable <= replaceable) return null;
+
+  return {
+    reason:
+      `This project has ${untouchable} footage/image layers we cannot replace against only ` +
+      `${replaceable} we can, which is what a finished ad looks like rather than a template: ` +
+      `its own footage is baked into renamed layers, so a render would keep them and splice ` +
+      `our clip in around them. Build the template with EMPTY placeholders — leave each one's ` +
+      `source under its own filename rather than renaming the layer — per ` +
+      `docs/after-effects-template-spec.md.`,
+    discard: false,
+  };
+}
+
+/**
+ * A comp declaring longer than this is a mistake, not a template — and rendering
+ * a preview of it costs money. Deliberately generous: this is a fuse, NOT the
+ * length gate (`comp.duration` is arbitrary; the 8–60s rule is enforced on the
+ * MEASURED length in `preview.ts`).
+ */
+export const MAX_COMP_PREFILTER_SEC = 600;
+
+/**
+ * Why a MEASURED template length is unusable, or null when it is fine.
+ *
+ * The real 8–60s gate: under 8s there is not enough footage for a coherent ad,
+ * over 60s is past the footage cap (four ≤15s Seedance clips merged). Runs at
+ * preview time, against the length the template actually rendered.
+ */
+export function validateMeasuredDuration(sec: number): string | null {
+  if (sec < MIN_TEMPLATE_SEC) {
+    return `This template renders ${sec.toFixed(1)}s; templates must be at least ${MIN_TEMPLATE_SEC}s.`;
+  }
+  if (sec > MAX_TEMPLATE_SEC) {
+    return `This template renders ${sec.toFixed(1)}s; templates must be at most ${MAX_TEMPLATE_SEC}s.`;
+  }
+  return null;
+}
+
+/**
+ * Carry a MEASURED duration across a re-introspection.
+ *
+ * `buildMetadata` re-derives `durationSec` from the composition — the number we do
+ * not trust — so without this, one click of `POST /:id/reintrospect` silently
+ * reverts a measured 21.0s back to the comp's 30.97s, and the next run quietly
+ * over-generates again. Nothing about the project file changed, so the
+ * measurement is still true.
+ */
+export function withMeasuredDuration(
+  fresh: TemplateMetadata,
+  prior: TemplateMetadata | null,
+): TemplateMetadata {
+  const measured = prior?.measuredDurationSec;
+  if (typeof measured !== "number" || !(measured > 0)) return fresh;
+  return {
+    ...fresh,
+    durationSec: measured,
+    measuredDurationSec: measured,
+    durationSource: "measured",
+  };
 }
 
 /**
@@ -344,14 +486,20 @@ export async function introspectTemplate(
     raw.layers,
     row.aepLayers as AepLayerIndex | null,
   );
-  const metadata = buildMetadata(structure);
+  // Never let a re-derived composition duration clobber a measurement we already
+  // trust (`buildMetadata` re-reads the comp's arbitrary `duration`).
+  const metadata = withMeasuredDuration(buildMetadata(structure), parseMetadata(row.metadata));
 
   const rejection = validateForLibrary(structure, metadata);
   if (rejection) {
-    // This template will never be rendered, so it has no business occupying
-    // Nexrender's store. The bytes go back before the row is marked failed.
-    await discardRemoteTemplate(row, provider, rejection);
-    await failTemplate(id, rejection);
+    // Only hand the bytes back when the verdict is one we cannot be wrong about
+    // (see `TemplateRejection.discard`). Every current rule reads OUR classifier,
+    // so they all keep the upload: fixing the classifier and re-reading rescues
+    // the template, and an admin's `DELETE /:id` still reaps the store.
+    if (rejection.discard) {
+      await discardRemoteTemplate(row, provider, rejection.reason);
+    }
+    await failTemplate(id, rejection.reason);
     return (await getTemplate(id)) ?? row;
   }
 
@@ -408,17 +556,18 @@ export async function reintrospectTemplate(
     raw.layers,
     row.aepLayers as AepLayerIndex | null,
   );
-  const metadata = buildMetadata(structure);
+  // Never let a re-derived composition duration clobber a measurement we already
+  // trust (`buildMetadata` re-reads the comp's arbitrary `duration`).
+  const metadata = withMeasuredDuration(buildMetadata(structure), parseMetadata(row.metadata));
 
   const rejection = validateForLibrary(structure, metadata);
   if (rejection) {
-    // Deliberately NOT `discardRemoteTemplate`, unlike the first introspection.
-    // This template was accepted once; what changed is OUR classifier. Deleting
-    // the upload here would mean a regression in our own code could wipe every
-    // project in the library in one sweep, recoverable only by re-uploading each
-    // file by hand. The row goes `failed`; the bytes stay, so fixing the
-    // classifier and re-reading rescues it.
-    await failTemplate(id, rejection);
+    // NEVER discard here, whatever the verdict says. This template was accepted
+    // once; what changed is OUR classifier. Deleting the upload would mean a
+    // regression in our own code could wipe every project in the library in one
+    // sweep, recoverable only by re-uploading each file by hand. The row goes
+    // `failed`; the bytes stay, so fixing the classifier and re-reading rescues it.
+    await failTemplate(id, rejection.reason);
     return (await getTemplate(id)) ?? row;
   }
 

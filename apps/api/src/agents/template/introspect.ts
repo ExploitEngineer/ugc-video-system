@@ -466,13 +466,42 @@ export function buildStructure(
     ignore(k);
   }
 
+  // A slot the main composition never places is not a slot. `resolveWindows`
+  // reaches a layer if and only if the render actually does, so "no window" IS
+  // "never renders" — and an orphan is not a harmless extra row:
+  //
+  //   - the plan LLM writes copy and image subjects for it
+  //   - the Image Agent pays gpt-image-2 for a still nothing will ever show
+  //   - ONE windowless slot flips `planClipSlices` onto its even-split fallback
+  //     for EVERY slot (`slices.ts`), throwing away the real timing we resolved
+  //     for the slots that do render
+  //   - it hides whether the project marks anything as replaceable at all
+  //     (`validateForLibrary`)
+  //
+  // They are common: a finished ad built from a template pack keeps the pack's
+  // demo comps (`PUT YOUR IMAGE TEXT 1`, `PUT YOUR VIDEO`) lying beside the real
+  // work, unplaced and invisible.
+  //
+  // Guarded on a non-empty resolution. An empty `windows` means the resolver
+  // found no main composition and placed NOTHING; dropping every slot on the back
+  // of our own failure is the destructive move this file avoids everywhere else.
+  // Counted in `ignored` so the admin console still shows they were seen.
+  const rendered =
+    windows.size > 0
+      ? slots.filter((slot) => {
+          if (slot.startSec != null) return true;
+          ignore("unreachable");
+          return false;
+        })
+      : slots;
+
   // Group by kind (the editable order), then by WHEN each slot appears. Time
   // order is what the slice planner and the copywriter both read: slice 2 must
   // come from later in the master than slice 1, and the second line of copy must
   // follow the first. Layer-list order is not time order, so sorting on it — as
   // this used to — was luck.
   const order = ["VIDEO", "IMAGE", "AUDIO", "TEXT"];
-  slots.sort(
+  rendered.sort(
     (a, b) =>
       order.indexOf(a.asset) - order.indexOf(b.asset) ||
       (a.startSec ?? Number.POSITIVE_INFINITY) -
@@ -483,7 +512,7 @@ export function buildStructure(
     status: "ready",
     mainComposition: mainName,
     renderCompositions: renderCompositions.length ? renderCompositions : comps.map((c) => c.name),
-    slots,
+    slots: rendered,
     mainCompositionWidth: compW,
     mainCompositionHeight: compH,
     mainCompositionDurationSec: main?.duration ?? null,

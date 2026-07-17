@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { TemplateJobAssetInput } from "../../../providers/template-render.js";
-import { dropAssetsByLayerName, parseMissingLayerName } from "../self-heal.js";
+import {
+  dropAssetsByLayerName,
+  dropImageAssets,
+  isAssetRejectionError,
+  parseMissingLayerName,
+} from "../self-heal.js";
 
 describe("parseMissingLayerName", () => {
   it("extracts the layer name from a real Nexrender missing-layer error", () => {
@@ -54,5 +59,54 @@ describe("dropAssetsByLayerName", () => {
   it("does not mutate the input array", () => {
     dropAssetsByLayerName(assets, "dynamic");
     expect(assets).toHaveLength(4);
+  });
+});
+
+describe("dropImageAssets — what makes injecting stills safe to attempt", () => {
+  const assets: TemplateJobAssetInput[] = [
+    { kind: "media", mediaType: "video", composition: "Main", layerName: "PH_1", src: "clip.mp4" },
+    { kind: "autoscale", composition: "Main", layerName: "PH_1", fit: "fill" },
+    { kind: "media", mediaType: "image", composition: "Main", layerName: "IMG_1", src: "still.png" },
+    { kind: "autoscale", composition: "Main", layerName: "IMG_1", fit: "fill" },
+    { kind: "text", composition: "Main", layerName: "Headline", value: "Hello" },
+  ];
+
+  it("drops the stills and leaves the ad's video and text intact", () => {
+    const out = dropImageAssets(assets);
+    expect(out.filter((a) => a.kind === "media" && a.mediaType === "image")).toHaveLength(0);
+    expect(out.filter((a) => a.kind === "media" && a.mediaType === "video")).toHaveLength(1);
+    expect(out.filter((a) => a.kind === "text")).toHaveLength(1);
+  });
+
+  it("takes the orphaned autoscale with them, but not the video's", () => {
+    // A stale autoscale would rescale whatever placeholder is still in the layer.
+    const out = dropImageAssets(assets);
+    const scaled = out.filter((a) => a.kind === "autoscale").map((a) => a.layerName);
+    expect(scaled).toEqual(["PH_1"]);
+  });
+
+  it("does not mutate the input array", () => {
+    dropImageAssets(assets);
+    expect(assets).toHaveLength(5);
+  });
+});
+
+describe("isAssetRejectionError — Nexrender refusing an asset names no layer", () => {
+  it("recognises the rejection that kept the stills switched off", () => {
+    expect(
+      isAssetRejectionError(
+        "@nexrender/action-encode: assetRedefinition must include src, layerName, and filename",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not claim a missing-layer error, which self-heals by NAME instead", () => {
+    expect(
+      isAssetRejectionError(
+        "Error: nexrender: Couldn't find any layers by provided name (dynamic) inside a composition: *",
+      ),
+    ).toBe(false);
+    expect(isAssetRejectionError(undefined)).toBe(false);
+    expect(isAssetRejectionError("")).toBe(false);
   });
 });

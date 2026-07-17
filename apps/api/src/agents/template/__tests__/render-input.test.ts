@@ -299,6 +299,32 @@ describe("buildRenderInput — the voiceover", () => {
     });
   });
 
+  it("refuses an audio layer it can only address by index", () => {
+    // Index targeting is fine for footage, but the encode action rejects an audio
+    // asset carrying no layerName and kills the WHOLE render:
+    //   "@nexrender/action-encode: assetRedefinition must include src, layerName,
+    //    and filename"
+    // Every template that ever rendered here happened to have no audio slot, so a
+    // template with seven unnamed ones was the first to hit it. Emit nothing and
+    // let the voiceover be muxed over the render instead.
+    const indexed = [
+      slot({ asset: "VIDEO", jobLayerName: "clip.mp4" }),
+      slot({
+        asset: "AUDIO",
+        jobLayerName: "TING SOUND EFFECT.mp3",
+        targetBy: "index",
+        layerIndex: 16,
+      }),
+    ];
+    const input = build(template(indexed), {
+      audioUrl: "https://cdn/vo.m4a",
+      audioLayerName: "TING SOUND EFFECT.mp3",
+    });
+    expect(
+      input.assets.find((a) => a.kind === "media" && a.mediaType === "audio"),
+    ).toBeUndefined();
+  });
+
   it("never autoscales an audio layer — it has no dimensions", () => {
     const input = build(template(withAudio), {
       audioUrl: "https://cdn/vo.m4a",
@@ -337,7 +363,7 @@ describe("buildRenderJobBody — the new function assets reach Nexrender intact"
     if (!("assets" in body)) throw new Error("expected a deliverable job");
 
     expect(body.assets).toEqual([
-      { type: "video", composition: "main", layerName: "clip.mp4", src: CLIP },
+      { type: "video", composition: "main", layerName: "clip.mp4", name: "clip.mp4", src: CLIP },
       {
         type: "function",
         name: "nx:layer-autoscale",
@@ -360,6 +386,7 @@ describe("buildRenderJobBody — the new function assets reach Nexrender intact"
       type: "audio",
       composition: "main",
       layerName: "vo.mp3",
+      name: "vo.m4a",
       src: "https://cdn/vo.m4a",
     });
   });
@@ -382,6 +409,7 @@ describe("buildRenderJobBody — the new function assets reach Nexrender intact"
       type: "image",
       composition: "main",
       layerName: "hero.jpg",
+      name: "hero.png",
       src: "https://cdn/hero.png",
     });
   });

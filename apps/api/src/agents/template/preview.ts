@@ -19,18 +19,22 @@
 // less. That makes this stage a genuine validation gate, not just cosmetics.
 
 import { env } from "../../config/index.js";
+import { unprocessable } from "../../lib/errors.js";
 import { isTransientNetworkError } from "../../lib/http.js";
 import { createLogger } from "../../lib/log.js";
 import { uploadTemplateObject } from "../../lib/storage.js";
-import { extractPoster } from "../../lib/video/merge.js";
+import { extractPoster, probeVideoDuration } from "../../lib/video/merge.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
+import { isStubTemplateId } from "../../providers/nexrender/index.js";
 import type { TemplateRenderProvider } from "../../providers/template-render.js";
 import {
   failTemplate,
   getTemplate,
+  parseMetadata,
   parseStructure,
   setTemplate,
   type TemplateRow,
+  validateMeasuredDuration,
 } from "./library.js";
 
 const log = createLogger("template-preview");
@@ -171,16 +175,77 @@ export async function previewTemplate(
     });
   }
 
+  // MEASURE the template's real length off this clip. It is the same composition
+  // rendered with no assets, so its length IS the template's length, by definition —
+  // whereas the composition's `duration` property is arbitrary (After Effects
+  // renders the WORK AREA, and Nexrender exposes no work-area field). Believing the
+  // property made a 21s ad generate a 36s master.
+  //
+  // Best-effort: a template is never failed over a probe that could not run — the
+  // composition's number stays as the (poor) fallback.
+  let measured: number | null = null;
+  if (isStubTemplateId(row.nexrenderTemplateId)) {
+    // The stub hands back a canned 2s clip; measuring it would reject every
+    // template in the free smoke-test path for being under MIN_TEMPLATE_SEC.
+    // Checked per-ROW, not per-env: a stub-registered row always carries the
+    // prefix, even if this process now holds real credentials.
+    log.info("stub preview — keeping the composition's duration", { id });
+  } else {
+    try {
+      measured = await probeVideoDuration(result.videoUrl);
+    } catch (err) {
+      log.warn("preview duration probe failed (non-fatal)", {
+        id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const prior = parseMetadata(row.metadata);
+  if (measured != null) {
+    const rejection = validateMeasuredDuration(measured);
+    if (rejection) {
+      // Deliberately NOT `discardRemoteTemplate`, unlike the introspection gate:
+      // this is OUR measurement, and a regression in it must never wipe a user's
+      // upload. The row fails; the bytes stay.
+      await failTemplate(id, rejection);
+      return (await getTemplate(id)) ?? row;
+    }
+    log.info("preview measured", {
+      id,
+      measured,
+      comp: prior?.durationSec ?? null,
+      drift: (measured - (prior?.durationSec ?? 0)).toFixed(2),
+    });
+  }
+
+  const metadata = prior
+    ? measured != null
+      ? {
+          ...prior,
+          durationSec: measured,
+          measuredDurationSec: measured,
+          durationSource: "measured" as const,
+        }
+      : { ...prior, durationSource: "composition" as const }
+    : null;
+
   await setTemplate(id, {
     previewVideoUrl: result.videoUrl,
     previewVideoPath: null, // not re-hosted — the URL is Nexrender's own (expires ~14d)
     previewPosterUrl: poster?.url ?? null,
     previewPosterPath: poster?.storagePath ?? null,
     previewSource: "auto",
+    ...(metadata ? { metadata } : {}),
     error: null,
     status: "ready",
   });
-  log.info("✓ preview ready", { id, hasPoster: Boolean(poster) });
+  log.info("✓ preview ready", {
+    id,
+    hasPoster: Boolean(poster),
+    durationSec: metadata?.durationSec ?? null,
+    source: metadata?.durationSource ?? "unknown",
+  });
   return (await getTemplate(id)) ?? row;
 }
 
@@ -191,6 +256,65 @@ export async function previewTemplate(
  * Lorem Ipsum: the auto-render is faithful but ugly, so let the admin drop in
  * the designer's own demo video. Skips Nexrender entirely.
  */
+/**
+ * Re-measure an EXISTING preview and correct the template's recorded length.
+ *
+ * The backfill for templates registered before the length was measured: their
+ * `durationSec` is the composition's `duration` property, which is arbitrary (one
+ * real template reports 30.97s and renders 21.0s), so their runs over-generate
+ * footage and slice it from the wrong seconds.
+ *
+ * Costs nothing when the preview is still on Nexrender's CDN (~14d retention) —
+ * it just re-reads the clip. Once it has expired, `DELETE /:id/preview` regenerates
+ * one and the normal path measures it.
+ */
+export async function remeasureTemplate(id: string): Promise<TemplateRow> {
+  const row = await getTemplate(id);
+  if (!row) throw new Error(`remeasure: template ${id} not found`);
+  if (!row.previewVideoUrl) {
+    throw unprocessable(
+      "This template has no preview to measure. Regenerate the preview first (DELETE /admin/templates/:id/preview).",
+    );
+  }
+  if (row.previewSource !== "auto") {
+    // An admin-supplied demo clip's length has nothing to do with the composition.
+    throw unprocessable(
+      "This template's preview is an admin override, so its length is not the template's. Regenerate the auto preview to measure it.",
+    );
+  }
+  if (row.nexrenderTemplateId && isStubTemplateId(row.nexrenderTemplateId)) {
+    throw unprocessable("This is a stub template; its canned preview is not measurable.");
+  }
+
+  const measured = await probeVideoDuration(row.previewVideoUrl);
+  if (measured == null) {
+    throw unprocessable(
+      "Could not read the preview's duration — it may have expired. Regenerate the preview (DELETE /admin/templates/:id/preview).",
+    );
+  }
+  const rejection = validateMeasuredDuration(measured);
+  if (rejection) throw unprocessable(rejection);
+
+  const prior = parseMetadata(row.metadata);
+  if (!prior) throw unprocessable("This template has no readable metadata to correct.");
+
+  log.info("remeasured", {
+    id,
+    measured,
+    was: prior.durationSec,
+    drift: (measured - (prior.durationSec ?? 0)).toFixed(2),
+  });
+  await setTemplate(id, {
+    metadata: {
+      ...prior,
+      durationSec: measured,
+      measuredDurationSec: measured,
+      durationSource: "measured",
+    },
+  });
+  return (await getTemplate(id)) ?? row;
+}
+
 export async function setPreviewOverride(
   id: string,
   bytes: Uint8Array,
@@ -198,6 +322,11 @@ export async function setPreviewOverride(
 ): Promise<TemplateRow> {
   const row = await getTemplate(id);
   if (!row) throw new Error(`preview override: template ${id} not found`);
+
+  // Deliberately does NOT measure this clip's duration, unlike `previewTemplate`.
+  // This is a hand-picked demo video whose length has nothing to do with the
+  // composition's — writing it into `metadata.durationSec` would make every beat,
+  // segment and slice downstream follow a fiction.
 
   const video = await uploadTemplateObject({
     templateId: id,

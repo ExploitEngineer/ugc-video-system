@@ -133,11 +133,30 @@ describe("planClipSlices — no timeline (older snapshots)", () => {
     ]);
   });
 
-  it("falls back for the whole template when ANY slot lacks a window", () => {
-    // A half-resolved timeline is not a timeline: mixing absolute starts with
-    // guessed ones would stack two slices on the same second.
-    const plan = planClipSlices([at("a", 0, 2), untimed("b", 2)]);
-    expect(plan.map((p) => p.startSec)).toEqual([0, 2]);
+  it("does NOT punish the slots that DO know their window", () => {
+    // This used to fall back for the WHOLE template on a single windowless slot,
+    // throwing away real timing to protect against stacking two slices on one
+    // second. The cost was absurdly lopsided: a 40-slot template with one unplaced
+    // layer had all 40 slices cut wrong. `a` plays at master second 10, and that
+    // is the one fact here we actually know.
+    const plan = planClipSlices([at("a", 10, 2), untimed("b", 2)]);
+    expect(plan).toEqual([
+      { jobLayerName: "a", startSec: 10, durationSec: 2 },
+      // The unknown one follows it, so the take stays continuous.
+      { jobLayerName: "b", startSec: 12, durationSec: 2 },
+    ]);
+  });
+
+  it("cannot stack a guessed start onto a known one", () => {
+    // The stacking the old all-or-nothing guarded against cannot arise: an untimed
+    // slot sorts LAST (`startSec ?? Infinity` in `buildStructure`), so the cursor
+    // has already passed every real window by the time one is placed.
+    const plan = planClipSlices([at("a", 0, 2), at("b", 2, 3), untimed("c", 2)]);
+    expect(plan.map((p) => p.startSec)).toEqual([0, 2, 5]);
+    for (const [i, p] of plan.entries()) {
+      const prev = plan[i - 1];
+      if (prev) expect(p.startSec).toBeGreaterThanOrEqual(prev.startSec + prev.durationSec - 1e-6);
+    }
   });
 });
 

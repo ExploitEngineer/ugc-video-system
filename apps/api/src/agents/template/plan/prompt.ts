@@ -42,6 +42,12 @@ export interface TemplateBlueprintPromptInput {
   hasPoster: boolean;
   /** Seconds each sampled frame was taken at, in attach order (after the poster). */
   frameTimestampsSec: number[];
+  /**
+   * The whole preview CLIP is attached (Gemini video-vision), not stills. Changes
+   * the intro to "you are watching the clip" and drops the frame legend — the
+   * model sees real timestamps, so it never needs a still-to-second mapping.
+   */
+  videoMode?: boolean;
   /** Ground-truth `#rrggbb` swatches sampled from the preview poster (may be empty). */
   palette?: string[];
 }
@@ -104,14 +110,20 @@ export function buildTemplateBlueprintPrompt(
   const hasText = input.slots.some((s) => s.asset === "TEXT");
   const hasFrames = input.hasPoster || input.frameTimestampsSec.length > 0;
 
+  // What the model is looking at, in order of fidelity: the whole clip (Gemini),
+  // sampled stills (Claude), or nothing (text-only degrade).
+  const visualIntro = input.videoMode
+    ? "You are WATCHING the actual rendered template clip end to end (with audio).\nREAD THE LOOK — palette, lighting, mood, pacing, camera and graphic motion — and\nread EXACTLY WHAT HAPPENS at each timestamp: real motion and pacing, observed not\ninferred. The clip shows the template's OWN placeholder content, so read its STYLE\nand timing, and never copy the placeholder's subject."
+    : hasFrames
+      ? "You are shown VISUAL FRAMES of the template playing its OWN placeholder\ncontent. READ THE LOOK from them — palette, lighting, mood, pacing, camera and\ngraphic motion — and READ WHAT HAPPENS at each second. The frames show the\ntemplate's STYLE, not this ad's subject: never copy the placeholder's subject."
+      : "No preview frames are available, so reason about the look from the slot\ninventory and the brief alone.";
+
   const system = [
     "You are analyzing a designer's finished After Effects template to produce a",
     "production BLUEPRINT for ONE specific ad. The template has slots: video slots",
     "the ad clip fills, image slots for stills, and text slots for on-screen copy.",
     "",
-    hasFrames
-      ? "You are shown VISUAL FRAMES of the template playing its OWN placeholder\ncontent. READ THE LOOK from them — palette, lighting, mood, pacing, camera and\ngraphic motion — and READ WHAT HAPPENS at each second. The frames show the\ntemplate's STYLE, not this ad's subject: never copy the placeholder's subject."
-      : "No preview frames are available, so reason about the look from the slot\ninventory and the brief alone.",
+    visualIntro,
     "",
     "Decide, for each slot, what it should contain — so the clip, the stills and the",
     "copy all describe the SAME ad. Be concrete and specific to THIS product.",

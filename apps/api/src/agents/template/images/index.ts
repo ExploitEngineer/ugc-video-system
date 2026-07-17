@@ -172,10 +172,15 @@ export async function generateTemplateImages(ctx: SkillContext): Promise<void> {
         refs: productRef,
         size,
         quality: "high",
+        // PNG, NOT the pipeline-wide WebP default. These bytes are imported by
+        // After Effects, which cannot read WebP without a third-party plugin —
+        // and the template spec bans those. The sheets can stay WebP: Seedance
+        // reads those, and the size saving is real there.
+        outputFormat: "png",
       });
       // Same tonal correction the reference sheets get — this pipeline's stills
-      // otherwise drift warm/red.
-      const bytes = await neutralizeCast(raw);
+      // otherwise drift warm/red. Must re-encode to PNG for the same reason.
+      const bytes = await neutralizeCast(raw, { format: "png" });
 
       await persistAsset({
         runId,

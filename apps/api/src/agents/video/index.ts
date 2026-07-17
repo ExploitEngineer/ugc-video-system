@@ -7,6 +7,7 @@ import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
+import { downloadToBuffer } from "../../lib/download.js";
 import { createLogger } from "../../lib/log.js";
 import {
   cleanStoryboardRefUrl,
@@ -95,15 +96,6 @@ export interface VideoBuilderInput {
 }
 
 const DEFAULT_DURATION_SEC = 15;
-
-/**
- * Hard ceiling for downloading the finished mp4 from the provider CDN. The
- * clip is small (~a few MB at 1080p/15s), so 120s is generous — its job is to
- * turn a SILENTLY-stalled connection (opens, then never sends bytes) into a
- * clean abort→retry→error instead of an eternal spinner, since the fetch/body
- * read otherwise has no timeout.
- */
-const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
 
 type Video = typeof schema.videos.$inferSelect;
 
@@ -482,40 +474,14 @@ export async function videoBuilder(
           durationSec,
         });
 
-        // 4. Download the mp4. Pass any auth headers the provider supplied
-        // (Seedance's video_url is directly fetchable, so this is usually
-        // empty). A single AbortController per attempt bounds BOTH the fetch AND
-        // the body read (arrayBuffer) — otherwise a connection that opens then
-        // never sends hangs the run forever with no error. Retry transient blips
-        // so a flaky download doesn't waste the already-generated (paid) clip.
+        // 4. Stream the mp4 to disk, bounded by a STALL (idle) timeout — never a
+        // total-duration cap, so a healthy large clip download is never aborted
+        // mid-transfer. Passes any provider auth headers; retries internally.
         log.info("downloading video", { taskId: task.taskId });
-        let lastErr = "";
-        for (let dl = 1; dl <= 3; dl++) {
-          const ac = new AbortController();
-          const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
-          try {
-            const res = await fetch(result.videoUrl, {
-              headers: result.downloadHeaders,
-              signal: ac.signal,
-            });
-            if (!res.ok) throw new Error(`status ${res.status}`);
-            bytes = new Uint8Array(await res.arrayBuffer());
-            break;
-          } catch (err) {
-            const cause = (
-              err as { cause?: { code?: string; message?: string } }
-            ).cause;
-            lastErr =
-              (err as Error)?.name === "AbortError"
-                ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
-                : (cause?.code ?? cause?.message ?? (err as Error).message);
-            log.warn("video download retry", { dl, err: lastErr });
-            if (dl < 3) await sleep(800 * dl);
-          } finally {
-            clearTimeout(timer);
-          }
-        }
-        if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
+        bytes = await downloadToBuffer(result.videoUrl, {
+          label: "seedance-clip-download",
+          ...(result.downloadHeaders ? { headers: result.downloadHeaders } : {}),
+        });
         log.info("✓ video downloaded", {
           taskId: task.taskId,
           bytes: bytes.length,

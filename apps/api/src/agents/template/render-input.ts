@@ -146,14 +146,19 @@ export function buildRenderInput(
         // Only the layer `clips.ts` routed the voiceover to. Any other audio
         // layer keeps the template's own track (its music bed, typically).
         if (!parts.audioUrl || slot.jobLayerName !== parts.audioLayerName) break;
+        // An audio asset MUST carry a layerName. Index targeting is fine for
+        // footage but the encode action rejects an unaddressed audio asset and
+        // fails the whole render ("assetRedefinition must include src, layerName,
+        // and filename"). `clips.ts` already declines to route the voiceover to an
+        // unnamed layer, so this is a backstop: it must never be reachable, and if
+        // it ever is, the voiceover falls back to the mux instead of costing a
+        // render.
+        if (slot.targetBy === "index") break;
         assets.push({
           kind: "media",
           mediaType: "audio",
           composition: slot.composition,
           layerName: slot.jobLayerName,
-          ...(slot.targetBy === "index" && slot.layerIndex != null
-            ? { layerIndex: slot.layerIndex }
-            : {}),
           src: parts.audioUrl,
         });
         // Deliberately no autoscale: an audio layer has no dimensions.

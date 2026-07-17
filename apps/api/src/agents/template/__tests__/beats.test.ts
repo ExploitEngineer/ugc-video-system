@@ -128,7 +128,11 @@ describe("beatsToScenes", () => {
     scene,
   });
 
-  const sbScene = (i: number, transcript: string): StoryboardScene => ({
+  const sbScene = (
+    i: number,
+    transcript: string,
+    speaker?: StoryboardScene["speaker"],
+  ): StoryboardScene => ({
     index: i,
     cameraAngle: `angle ${i}`,
     actionMovement: "",
@@ -136,6 +140,7 @@ describe("beatsToScenes", () => {
     panelCaption: "",
     transcript,
     adStyle: "warm",
+    ...(speaker ? { speaker } : {}),
   });
 
   it("uses the beat scene as the description and borrows the transcript by midpoint", () => {
@@ -161,5 +166,26 @@ describe("beatsToScenes", () => {
       sceneDescription: "solo beat",
       transcript: "",
     });
+  });
+
+  it("a borrowed transcript keeps its speaker", () => {
+    // The line and its owner must travel TOGETHER. If the speaker is dropped here
+    // the line is re-orphaned and every multi-video-slot template (the common
+    // case) silently loses per-line voicing — with no error anywhere.
+    const woman = { id: "A", role: "the woman", voice: "warm woman in her 20s" };
+    const man = { id: "B", role: "the man", voice: "calm man in his 30s" };
+    const scenes = beatsToScenes(
+      [beat(0, 2, "beat one"), beat(8, 7, "beat two")],
+      [sbScene(0, "line A", woman), sbScene(1, "line B", man)],
+    );
+    expect(scenes[0]?.speaker).toEqual(woman);
+    expect(scenes[1]?.speaker).toEqual(man);
+  });
+
+  it("omits the speaker key entirely for a scene that has none", () => {
+    // Legacy rows (written before speakers existed) must stay byte-identical in
+    // jsonb, so the key is ABSENT rather than an explicit undefined.
+    const scenes = beatsToScenes([beat(0, 5, "solo")], [sbScene(0, "line")]);
+    expect("speaker" in (scenes[0] as object)).toBe(false);
   });
 });

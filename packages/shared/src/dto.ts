@@ -187,6 +187,19 @@ export type Run = z.infer<typeof runSchema>;
  * condensed form of `sceneDescription`); optional for rows created before
  * labelled storyboards landed.
  */
+/**
+ * Who speaks a scene's `transcript`, and in what voice. `role` doubles as the
+ * per-line key the video prompt uses ("the woman"); `voice` is one frozen
+ * descriptor, reused verbatim across a merged ad's segments so a character's
+ * voice cannot drift between them.
+ */
+export const speakerSchema = z.object({
+  id: z.string().catch(""),
+  role: z.string().catch(""),
+  voice: z.string().catch(""),
+});
+export type Speaker = z.infer<typeof speakerSchema>;
+
 export const sceneSchema = z.object({
   // Field-level `.catch` keeps a single missing/malformed field (e.g. legacy
   // rows with no `transcript`) from failing the whole `scenes` array and
@@ -198,6 +211,12 @@ export const sceneSchema = z.object({
   panelCaption: z.string().optional(),
   transcript: z.string().catch(""),
   adStyle: z.string().catch(""),
+  // BOTH modifiers are load-bearing. `.optional()` — every row written before
+  // speaker identity existed has no speaker, and `parseScenes` returns null for
+  // the WHOLE array on any parse failure, so requiring it would blank the script
+  // panel of every past run. `.catch(undefined)` — a malformed speaker degrades
+  // this one field instead of nulling the array with it.
+  speaker: speakerSchema.optional().catch(undefined),
 });
 export type Scene = z.infer<typeof sceneSchema>;
 
@@ -509,8 +528,26 @@ export type SlotCounts = z.infer<typeof slotCountsSchema>;
  * rest of the timeline — nothing is ever trimmed to fit the footage.
  */
 export const templateMetadataSchema = z.object({
-  /** Main composition duration in seconds, from the v3 compositions response. */
+  /**
+   * The template's REAL length — how long the rendered ad actually runs. This is
+   * the one number every step reads (beats, segments, slices, the crop).
+   *
+   * NOT simply the composition's `duration` property. After Effects renders a
+   * comp's WORK AREA, and the v3 compositions response has no work-area field, so
+   * `duration` is arbitrary: one real template's `Main_Comp` reports 30.97s and
+   * renders 21.0s, while sibling comps in the same file claim 3600s and 90.97s.
+   * Believing it generated a 36s master for a 21s ad — ~40% of the video spend
+   * discarded, and every slice cut from the wrong second.
+   *
+   * So it is MEASURED off the template's own preview render (which is that same
+   * composition rendered with no assets, i.e. the template's own output), falling
+   * back to the composition's number when no measurement exists.
+   */
   durationSec: z.number().nullable().default(null),
+  /** The measured value, when we have one — provenance for `durationSec`. */
+  measuredDurationSec: z.number().nullable().optional(),
+  /** Where `durationSec` came from. Absent on rows predating the measurement. */
+  durationSource: z.enum(["measured", "composition"]).optional(),
   frameRate: z.number().nullable().default(null),
   width: z.number().nullable().default(null),
   height: z.number().nullable().default(null),

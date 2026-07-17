@@ -30,6 +30,7 @@ import {
   cleanStoryboardRefUrl,
   providerSafeRefUrl,
 } from "../../../lib/provider-refs.js";
+import { downloadToBuffer } from "../../../lib/download.js";
 import { mergeSegmentUrls } from "../../../lib/video/merge.js";
 import { classifyRunError, runFailureWithCode } from "../../../lib/run-failure.js";
 import {
@@ -45,10 +46,11 @@ import { stableSeed } from "../../video/index.js";
 import { targetSizeFor } from "../../merge/index.js";
 import { planFootageSegments, templateTotalSeconds } from "../geometry.js";
 import { beatsToScenes, deriveTemplateBeats } from "../beats.js";
-import { KEYFRAME_PANELS } from "../keyframe/prompt.js";
 import {
   buildDeterministicTemplateVideoPrompt,
   buildTemplateVideoPrompt,
+  buildVoiceBlock,
+  castOf,
   TEMPLATE_VIDEO_NEGATIVES,
   type TemplateVideoPromptInput,
   type TemplateVideoScene,
@@ -57,9 +59,6 @@ import {
 type Video = typeof schema.videos.$inferSelect;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Hard ceiling for downloading the finished mp4 (bounds both fetch + body read). */
-const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
 
 /** At most this many submit → poll → download attempts per segment before giving up. */
 const MAX_ATTEMPTS = 2;
@@ -95,6 +94,7 @@ function toPromptScenes(scenes: StoryboardScene[]): TemplateVideoScene[] {
     sceneDescription: s.sceneDescription?.trim() || s.actionMovement?.trim() || "",
     transcript: s.transcript?.trim() ?? "",
     cameraAction: s.cameraAngle?.trim() || "",
+    ...(s.speaker ? { speaker: s.speaker } : {}),
   }));
 }
 
@@ -235,34 +235,12 @@ async function generateClip(
       }
       log.info("✓ task ready - downloading", { label, taskId });
 
-      // Download the mp4. One AbortController per attempt bounds both the fetch and
-      // the body read; retry transient blips so a flaky download doesn't waste the
-      // already-generated (paid) clip.
-      let bytes: Uint8Array | undefined;
-      let lastErr = "";
-      for (let dl = 1; dl <= 3; dl++) {
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
-        try {
-          const res = await fetch(result.videoUrl, {
-            headers: result.downloadHeaders,
-            signal: ac.signal,
-          });
-          if (!res.ok) throw new Error(`status ${res.status}`);
-          bytes = new Uint8Array(await res.arrayBuffer());
-          break;
-        } catch (err) {
-          lastErr =
-            (err as Error)?.name === "AbortError"
-              ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
-              : (err as Error).message;
-          log.warn("video download retry", { label, dl, err: lastErr });
-          if (dl < 3) await sleep(800 * dl);
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-      if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
+      // Stream the mp4 to disk with a STALL (idle) timeout — never a total-duration
+      // cap, so a healthy large clip download is never aborted mid-transfer.
+      const bytes = await downloadToBuffer(result.videoUrl, {
+        label: `seedance-${label}`,
+        ...(result.downloadHeaders ? { headers: result.downloadHeaders } : {}),
+      });
       log.info("✓ video downloaded", { label, taskId, bytes: bytes.length });
       return { bytes, hasAudio: result.hasAudio ?? true, taskId };
     } catch (attemptErr) {
@@ -315,7 +293,7 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
   await writeStepEvent({ runId, step, status: "started" });
 
   try {
-    // 3. Load references ONCE (shared by every segment): the clean 4-panel look
+    // 3. Load references ONCE (shared by every segment): the clean N-panel look
     // board, the product sheet, and the person face when the ad has a person.
     const sheet = await latestStoryboardSheet(runId);
     const productSheet = await latestProductSheet(runId);
@@ -323,9 +301,12 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
     const personRef = await resolvePersonRef(runId, personUpload);
     const hasPerson = Boolean(ctx.hasPerson) || Boolean(personRef);
     const sheetScenes = (sheet?.scenes as StoryboardScene[] | null | undefined) ?? [];
+    // The sheet's panel count = its persisted scene count (duration-derived at the
+    // keyframe step); `panelGrid(sheetPanels)` reproduces the same grid at clean time.
+    const sheetPanels = sheetScenes.length || 4;
 
     // 4. Derive the beats from the template's OWN video-slot timeline over the FULL
-    // footage length, mapped onto the four-scene arc so each slot shows its own
+    // footage length, mapped onto the N-scene arc so each slot shows its own
     // moment while the voiceover reads front-to-back.
     const derived = plan ? deriveTemplateBeats(tpl, plan, masterSec) : undefined;
     let all: Beats;
@@ -361,11 +342,12 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
       : [];
     const personReferences: string[] = [];
     if (sheet?.assetUrl) {
-      // The keyframe sheet is a FIXED 4-panel 2×2 board — clean-crop its number
-      // badges + caption bars off before Seedance (the template composites the real
-      // graphics itself), then feed the 4 clean keyframes as the shot/look guide.
+      // The keyframe sheet is an N-panel board (N = duration-derived, matches the
+      // persisted scene count) — clean-crop its number badges + caption bars off
+      // before Seedance (the template composites the real graphics itself), then
+      // feed the N clean keyframes as the shot/look guide.
       personReferences.push(
-        await cleanStoryboardRefUrl(sheet.assetUrl, runId, log, KEYFRAME_PANELS),
+        await cleanStoryboardRefUrl(sheet.assetUrl, runId, log, sheetPanels),
       );
     }
     if (hasPerson && personRef?.source) {
@@ -397,6 +379,19 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
     const rolesText = roles.length ? `${roles.join(". ")}. ` : "";
     const refs: RefBundle = { referenceImages, personReferences, rolesText };
 
+    // WHO speaks, and how they sound — resolved ONCE from the FULL beat list and
+    // reused unchanged by every segment, so a merged multi-segment ad keeps one
+    // voice per character instead of re-rolling it each clip. Derived from
+    // `all.scenes` (post-`beatsToScenes`) so only speakers that survived onto a
+    // real beat earn a voice. Sits beside `rolesText` because both are frozen
+    // legends: deterministic, never rewritten by the LLM.
+    const cast = castOf(all.scenes);
+    const voiceText = buildVoiceBlock(cast);
+    log.info("▶ cast resolved", {
+      speakers: cast.length,
+      voices: cast.map((c) => `${c.role}=${c.voice}`).join(" | ") || "none",
+    });
+
     /** Compose one segment's final Seedance prompt from its local beats. */
     const promptFor = async (
       segBeats: Beats,
@@ -414,9 +409,17 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
         characterAnchor: ctx.personBrief || undefined,
         scenes: segBeats.scenes,
         slotWindows: segBeats.slotWindows,
+        ...(cast.length ? { cast } : {}),
       };
       const body = await composeVideoBody(ctx, input, log);
-      return { prompt: `${rolesText}${body}\n\n${TEMPLATE_VIDEO_NEGATIVES}`, body };
+      // `voiceText` joins `rolesText` in the deterministic PREFIX — the LLM never
+      // sees or rewrites either, so both are byte-identical across segments. It
+      // also lands before any quoted line, which is the order Seedance expects a
+      // voice to be declared in.
+      return {
+        prompt: `${rolesText}${voiceText}${body}\n\n${TEMPLATE_VIDEO_NEGATIVES}`,
+        body,
+      };
     };
 
     // 6a. SINGLE clip (≤15s template): generate + persist the master directly.

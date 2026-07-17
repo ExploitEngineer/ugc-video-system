@@ -13,9 +13,9 @@ import { and, eq } from "drizzle-orm";
 import { runTemplateSchema, type TemplateTextFillEntry } from "@ugc/shared";
 import { db, schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
-import { fetchWithRetry } from "../../lib/http.js";
+import { downloadToBuffer, remoteContentLength } from "../../lib/download.js";
 import { createLogger } from "../../lib/log.js";
-import { classifyRunError, RunFailure } from "../../lib/run-failure.js";
+import { RunFailure, runFailureWithCode } from "../../lib/run-failure.js";
 import { capVideoDuration, muxVoiceover } from "../../lib/video/merge.js";
 import { createTemplateRenderProvider } from "../../providers/index.js";
 import type {
@@ -24,13 +24,23 @@ import type {
 } from "../../providers/template-render.js";
 import { latestFinalVideoUrl } from "../creative-direction/inputs.js";
 import { writeStepEvent } from "../events.js";
-import { persistAsset, persistSheet } from "../persist.js";
+import {
+  persistAsset,
+  persistSheet,
+  persistSheetFromUrl,
+  type PersistSheetResult,
+} from "../persist.js";
 import type { SkillContext } from "../types.js";
 import { prepareTemplateClips } from "./clips.js";
 import { fillTemplateText } from "./fill-text/index.js";
 import { templateTotalSeconds } from "./geometry.js";
 import { buildTemplateKeyframe } from "./keyframe/index.js";
-import { dropAssetsByLayerName, parseMissingLayerName } from "./self-heal.js";
+import {
+  dropAssetsByLayerName,
+  dropImageAssets,
+  isAssetRejectionError,
+  parseMissingLayerName,
+} from "./self-heal.js";
 import { generateTemplateImages } from "./images/index.js";
 import { planTemplate } from "./plan/index.js";
 import { buildRenderInput } from "./render-input.js";
@@ -94,7 +104,24 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
     }
 
     const template = runTemplateSchema.parse(run.template);
-    const imageUrls = await generatedImageUrls(runId);
+    // `image` assets had never once survived a job — Nexrender rejected them with
+    // "assetRedefinition must include src, layerName, and filename", and one bad
+    // asset aborts the WHOLE render, so they were switched off wholesale and every
+    // generated still was paid for and thrown away. Two things were wrong with
+    // them, and both are fixed upstream of here: they were WebP, which After
+    // Effects cannot import at all, and an index-targeted one carried neither a
+    // layerName nor a filename to satisfy the rejection.
+    //
+    // If they are refused anyway, the render loop below drops them and re-renders,
+    // so a still that cannot be injected costs its slot's artwork, never the ad.
+    const imageUrls = env.TEMPLATE_RENDER_INJECT_IMAGES
+      ? await generatedImageUrls(runId)
+      : new Map<string, string>();
+    if (!env.TEMPLATE_RENDER_INJECT_IMAGES) {
+      log.warn(
+        "image assets are NOT injected (TEMPLATE_RENDER_INJECT_IMAGES=false) — those slots keep the template's own artwork",
+      );
+    }
     // Cut the 15s master into a slice per video slot, and pull out its voiceover.
     // Idempotent: a rewind into this step reuses the slices already cut rather
     // than paying for ffmpeg twice.
@@ -163,6 +190,28 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
       if (result.state === "completed") break;
 
       if (result.state === "failed") {
+        // Nexrender refused an asset rather than failing to find a layer. It names
+        // no layer, so there is nothing targeted to drop — but the stills are the
+        // only assets whose contract is unproven, and losing them costs artwork
+        // rather than the ad. Try again without them before giving up.
+        const rejectedAssets =
+          isAssetRejectionError(result.error) &&
+          attempt < MAX_TEMPLATE_RENDER_ATTEMPTS &&
+          assets.some((a) => a.kind === "media" && a.mediaType === "image");
+        if (rejectedAssets) {
+          const before = assets.length;
+          assets = dropImageAssets(assets);
+          log.warn(
+            "↻ Nexrender rejected an asset — retrying without the generated stills; those slots keep the template's artwork",
+            { jobId: task.jobId, dropped: before - assets.length, attempt, error: result.error },
+          );
+          await db
+            .update(schema.runs)
+            .set({ nexrenderJobId: null })
+            .where(eq(schema.runs.id, runId));
+          continue;
+        }
+
         const missing = parseMissingLayerName(result.error);
         const droppable =
           missing != null &&
@@ -212,97 +261,156 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
     }
 
     // The template has no audio layer to inject the speech into — the common
-    // case, most .aep projects have none — so lay it over the finished render.
-    // `-shortest` trims the 15s track to the composition's own runtime.
-    const muxed = !audioLayerName && audioUrl;
+    // case, most .aep projects have none — so we lay the voiceover over the
+    // finished render. `-shortest` trims the track to the composition's runtime.
+    const wouldMux = !audioLayerName && audioUrl;
 
-    // Download the Nexrender output and re-host to Supabase — the Cloud URL
-    // expires (~14d), so persist our own copy immediately.
-    let bytes: Uint8Array;
-    if (muxed) {
-      log.info("▶ muxing the voiceover over the render", { jobId: task.jobId });
-      bytes = (await muxVoiceover(result.videoUrl, audioUrl)).bytes;
-    } else {
-      log.info("▶ downloading render output", { jobId: task.jobId });
-      const res = await fetchWithRetry(result.videoUrl, undefined, {
-        label: "template-render-download",
+    // Supabase Storage caps a single upload (~50MB by default). Rather than fail
+    // the run on a big render, keep the Nexrender URL directly (it serves the
+    // composite; it expires ~14d, and with no audio layer it has no voiceover
+    // since we don't re-host a muxed copy). Peek at the size via HEAD FIRST so an
+    // oversized render skips the download + mux + upload entirely.
+    const uploadCap = env.STORAGE_UPLOAD_MAX_BYTES;
+    const remoteSize = await remoteContentLength(result.videoUrl);
+
+    // Persist the render as an EXTERNAL asset — the Nexrender URL, no upload.
+    const persistExternal = (): Promise<PersistSheetResult<Video>> =>
+      persistSheetFromUrl<Video>({
+        runId,
+        kind: "templated_video",
+        url: result.videoUrl as string,
+        mime: "video/mp4",
+        meta: { source: "nexrender", nexrenderTemplateId, oversized: true },
+        artifactInsert: async (tx, assetId) => {
+          const [row] = await tx
+            .insert(schema.videos)
+            .values({
+              runId,
+              assetId,
+              segmentIndex: null,
+              // Only the render's own audio (an audio layer, if any) — no muxed
+              // voiceover, since we didn't download / re-host it.
+              hasAudio: Boolean(audioLayerName),
+              providerMeta: {
+                provider: "nexrender",
+                nexrenderTemplateId,
+                nexrenderJobId: task.jobId,
+                composition,
+                voiceover: audioLayerName ? "audio-layer" : "none",
+                external: true,
+                oversized: true,
+                ...(skippedLayers.length > 0
+                  ? { skippedLayers: skippedLayers.join(", ") }
+                  : {}),
+              },
+              status: "completed",
+            })
+            .returning();
+          return row;
+        },
       });
-      if (!res.ok) {
-        throw new Error(
-          `template_render: download failed ${res.status} for job ${task.jobId}`,
-        );
+
+    let persisted: PersistSheetResult<Video>;
+    if (remoteSize != null && remoteSize > uploadCap) {
+      log.warn(
+        "render exceeds the Storage cap — serving the Nexrender URL directly (no upload, no voiceover mux)",
+        { bytes: remoteSize, cap: uploadCap, jobId: task.jobId },
+      );
+      persisted = await persistExternal();
+    } else {
+      // Download the Nexrender output and re-host to Supabase — the Cloud URL
+      // expires (~14d), so persist our own copy immediately.
+      let bytes: Uint8Array;
+      if (wouldMux) {
+        log.info("▶ muxing the voiceover over the render", { jobId: task.jobId });
+        bytes = (await muxVoiceover(result.videoUrl, audioUrl)).bytes;
+      } else {
+        log.info("▶ downloading render output", { jobId: task.jobId });
+        bytes = await downloadToBuffer(result.videoUrl, {
+          label: "template-render-download",
+        });
       }
-      bytes = new Uint8Array(await res.arrayBuffer());
-    }
 
-    // The delivered ad runs the TEMPLATE's own length (capped at
-    // MAX_TEMPLATE_SEC), not a forced 15s — the Seedance master is reused across
-    // late slots (`slices.ts`), so slots at 18s/20s show real footage. Crop only
-    // when the comp runs past that cap (an over-long grandfathered template),
-    // avoiding a needless re-encode of the common in-band case.
-    const adSec = templateTotalSeconds(template);
-    const compSec = template.metadata.durationSec;
-    if (compSec == null || compSec > adSec) {
-      log.info("▶ cropping render to the template's length", { compSec, adSec });
-      bytes = (await capVideoDuration(bytes, adSec)).bytes;
-    }
+      // The delivered ad runs the TEMPLATE's own length (capped at
+      // MAX_TEMPLATE_SEC), not a forced 15s — the Seedance master is reused across
+      // late slots (`slices.ts`), so slots at 18s/20s show real footage. Crop only
+      // when the comp runs past that cap (an over-long grandfathered template),
+      // avoiding a needless re-encode of the common in-band case.
+      const adSec = templateTotalSeconds(template);
+      const compSec = template.metadata.durationSec;
+      // A MEASURED template needs no crop: `adSec` is the length this very
+      // composition renders, so the render already IS that long. This survives only
+      // as a safety net for an over-long grandfathered comp.
+      //
+      // A template with NO readable duration is now left ALONE. It used to be
+      // cropped to the 15s default, which truncated a real 21s ad on the strength
+      // of a number we never had — delivering what AE rendered beats cutting it to
+      // a guess.
+      if (compSec != null && compSec > adSec) {
+        log.info("▶ cropping render to the template's length", { compSec, adSec });
+        bytes = (await capVideoDuration(bytes, adSec)).bytes;
+      }
 
-    const persisted = await persistSheet<Video>({
-      runId,
-      kind: "templated_video",
-      bytes,
-      mime: "video/mp4",
-      meta: { source: "nexrender", nexrenderTemplateId },
-      artifactInsert: async (tx, assetId) => {
-        const [row] = await tx
-          .insert(schema.videos)
-          .values({
-            runId,
-            assetId,
-            segmentIndex: null,
-            hasAudio: true,
-            providerMeta: {
-              provider: "nexrender",
-              nexrenderTemplateId,
-              nexrenderJobId: task.jobId,
-              composition,
-              voiceover: muxed ? "muxed" : "audio-layer",
-              // Layers Nexrender could not resolve and the render dropped to
-              // recover. Absent on a clean render; audits a partially-healed one.
-              ...(skippedLayers.length > 0
-                ? { skippedLayers: skippedLayers.join(", ") }
-                : {}),
-            },
-            status: "completed",
-          })
-          .returning();
-        return row;
-      },
-    });
+      if (bytes.length > uploadCap) {
+        // HEAD reported no size (or the processed file is still over the cap) —
+        // too big to upload, so serve the Nexrender URL directly instead.
+        log.warn(
+          "render exceeds the Storage cap after processing — serving the Nexrender URL directly",
+          { bytes: bytes.length, cap: uploadCap, jobId: task.jobId },
+        );
+        persisted = await persistExternal();
+      } else {
+        persisted = await persistSheet<Video>({
+          runId,
+          kind: "templated_video",
+          bytes,
+          mime: "video/mp4",
+          meta: { source: "nexrender", nexrenderTemplateId },
+          artifactInsert: async (tx, assetId) => {
+            const [row] = await tx
+              .insert(schema.videos)
+              .values({
+                runId,
+                assetId,
+                segmentIndex: null,
+                hasAudio: true,
+                providerMeta: {
+                  provider: "nexrender",
+                  nexrenderTemplateId,
+                  nexrenderJobId: task.jobId,
+                  composition,
+                  voiceover: wouldMux ? "muxed" : "audio-layer",
+                  // Layers Nexrender could not resolve and the render dropped to
+                  // recover. Absent on a clean render; audits a partially-healed one.
+                  ...(skippedLayers.length > 0
+                    ? { skippedLayers: skippedLayers.join(", ") }
+                    : {}),
+                },
+                status: "completed",
+              })
+              .returning();
+            return row;
+          },
+        });
+      }
+    }
 
     // Best-effort: capture the MODIFIED .aep Nexrender returned (the editable
     // project), re-hosted to Supabase alongside the mp4. Non-fatal — not every
     // job/plan emits one, and a missing project must never fail the render.
     if (result.projectUrl) {
       try {
-        const aepRes = await fetchWithRetry(result.projectUrl, undefined, {
+        const aepBytes = await downloadToBuffer(result.projectUrl, {
           label: "template-render-aep-download",
         });
-        if (aepRes.ok) {
-          await persistAsset({
-            runId,
-            kind: "template_aep",
-            bytes: new Uint8Array(await aepRes.arrayBuffer()),
-            mime: "application/x-aep",
-            meta: { source: "nexrender", jobId: task.jobId },
-          });
-          log.info("✓ modified .aep persisted", { jobId: task.jobId });
-        } else {
-          log.warn("modified .aep download failed (non-fatal)", {
-            jobId: task.jobId,
-            status: aepRes.status,
-          });
-        }
+        await persistAsset({
+          runId,
+          kind: "template_aep",
+          bytes: aepBytes,
+          mime: "application/x-aep",
+          meta: { source: "nexrender", jobId: task.jobId },
+        });
+        log.info("✓ modified .aep persisted", { jobId: task.jobId });
       } catch (err) {
         log.warn("modified .aep capture failed (non-fatal)", {
           jobId: task.jobId,
@@ -319,7 +427,16 @@ export async function applyTemplate(ctx: SkillContext): Promise<void> {
     });
     log.info("✓ templated video persisted", { assetId: persisted.assetId });
   } catch (err) {
-    const failure = classifyRunError(err, "TEMPLATE_RENDER_FAILED");
+    // FORCE the code — never `classifyRunError`, which runs the provider-signature
+    // patterns FIRST and only falls back to the default when none match. Anything
+    // failing in here reads as a generic provider error: a Supabase upload that
+    // timed out matched the `timed out` pattern and this step reported
+    // VIDEO_GENERATION_TIMEOUT. That is not cosmetic. `rewindStepForTemplateRegen`
+    // is keyed on the TEMPLATE_* code, so the wrong code sent the retry down the
+    // VIDEO regen path — re-generating a Seedance clip that was already finished,
+    // to fix an upload. It also told the user their video timed out when the render
+    // had in fact succeeded and was sitting on Nexrender, done and paid for.
+    const failure = runFailureWithCode("TEMPLATE_RENDER_FAILED", err);
     const raw = err instanceof Error ? err.message : String(err);
     const detail = failure.detail ?? raw;
     log.error("✗ template_render failed", { code: failure.code, err: detail });

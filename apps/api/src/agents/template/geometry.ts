@@ -91,6 +91,31 @@ export function planFootageSegments(
   }));
 }
 
+/**
+ * How many storyboard panels the template keyframe renders, from the ad's LENGTH.
+ *
+ * Mirrors the normal pipeline's rate — 4 panels per 15s (15s→4, 30s→8) — then
+ * snaps UP to a FULL near-square grid so there are never empty cells:
+ *   15s→4 (2×2) · 22.8s→6 (3×2) · 30s→9 (3×3) · 45s→12 (4×3) · 60s→16 (4×4).
+ * Clamped to [4, 16]: never below today's proven 2×2, never past the normal
+ * pipeline's 60s master. Tied to DURATION, NOT the template's video-slot count.
+ *
+ * `rows`/`cols` intentionally match `lib/image/crop.ts` `panelGrid(panelCount)`
+ * (each returned `panelCount` is a grid capacity = a fixed point of `panelGrid`),
+ * so the sheet is generated and later cleaned on the SAME grid. Kept inline so
+ * this module stays pure (no sharp/image import).
+ */
+export function templateKeyframePanels(sec: number): {
+  panelCount: number;
+  rows: number;
+  cols: number;
+} {
+  const target = Math.min(16, Math.max(4, Math.round((sec / 15) * 4)));
+  const cols = Math.ceil(Math.sqrt(target));
+  const rows = Math.ceil(target / cols);
+  return { panelCount: rows * cols, rows, cols };
+}
+
 // ── gpt-image-2 sizing ───────────────────────────────────────────────────────
 
 /** Hard ceiling enforced by gpt-image-2 (3840×2160 sits exactly on it). */

@@ -31,6 +31,7 @@ import {
 import {
   previewTemplate,
   regeneratePreview,
+  remeasureTemplate,
   setPreviewOverride,
 } from "../agents/template/preview.js";
 import {
@@ -186,6 +187,24 @@ adminTemplates.post("/:id/introspect", async (c) => {
  */
 adminTemplates.post("/:id/reintrospect", async (c) => {
   const row = await reintrospectTemplate(c.req.param("id"));
+  return c.json(toTemplateAdminDto(row));
+});
+
+/**
+ * POST /admin/templates/:id/remeasure — correct a template's recorded length.
+ *
+ * Re-reads the EXISTING preview to learn how long the template actually renders.
+ * After Effects renders a composition's WORK AREA, not its `duration` property,
+ * and Nexrender exposes no work area — so a template registered before this was
+ * measured carries the composition's number, which can be wildly wrong (one real
+ * template reports 30.97s and renders 21.0s) and makes every run over-generate
+ * footage and slice it from the wrong seconds. Free while the preview is still on
+ * Nexrender's CDN; no render, no AI spend.
+ */
+adminTemplates.post("/:id/remeasure", async (c) => {
+  const existing = await getTemplate(c.req.param("id"));
+  if (!existing) throw notFound("Template not found.");
+  const row = await remeasureTemplate(existing.id);
   return c.json(toTemplateAdminDto(row));
 });
 

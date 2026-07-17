@@ -19,5 +19,11 @@ onlyBuiltDependencies:
   - sharp
   - ffmpeg-static
 
+# Intentionally NOT built. @google/genai ships a prebuilt dist/ (its `prepare`
+# script only rebuilds from source); protobufjs's postinstall is an optional
+# compat check. Neither needs to run — listing them here silences the ignored-
+# build check without granting either a build step.
 ignoredBuiltDependencies:
   - unrs-resolver
+  - "@google/genai"
+  - protobufjs

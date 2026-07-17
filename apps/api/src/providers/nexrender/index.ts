@@ -374,6 +374,8 @@ type NexJobAsset =
       /** Exactly one of these two is sent. See `buildRenderJobBody`. */
       layerName?: string;
       layerIndex?: number;
+      /** The filename to save `src` as. Sent with `layerName`. */
+      name?: string;
       src: string;
     }
   | {
@@ -381,6 +383,25 @@ type NexJobAsset =
       name: string;
       params: Record<string, unknown>;
     };
+
+/**
+ * The filename Nexrender should save a media asset as: the src's own basename,
+ * which is unique per asset and carries a real extension. Falls back to the raw
+ * tail if the URL doesn't parse, and to a generic name if there is nothing
+ * usable — never an empty string, which would be as unusable as no name at all.
+ */
+export function assetFilename(src: string): string {
+  let path = src;
+  try {
+    path = new URL(src).pathname;
+  } catch {
+    // Not an absolute URL (a local path, or a relative one) — strip any query
+    // string by hand and use what's left.
+    path = src.split(/[?#]/)[0] ?? src;
+  }
+  const base = path.split("/").filter(Boolean).pop() ?? "";
+  return base.length > 0 ? decodeURIComponent(base) : "asset";
+}
 
 export type NexJobBody = {
   template: { id: string; composition: string };
@@ -412,10 +433,41 @@ export function buildRenderJobBody(input: TemplateRenderInput): NexJobBody {
         return {
           type: a.mediaType,
           composition: a.composition,
+          // A NAME-targeted media asset must also say what to save the download
+          // as. Nexrender derives that filename from `name`, falling back to the
+          // layerName — and an AE layer name is not a filename ("DELETE THIS" has
+          // no extension), so the job dies with "assetRedefinition must include
+          // src, layerName, and filename" before a frame renders. The src basename
+          // is already unique per asset and carries the right extension.
+          //
+          // Index-targeted VIDEO is deliberately left alone: it has rendered
+          // successfully many times without a `name`, and every template that ever
+          // worked here had ZERO name-targeted media, which is why one such layer
+          // was enough to kill an 80-asset job.
+          //
+          // Index-targeted IMAGE is the exception, because it has never once
+          // rendered — it is the asset the "must include src, layerName, and
+          // filename" rejection names, and without a `name` it carries neither a
+          // layerName nor a filename to satisfy it. Sending one is the cheap half
+          // of that fix (the other half is not handing After Effects a `.webp`).
+          // If this guess is wrong, `self-heal.ts` drops the stills and re-renders
+          // rather than losing the ad.
+          ...(a.layerIndex == null || a.mediaType === "image"
+            ? { name: assetFilename(a.src) }
+            : {}),
           // Exactly one of the two. `layerName` matches the name STORED in the
           // project, and a designer's footage placeholder has none — After
           // Effects only displays its source's name, which is what introspection
           // reports. Such a layer is addressable by stacking index alone.
+          //
+          // Do NOT "fix" this by sending the source filename as `layerName`:
+          // Cloud's OpenAPI omits `layerIndex`, which reads like it is
+          // unsupported, but its workers run nexrender core, which honours it.
+          // Six real renders prove the index path works (one of them filling 40
+          // index-targeted video slots). Switching them to a source-filename
+          // `layerName` instead fails the render outright with `Unable to call
+          // "replaceSource" because of parameter 1. undefined is not of the
+          // correct type`.
           ...(a.layerIndex != null
             ? { layerIndex: a.layerIndex }
             : { layerName: a.layerName }),

@@ -151,6 +151,19 @@ function getOpenRouterClient(): OpenAI {
 /** Image-gen attempts before giving up (covers truncated-body JSON failures). */
 const IMAGE_MAX_ATTEMPTS = 5;
 
+/**
+ * Wall-clock ceiling for ONE `generateImage` call, retries and all.
+ *
+ * Counting attempts does not bound anything on its own: attempts multiply with
+ * whatever the SDK does underneath (5 here × 5 there × a 300s timeout = 125
+ * minutes on a single still). A real 4K sheet takes ~150-220s, so a slot that has
+ * burned this long is not slow, it is broken — and an image slot is non-fatal, so
+ * giving up cheaply and keeping the template's own artwork beats stalling the run.
+ *
+ * A DEADLINE is the bound that survives someone re-tuning either retry layer.
+ */
+const IMAGE_TOTAL_BUDGET_MS = 10 * 60 * 1000;
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -424,6 +437,9 @@ export function createOpenAIProvider(): OpenAIProvider {
       // "experimental") steps DOWN the fallback ladder instead of retrying the
       // same doomed size — so 4K degrades to 2560×1440 → 2K rather than failing.
       let lastErr: unknown;
+      // Loop-scoped: the deadline bounds the WHOLE call. `t0` below restarts each
+      // attempt (it times that attempt for the log), so it cannot measure this.
+      const startedAt = Date.now();
       for (let attempt = 1; attempt <= IMAGE_MAX_ATTEMPTS; attempt++) {
         const t0 = Date.now();
         log.debug("image →", {
@@ -447,12 +463,24 @@ export function createOpenAIProvider(): OpenAIProvider {
               ? {}
               : { output_compression: outputCompression }),
           };
+          // `maxRetries: 1` — NOT the client's default 4. This loop already owns
+          // retrying (with backoff AND the size-fallback ladder the SDK knows
+          // nothing about), so the SDK's retries do not add resilience, they
+          // MULTIPLY the budget: 5 attempts here × 5 SDK tries × the 300s timeout
+          // is 125 minutes on one still, of which this loop logs a single line
+          // every 25 minutes. That reads as a hung step, and it is why a run sat
+          // for 40+ minutes with a live worker and no progress. One SDK retry is
+          // kept because it honours `Retry-After` on a 429, which this loop does not.
+          const perCall = { maxRetries: 1 };
           const result = refFiles
-            ? await getClient().images.edit({
-                ...baseParams,
-                image: refFiles,
-              } as never)
-            : await getClient().images.generate(baseParams as never);
+            ? await getClient().images.edit(
+                {
+                  ...baseParams,
+                  image: refFiles,
+                } as never,
+                perCall,
+              )
+            : await getClient().images.generate(baseParams as never, perCall);
 
           const b64 = result.data?.[0]?.b64_json;
           if (!b64) throw internal("OpenAI image response missing image data.");
@@ -485,6 +513,19 @@ export function createOpenAIProvider(): OpenAIProvider {
               ms: Date.now() - t0,
               err: msg,
             });
+          }
+          // Stop on the wall clock, not just the attempt count — another attempt
+          // could sit in a 5-minute timeout, and this slot has already had its
+          // budget. Checked BEFORE the backoff so we never sleep on the way out.
+          const spent = Date.now() - startedAt;
+          if (spent > IMAGE_TOTAL_BUDGET_MS) {
+            log.warn("image budget exhausted — giving up on this slot", {
+              attempt,
+              ms: spent,
+              budgetMs: IMAGE_TOTAL_BUDGET_MS,
+              err: msg,
+            });
+            break;
           }
           // Capped exponential backoff + jitter (~2s, 4s, 8s, 12s): give a
           // truncating proxy / flaky connection time to clear, and keep the
