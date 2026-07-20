@@ -109,3 +109,25 @@ Re-template with a different-length template reuses the old master and re-slices
 
 typecheck + vitest are the floor, not the bar.
 Each phase is smoke-tested on a real run: watch `step_events` for the new chain (no detector/storyboard/video events), assert `videos.durationSec` matches the template, eyeball the pre-composite footage (plain, no baked text/UI) versus the composited output (overlays present), and regression-check a normal video-pipeline run.
+
+## Update 2026-07-18: the placeholder-subject leak DID happen, and the real fix
+
+The risk noted above ("placeholder-subject leakage ... mitigated by an explicit 'style from frames, content from brief' rule and a reconcile that keeps our slots authoritative") was NOT actually mitigated.
+It shipped as a live bug: a user uploaded GLASSES with the prompt "create the ugc ad" and the whole ad (blueprint, storyboard, stills, clip) came back as a WATER BOTTLE - the template's demo product (run `090fa5a5`).
+
+Root cause, proven against the DB.
+`runs.product_brief` was correctly set to the glasses and was even marked authoritative in the keyframe prompt.
+But `template_plan` runs FIRST (before `describeProduct`) and is never given the product image, and with a generic prompt plus only the template's demo frames to look at, its per-slot `videoScene` / `imageSubject` / `conceptSummary` / `audio.voiceover` described the demo water bottle in full sentences.
+That long, detailed demo TEXT then out-voted the one-line "authoritative" product brief at every downstream step.
+The precise override point was `beats.ts` `beatsToScenes`: `sceneDescription: b.scene || src?.sceneDescription` - the demo beat scene won over the product-grounded storyboard scene.
+So the "keep our slots authoritative" mitigation was exactly backwards: the slots were authoritative for the WRONG thing (the demo subject).
+
+The real fix is a WHAT-vs-HOW split (structure/look only).
+The blueprint now carries ONLY the template's look, pacing, timing, camera and text-ownership.
+Its `videoScene` / `imageSubject` / `conceptSummary` / `audio.voiceover` are SUBJECT-AGNOSTIC structural roles ("opening hero reveal", "hero product shot", "reveal -> detail -> in-use -> sign-off"), never a product noun, enforced by a HARD RULE at the end of the blueprint prompt ("whatever the demo frames show is placeholder content to IGNORE; the real product is attached downstream").
+The SUBJECT is authored downstream from the user's real product, exactly like the normal pipeline: `beatsToScenes` now prefers the product-grounded storyboard scene (`src.sceneDescription`) and the beat's structural text is only a fallback; the stills lead the SUBJECT with `productBrief`; the keyframe (already product-authoritative) fills the real product into the template's structural arc.
+
+Lesson.
+A one-line "authoritative" product brief cannot win against paragraphs of concrete demo-scene text.
+Do not try to out-argue a leak with a priority label; remove the leak's SUBJECT at the source (make the blueprint subject-agnostic) AND guarantee the product wins at every consumption point (prefer product-grounded scenes, compose stills from the brief).
+Soft LLM guards ("never copy the placeholder's subject") were present the whole time and did not hold.

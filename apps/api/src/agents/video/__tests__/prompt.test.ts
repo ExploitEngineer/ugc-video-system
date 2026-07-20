@@ -37,7 +37,7 @@ describe("buildDeterministicVideoPrompt — shot-list brackets", () => {
     expect(out).toContain("[0:11-0:15]");
   });
 
-  it("keeps the 2×2 four-panel board wording for a normal 4-scene clip", () => {
+  it("references the storyboard as one continuous take, without re-describing the 2×2 grid (lean prompt)", () => {
     const out = buildDeterministicVideoPrompt({
       adStyle: "warm",
       adType: "ugc",
@@ -45,7 +45,12 @@ describe("buildDeterministicVideoPrompt — shot-list brackets", () => {
       durationSec: 15,
       aspectRatio: "16:9",
     });
-    expect(out).toContain("2×2 of four keyframe panels");
+    // The still carries appearance/layout, so the lean prompt just names the
+    // storyboard reference and directs one continuous take — it no longer
+    // re-describes the panel grid (that reduced motion).
+    expect(out).toContain("storyboard");
+    expect(out.toLowerCase()).toContain("continuous");
+    expect(out).not.toContain("2×2");
   });
 
   it("cuts for a cut-style look (regression lock)", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunDetail } from "@ugc/shared";
+import type { RunDetail, Step } from "@ugc/shared";
 import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
@@ -59,6 +59,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
 import { useRunStream } from "@/lib/use-run-stream";
+
+/**
+ * Template-step failure code → the step the server re-runs FIRST on
+ * `POST /runs/:id/regenerate-template` (the failed step itself). The single source
+ * of truth for BOTH the reachable "Retry" gate and the optimistic amber seed, kept
+ * in lockstep with the API's `RESUME_STEP_BY_CODE` / `rewindStepForTemplateRegen`.
+ */
+const TEMPLATE_RESUME_STEP: Record<string, Step> = {
+  TEMPLATE_PLAN_FAILED: "template_plan",
+  TEMPLATE_KEYFRAME_FAILED: "template_keyframe",
+  TEMPLATE_FILL_FAILED: "template_fill",
+  TEMPLATE_VIDEO_FAILED: "template_video",
+  TEMPLATE_RENDER_FAILED: "template_render",
+};
+const TEMPLATE_RETRYABLE_CODES = Object.keys(TEMPLATE_RESUME_STEP);
 
 /** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
 function prettyHook(id: string): string {
@@ -166,17 +181,15 @@ export function RunView({ runId }: { runId: string }) {
 
   const regenerateTemplateMutation = useMutation({
     mutationFn: () => regenerateTemplateAction(runId),
-    // Amber loader on the click. The retry re-runs from the step that failed,
-    // mirroring the API's `rewindStepForTemplateRegen` → its next step; the
-    // button only shows for these two codes.
+    // Amber loader on the click, lit on the SAME step the server re-runs first
+    // (the failed step), so the optimistic state matches the authoritative seed for
+    // every retryable code — not just fill/render.
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey });
       const prev = queryClient.getQueryData<RunDetail>(queryKey);
       if (prev) {
         const target =
-          prev.errorCode === "TEMPLATE_FILL_FAILED"
-            ? "template_fill"
-            : "template_render";
+          TEMPLATE_RESUME_STEP[prev.errorCode ?? ""] ?? "template_plan";
         queryClient.setQueryData(queryKey, optimisticRegen(prev, target));
       }
       return { prev };
@@ -287,6 +300,19 @@ export function RunView({ runId }: { runId: string }) {
   // re-composite. Mirrors the API's own check, so a run that failed before the
   // clip existed never offers the action.
   const hasGeneratedVideo = run.assets.some((a) => a.kind === "final_video");
+  // `template_images` is non-fatal BY DESIGN: a slot whose still fails to generate
+  // silently keeps the template's own placeholder artwork and the step still
+  // passes. That silence can ship an ad with stock art and no signal — so surface
+  // the count (read from the passed step's payload) as an informational note.
+  const imageFallbackCount = (() => {
+    const ev = [...run.stepEvents]
+      .reverse()
+      .find((e) => e.step === "template_images" && e.status === "passed");
+    const n = Number(
+      (ev?.payload as { fellBack?: number } | undefined)?.fellBack,
+    );
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
   // Multi-segment: the N 15s segment clips + the N segment storyboard rows.
   // Segments finish in parallel (random order), so order by the `segmentIndex`
   // stamped on each asset's meta, falling back to original order if absent.
@@ -545,9 +571,14 @@ export function RunView({ runId }: { runId: string }) {
                   allowCurrent
                 />
               )}
+              {/* Retry is reachable for EVERY template-step failure the server can
+                  rewind (plan / keyframe / fill / video / render) — not just the
+                  last two. The plan/keyframe/video failures produce no final video,
+                  so `RetemplateDialog` (gated on hasGeneratedVideo) never shows for
+                  them; without this they had NO recovery button at all even though
+                  `rewindStepForTemplateRegen` fully supports them. */}
               {isTemplateRun &&
-                (run.errorCode === "TEMPLATE_RENDER_FAILED" ||
-                  run.errorCode === "TEMPLATE_FILL_FAILED") && (
+                TEMPLATE_RETRYABLE_CODES.includes(run.errorCode ?? "") && (
                   <Button
                     variant="brand"
                     size="sm"
@@ -626,6 +657,16 @@ export function RunView({ runId }: { runId: string }) {
                 )}
               </div>
             </div>
+            {isTemplateRun && imageFallbackCount > 0 && (
+              <div className="border-warning/30 bg-warning/5 flex items-center gap-2 border-b px-4 py-2">
+                <TriangleAlertIcon className="text-warning size-4 shrink-0" />
+                <p className="text-warning text-xs">
+                  {imageFallbackCount} template image
+                  {imageFallbackCount === 1 ? "" : "s"} could not be generated
+                  and kept the template&apos;s built-in artwork.
+                </p>
+              </div>
+            )}
             <div className="p-4">
               <ArtifactCard
                 asset={finalVideo}

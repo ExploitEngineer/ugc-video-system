@@ -8,6 +8,50 @@
 
 ---
 
+## 2026-07-18 REFRESH #2 — fake-looking action + prompt economy (applied to code)
+
+A second deep-research pass (99 agents, adversarially verified) plus a line-level inventory of the ACTUAL submitted prompt found why the generated action looked fake/stiff, and it was NOT only length.
+
+The measured problem: the submitted Seedance prompt for a UGC run was 214 words (LLM tier) to 433 words (deterministic fallback); only ~15-20% was actual beat ACTION, and appearance/identity/product were re-described 4-5 times.
+
+Verified, HIGH-confidence findings (official fal.ai + Runway, corroborated):
+
+- **Re-describing what the input still already carries ACTIVELY REDUCES motion** — Runway's official image-to-video guide: restating the image's details "can actually reduce motion and produce unexpected results — the model gets busy and stops moving". This was a direct cause of our stiff action. So the still carries appearance/identity/product/wardrobe/lighting/setting, and the prompt now spends its words almost entirely on MOTION.
+- **Physical grounding is the realism lever.** Name a concrete CONSEQUENCE the model must resolve toward ("the mug slides and tips") and the MECHANICS of the motion — weight, contact points, momentum, follow-through. Fixes the exact failure modes: gliding feet → "each foot lands heel-first, then rolls forward"; morphing hands → anchor to objects ("fingers close around the cup"). These phrases are SHORT, so they don't cost economy.
+- **Physically-grounded VERBS + causal/temporal sequencing beat adjective stacks.** "she picks it up, feels its weight, then sets it down" beats "she elegantly handles the product". Praise adjectives (beautiful/smooth/elegant/cinematic) give the model nothing to animate.
+- **~60-100 words per shot; long actively HURTS via conflicting instructions + attention dilution.** ONE primary action + ONE camera move per beat, stated together ("what moves, how it moves, what the camera does").
+- **Negatives: unresolved — every web claim was refuted.** No reliable guidance on which inline negatives help vs summon the artifact, so MINIMIZE them (this repo's memory already warns failure-naming can summon the failure). Keep only positive-framed, load-bearing cues (one full-frame/no-grid cue; audio suppression like "no music" for UGC).
+
+What changed in code (this refresh):
+
+- The Seedance prompt was cut from ~214-433 words to ~120-185. Wrapper (`video/index.ts` `composePrompt`) 134→~46 words: the `@Image` legend is a bare NAMING of each reference (no "keep its exact shape/colour/markings" — that reduced motion), a 4-word identity anchor kept ONLY for merged segments; `videoRenderDirective`, `videoNegatives` (`ad-types/fragments/looks.ts`) and the speech directive each cut to one short clause.
+- The LLM writer system (`buildVideoPrompt`) 594→~280 words, rebuilt around the physical-motion instruction (consequence + mechanics + causal order), with an explicit "do NOT re-describe appearance — it reduces motion" and "no praise adjectives".
+- The deterministic fallback (`buildDeterministicVideoPrompt`) 340→~150 words: dropped the appearance pins, the product hard-freeze rigidity clause (it fought natural handling), and the repeated anti-grid wording.
+- The per-type `videoAudioLine` skill fragments were cut to their music/SFX nuance (the lip-sync/voice rule is owned once by the wrapper); the UGC `videoPacing` lost its duplicate audio tail. Resolved the motion CONTRADICTIONS (UGC was told "handheld micro-shake" AND "stable, never fast"; the product was frozen AND handled) by removing the code-side competing cues so each look has ONE coherent camera voice.
+- Golden `legacy-prompts.json` regenerated + audited.
+
+STILL OPEN (needs first-party in-pipeline A/B, not web research): which exact negatives reduce floaty motion vs backfire; per-ad-type motion recipes; cross-clip identity/voice drift threshold for merged 30/45/60s runs.
+
+---
+
+## 2026-07-18 REFRESH (targeted re-research, applied to code)
+
+A fresh 5-angle deep-research pass (20 sources, adversarial verify) re-confirmed most of this guide and pinned the ONE change that was actually costing us on-camera speech.
+Documented-vs-empirical is marked; the hard API facts are PRIMARY (fal.ai schema + fal GitHub), the phrasing rules are SECONDARY (fal.ai learn pages) + community, well-corroborated but not vendor-guaranteed.
+
+- **Lip-sync trigger (HIGH-confidence, now in code).** On-screen lip-sync is triggered by a SPEAKING-VERB attribution plus the line in DOUBLE quotes tied to the visible speaker, e.g. `she says: "..."` (fal.ai official guide: "Put any spoken line in double quotes, and the model lip-syncs it, generates the voice, and times it to the cut"; BytePlus ModelArk corroborates).
+  A bare `(spoken: "...")` label or a single-quoted floating line reads as ambient audio, which is exactly why our UGC character wasn't talking.
+  Off-screen voiceover is the CONTRAST case: phrase it as narration with a `narrates:` verb, e.g. `a low, unhurried female voice narrates: "..."`.
+  Applied: `agents/video/prompt.ts` now attributes UGC/service lines with `says:` and cinematic lines with `narrates:`, in double quotes, in BOTH the LLM builder and the deterministic builder; `agents/video/index.ts` also prepends a deterministic, LLM-immune lip-sync directive (see `[[09-multi-speaker-voice-and-lipsync]]` update).
+- **Lip-sync reliability (MEDIUM).** Keep spoken lines SHORT (5-10 words/line, ~20 words per 15s); long monologues drift out of sync toward the clip end. Medium close-up, front-facing or slight three-quarter, camera relatively stable during the line. Our transcripts are already short; keep them so.
+- **Speech is the WEAKEST audio channel (MEDIUM, against-interest).** fal.ai (the official host) says lip-sync "works, but the audio quality appears to be strongest on sound effects and ambient audio" and recommends testing lip-sync against your standards before a dialogue-heavy production pipeline (~50-60% production-ready, metallic sibilants). So the two-pass post-dub VO path stays the guaranteed option for voice-critical ads.
+- **Inline negatives + no camera_fixed on fal (HIGH for the fact, MEDIUM for the list).** The fal image-to-video schema exposes only `prompt/image_url/end_image_url/resolution/duration/aspect_ratio/generate_audio/seed/end_user_id/bitrate_mode` — NO `negative_prompt` and NO `camera_fixed` (a real change from Seedance 1.0). Negatives stay inline + short + positive/rigid; failure-naming can soft-summon the artifact and long lists get ignored (keep our look-family-conditional negatives, not one universal string). Vague intensity adjectives BACKFIRE: unqualified `fast` = chaos, `epic` = no-op, `lots of movement` = jitter; make exactly ONE element move and use ONE camera instruction.
+- **WRAPPER vs NATIVE (important for the code).** All the confirmed API detail is the fal.ai WRAPPER. This pipeline calls the NATIVE BytePlus ModelArk REST API (`providers/byteplus/index.ts`), which differs: discrete integer durations (`snapSeedanceDuration`), 1080p available (`BYTEPLUS_VIDEO_RESOLUTION`), and `camerafixed` MAY be a real native parameter. Our `--camerafixed true` suffix is safe (silently ignored if unsupported). Do NOT port fal's `480p/720p-only` or continuous `4-15` duration into the native path.
+- **REFUTED / still open.** Two candidate cross-clip drift mitigations were REFUTED (restating the accent in every scene; inserting written-beat "she pauses, then continues:" resync anchors) — so our frozen-identity-block + same-refs approach is the best available but remains UNVALIDATED. Per-ad-type camera/motion recipes had NO surviving confirmed web evidence: they need first-party A/B testing THROUGH the pipeline, not more web research — so we deliberately did NOT rewrite the per-ad-type fragments speculatively (consistent with this repo's history of reverted prompt-rule tuning).
+- **Unchanged, re-confirmed.** `generate_audio` defaults true (single pass, no extra cost); single clip caps at 15s (30/45/60s = N merged clips); voice is described in-prompt, not a field, and there is no voice-clone path (the `@Audio` voice-MATCH input needs Ark Console activation and is a timing/mood reference, not a voice template).
+
+---
+
 ## DELIVERABLE 1 — Validated Best-Practice Guide
 
 ### A. What is DOCUMENTED vs EMPIRICAL (read this first)

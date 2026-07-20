@@ -1083,15 +1083,21 @@ runs.post("/:id/regenerate-template", async (c) => {
     })
     .where(eq(schema.runs.id, id));
 
-  // Seed a `regenerated` event on the step the worker resumes into, so the amber
-  // loader shows the instant this response lands. The chain from each checkpoint:
-  // null → template_plan, storyboard → template_fill, video → template_render.
+  // Seed a `regenerated` event on the step the worker actually re-runs FIRST, so
+  // the amber loader lights the RIGHT step the instant this response lands. The
+  // step that re-runs is exactly the one that failed — the rewind checkpoint is the
+  // step just before it. The previous mapping branched on a "storyboard" checkpoint
+  // that `rewindStepForTemplateRegen` never returns and defaulted everything else
+  // to `template_render`, so a keyframe/fill/video failure lit the wrong step.
+  const RESUME_STEP_BY_CODE: Partial<Record<string, Step>> = {
+    TEMPLATE_PLAN_FAILED: "template_plan",
+    TEMPLATE_KEYFRAME_FAILED: "template_keyframe",
+    TEMPLATE_FILL_FAILED: "template_fill",
+    TEMPLATE_VIDEO_FAILED: "template_video",
+    TEMPLATE_RENDER_FAILED: "template_render",
+  };
   const resumeTarget: Step =
-    rewindTo === null
-      ? "template_plan"
-      : rewindTo === "storyboard"
-        ? "template_fill"
-        : "template_render";
+    RESUME_STEP_BY_CODE[run.errorCode ?? ""] ?? "template_plan";
   await writeStepEvent({
     runId: id,
     step: resumeTarget,

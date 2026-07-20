@@ -86,7 +86,7 @@ the on-screen characters' own natural voices
 ### videoAudioLine
 
 ```
-Audio: each on-screen character speaks their line lip-synced with the mouth visible, ONE speaker per shot (never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; quote each line verbatim and keep it 5-10 words; light location ambience and a fitting score.
+Audio: location ambience under a fitting score.
 ```
 
 ### narrativeTreatment

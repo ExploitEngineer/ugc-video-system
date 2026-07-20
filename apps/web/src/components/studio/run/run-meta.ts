@@ -437,9 +437,15 @@ export function stepState(run: RunDetail, step: Step): StepState {
   // `status: running`) still read amber.
   if (activeSteps(run).includes(step)) {
     if (run.retemplating) return "rebuilding";
-    const latest = eventsInPass(run, step).at(-1)?.status;
-    if (run.status === "regenerating" || latest === "regenerated")
-      return "regenerating";
+    // Amber for the WHOLE redo. `regenerate-video` / `regenerate-template` seed a
+    // `regenerated` event and leave `status: running`, then the worker writes the
+    // step's own `started` — so keying off the LATEST event alone flipped the step
+    // back to blue "active" the moment work began. A `regenerated` event ANYWHERE
+    // in the current pass means this step is being redone, so it stays amber until
+    // it reaches a terminal event (at which point it leaves `activeSteps`).
+    const pass = eventsInPass(run, step);
+    const regenInPass = pass.some((e) => e.status === "regenerated");
+    if (run.status === "regenerating" || regenInPass) return "regenerating";
     return "active";
   }
 

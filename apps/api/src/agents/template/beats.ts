@@ -136,12 +136,20 @@ function makeContiguous(
 }
 
 /**
- * Project the beats onto the video builder's `StoryboardScene[]` shape: the beat
- * text becomes each scene's description, and camera/look/transcript are borrowed
- * from the storyboard scene covering the beat's midpoint — so the muxed
+ * Project the beats onto the video builder's `StoryboardScene[]` shape. The
+ * SUBJECT comes from the product-grounded storyboard scene covering the beat's
+ * midpoint (`src.sceneDescription`) — that scene was authored from the user's real
+ * product, so it is what keeps the clip on-subject. The beat's own `scene` text is
+ * now STRUCTURAL (a subject-agnostic shot role from the blueprint), used only as a
+ * fallback when the storyboard has no coverage for this window. Camera/look/
+ * transcript/speaker are borrowed from the same storyboard scene so the muxed
  * voiceover still reads front-to-back as one coherent arc while the visuals hit
- * each slot's beat. A beat past the storyboard's coverage falls back to its own
- * scene text with an empty transcript (Seedance then narrates from the concept).
+ * each slot's beat.
+ *
+ * WHY the flip: the blueprint reads the TEMPLATE'S OWN demo footage and, before
+ * this, its `videoScene` described the demo's product — so a glasses ad rendered
+ * the template's demo water bottle. Preferring the product-grounded storyboard
+ * scene here makes the demo subject unable to reach the screen.
  */
 export function beatsToScenes(
   beats: TemplateBeat[],
@@ -163,7 +171,9 @@ export function beatsToScenes(
       index: i,
       cameraAngle: src?.cameraAngle ?? "",
       actionMovement: src?.actionMovement ?? "",
-      sceneDescription: b.scene || src?.sceneDescription || "",
+      // Product-grounded storyboard scene wins; the structural beat text is only a
+      // fallback for windows the storyboard does not cover (see docstring above).
+      sceneDescription: src?.sceneDescription?.trim() || b.scene || "",
       panelCaption: src?.panelCaption ?? "",
       transcript: src?.transcript ?? "",
       adStyle: src?.adStyle ?? "",

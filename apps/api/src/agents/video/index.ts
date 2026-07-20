@@ -302,22 +302,21 @@ export async function videoBuilder(
     }
 
     // Compact @Image legend prepended to the Seedance prompt (deterministic, so
-    // the numbers can never drift from the submit order). Kept terse — the
-    // anti-grid / one-continuous-scene rule lives ONCE in `renderDirective` below
-    // (it was previously restated here too), so beat content sits nearer the front.
+    // the numbers can never drift from the submit order). Kept to a bare NAMING of
+    // each reference — the images already carry identity/appearance, and
+    // re-describing what the still holds ("keep its exact shape, colour…") makes the
+    // model re-assert stillness instead of animating (official image-to-video
+    // guidance: restating the image's details REDUCES motion). The one exception is
+    // a merged multi-segment run, where a 4-word identity anchor is the documented
+    // cross-clip-drift guard.
     const boardNo = productUrl ? 2 : 1;
+    const isSegment = input.segmentIndex != null;
     const roles: string[] = [];
-    if (productUrl) {
-      roles.push(
-        "@Image1 (the product) — keep its exact identity, shape, colour, finish and markings in every beat",
-      );
-    }
-    roles.push(
-      `@Image${boardNo} (the storyboard) — match its look, identity and shot order`,
-    );
+    if (productUrl) roles.push("@Image1 the product");
+    roles.push(`@Image${boardNo} the storyboard (follow its shot order)`);
     if (faceUrl) {
       roles.push(
-        `@Image${boardNo + 1} (the on-screen face) — keep this exact face and identity throughout`,
+        `@Image${boardNo + 1} the on-screen person${isSegment ? " (same face every part)" : ""}`,
       );
     }
     // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
@@ -336,7 +335,7 @@ export async function videoBuilder(
     // gets its own directive + negatives.
     const isService = ctx.adType === "service";
     const negatives = isService
-      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people)."
+      ? "Clean cuts between the distinct scenes, one full-frame scene per shot, one speaker per shot. Follow the storyboard; keep only the hero stat and the end-card line legible; the last beat is a clean brand end card (logo + short tagline, no people)."
       : videoNegatives(lookFamily);
     // Per-look render directive (single source of truth in ./prompt.js): service
     // = skit cuts; cinematic_polished + demo_clean = clean cuts between beats
@@ -345,11 +344,34 @@ export async function videoBuilder(
     // composed prompt can never carry a cut-vs-continuous contradiction.
     const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
+
+    // DETERMINISTIC lip-sync directive (LLM-immune). The UGC/testimonial look and
+    // the service skit are supposed to show the on-screen person TALKING; the
+    // cinematic looks (brand-story, founder-pov, lifestyle) narrate over the action
+    // by design and are left untouched. The LLM prompt-writer is given the quoted
+    // lines + an audio line, but under the 80-word "be terse, front-load, never
+    // re-describe" budget it routinely COMPRESSES AWAY the lip-sync instruction —
+    // leaving Seedance to treat the quotes as ambient voiceover, so the person's
+    // mouth never moves (the reported "character not talking"). Baking the directive
+    // into the wrapper (not the rewritten body) guarantees it survives, exactly as
+    // the template pipeline's frozen `buildVoiceBlock` does. Only added for the LLM
+    // tier — the deterministic prompt already states it.
+    const isUgcLook = lookFamily === "ugc_authentic";
+    const hasPresenter =
+      Boolean(input.hasPerson) || Boolean(input.characterAnchor?.trim());
+    const hasSpokenLines = input.scenes.some((s) => s.transcript?.trim());
+    const wantsOnCameraSpeech =
+      (isUgcLook || isService) && hasPresenter && hasSpokenLines;
+    const speechDirective = wantsOnCameraSpeech
+      ? isService
+        ? " Each on-screen person says their own line on camera, lips clearly moving; one speaker per shot."
+        : " The on-screen person says each line on camera, lips clearly moving, one natural voice throughout."
+      : "";
     const composePrompt = (
       tier: "llm" | "deterministic",
       audioMode: "full" | "safe" = "full",
     ): string =>
-      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier, audioMode)}\n\n${negatives}${cameraFixed}`;
+      `${roles.join(". ")}. ${renderDirective}${tier === "llm" ? speechDirective : ""}\n\n${videoPromptBody(tier, audioMode)}\n\n${negatives}${cameraFixed}`;
 
     // RETRY LADDER: submit → poll → download, up to MAX_VIDEO_ATTEMPTS times.
     // A TRANSIENT provider failure (network / 5xx / timeout / expired /

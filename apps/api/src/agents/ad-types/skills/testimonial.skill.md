@@ -132,7 +132,7 @@ a warm, conversational, natural-sounding voice
 ### videoAudioLine
 
 ```
-Audio: the on-screen person SPEAKS each line lip-synced in a natural, real human voice (the SAME voice throughout, fitting their apparent age, gender and energy); quote each line verbatim in its slice, keep it short, mouth visible while speaking; light room ambience, no music.
+Audio: light room ambience, no music.
 ```
 
 ### narrativeTreatment
@@ -144,5 +144,5 @@ Treatment: UGC — a real person casually talking about the product the way they
 ### videoPacing
 
 ```
-- Handheld iPhone micro-shake, eye-level medium shot held on the speaker; small natural head and hand movement, a gentle push-in to close. Natural light, synced lip dialogue, ambient room tone, no music.
+- Handheld iPhone feel, eye-level medium shot on the speaker; small natural head and hand movement, a gentle push-in to close; natural light.
 ```

@@ -56,10 +56,21 @@ export function buildTemplateImagePrompt(
 ): string {
   const shape = slotShape(input.width, input.height);
 
+  // `imageSubject` is now a SUBJECT-AGNOSTIC shot ROLE from the blueprint (e.g.
+  // "hero product shot"), because the blueprint reads the template's OWN demo
+  // footage and must never carry the demo's product forward. The real SUBJECT is
+  // the user's product (identity-locked by the reference sheet). Lead with the
+  // product so the still can never drift to the template's demo subject.
+  const shot = input.imageSubject?.trim();
+  const product = input.productBrief?.trim();
+  const subjectLine = product
+    ? `SUBJECT: ${product}${shot ? ` — framed as a ${shot}` : ""}.`
+    : `SUBJECT: ${shot || input.conceptSummary?.trim() || "the product in a natural, well-lit setting"}.`;
+
   const lines: string[] = [
     "A single photograph for an advertisement.",
     "",
-    `SUBJECT: ${input.imageSubject}`,
+    subjectLine,
   ];
 
   if (input.role) lines.push(`This still is ${input.role} in the ad.`);

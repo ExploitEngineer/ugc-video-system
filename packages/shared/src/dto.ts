@@ -628,7 +628,12 @@ export const templateSlotPlanSchema = z.object({
   role: z.string().catch(""),
   /** TEXT: what the copy should say, and why. */
   copyIntent: z.string().optional(),
-  /** IMAGE: what the generated still should depict. Absent when `fill` is false. */
+  /**
+   * IMAGE: the SUBJECT-AGNOSTIC shot ROLE this still plays (e.g. "hero product
+   * shot", "detail shot"), NOT a product noun. The real product is composited
+   * downstream from the user's upload, so the blueprint (which reads the template's
+   * OWN demo footage) never names it. Absent when `fill` is false.
+   */
   imageSubject: z.string().optional(),
   /**
    * IMAGE: whether to generate this slot at all. The deterministic
@@ -637,7 +642,13 @@ export const templateSlotPlanSchema = z.object({
    * (the `PH_2` / `Media_3` names that most real templates use).
    */
   fill: z.boolean().optional(),
-  /** VIDEO: the hero scene the clip should show. */
+  /**
+   * VIDEO: the SUBJECT-AGNOSTIC structural beat — this window's shot role, framing
+   * and KIND of action (e.g. "opening hero reveal", "close detail beat"), NOT a
+   * product scene. The on-subject scene is authored downstream from the user's
+   * product; downstream (`beatsToScenes`) this text is only a fallback for windows
+   * the product-grounded storyboard does not cover.
+   */
   videoScene: z.string().optional(),
   /** VIDEO: one camera move (or a hold) for this slot's beat. Vision analysis. */
   cameraAction: z.string().optional(),

@@ -323,7 +323,11 @@ export async function buildTemplateVideo(ctx: SkillContext): Promise<void> {
       if (scenes.length === 0) {
         scenes = [
           {
+            // Deepest fallback (no storyboard, no beats): stay on-subject with the
+            // product brief. `conceptSummary` is now a subject-agnostic structural
+            // arc, so it can't carry the product here.
             sceneDescription:
+              run.productBrief?.trim() ||
               plan?.conceptSummary?.trim() ||
               run.prompt ||
               "the product in a natural, well-lit setting",

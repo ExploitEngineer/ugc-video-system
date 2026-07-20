@@ -226,9 +226,12 @@ export async function buildTemplateKeyframe(ctx: SkillContext): Promise<void> {
     }
 
     // Deterministic fallbacks (concept/brief) so a provider glitch degrades
-    // gracefully instead of failing the run.
+    // gracefully instead of failing the run. Prefer the PRODUCT brief here:
+    // `conceptSummary` is now a subject-agnostic structural arc, so leading with it
+    // would drop the product from the fallback board/scenes. The brief keeps the
+    // fallback on-subject.
     const concept =
-      plan?.conceptSummary?.trim() || run.productBrief?.trim() || run.prompt.trim();
+      run.productBrief?.trim() || plan?.conceptSummary?.trim() || run.prompt.trim();
     const styleHint = run.visualStyle?.trim()
       ? ` Match this look: ${run.visualStyle.trim()}.`
       : run.adStyle?.trim()

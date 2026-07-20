@@ -143,24 +143,37 @@ describe("beatsToScenes", () => {
     ...(speaker ? { speaker } : {}),
   });
 
-  it("uses the beat scene as the description and borrows the transcript by midpoint", () => {
+  it("prefers the product-grounded storyboard scene over the structural beat, borrowing the transcript by midpoint", () => {
     const storyboard = [sbScene(0, "line A"), sbScene(1, "line B")];
     // beat 0 midpoint 1s → first half → scene 0; beat 1 midpoint ~11s → scene 1.
     const scenes = beatsToScenes(
       [beat(0, 2, "beat one"), beat(8, 7, "beat two")],
       storyboard,
     );
+    // The storyboard scene (authored from the user's REAL product) is the subject;
+    // the beat text is now a subject-agnostic structural role from the blueprint and
+    // must NOT reach the screen when the storyboard covers the window. This is what
+    // stops a glasses ad from rendering the template's demo water bottle.
     expect(scenes[0]).toMatchObject({
-      sceneDescription: "beat one",
+      sceneDescription: "sb 0",
       transcript: "line A",
     });
     expect(scenes[1]).toMatchObject({
-      sceneDescription: "beat two",
+      sceneDescription: "sb 1",
       transcript: "line B",
     });
   });
 
-  it("falls back to an empty transcript when there is no storyboard", () => {
+  it("uses the structural beat text only when the storyboard scene has no description", () => {
+    const blank: StoryboardScene = { ...sbScene(0, "line A"), sceneDescription: "" };
+    const scenes = beatsToScenes([beat(0, 5, "structural beat")], [blank]);
+    expect(scenes[0]).toMatchObject({
+      sceneDescription: "structural beat",
+      transcript: "line A",
+    });
+  });
+
+  it("falls back to the beat text and an empty transcript when there is no storyboard", () => {
     const scenes = beatsToScenes([beat(0, 5, "solo beat")], []);
     expect(scenes[0]).toMatchObject({
       sceneDescription: "solo beat",

@@ -145,3 +145,26 @@ Every degradation path lands on **today's exact output**, never on a confident w
 
 - The normal pipeline has the same hole. `video/prompt.ts:437` (service ads) asks Seedance to *infer* each character's gender and self-consistently voice them — the same guess that failed here. `StoryboardScene.speaker` is shared and optional, so the fix is available to it; wiring is not done.
 - No measurement yet of whether Seedance honours per-line keys. The first real two-character run is the experiment; `videos.provider_meta.videoPrompt` holds the submitted prompt for post-mortem.
+
+## Update 2026-07-18: the normal pipeline's "character not talking" bug, and its fix
+
+The normal pipeline shipped a live version of this bug, but the failure was different from the template pipeline's mis-voicing.
+A UGC/testimonial run (with a product and a person) rendered a character whose mouth never moved - the spoken transcript played as a detached voiceover (run `aa5e7431`).
+
+Two compounding causes, both fixed.
+
+1. Silent downgrade to a voiceover ad type.
+   On-camera lip-sync is bound to `lookFamily === "ugc_authentic"`, which only `testimonial` has; every other person-type narrates by design.
+   But `reconcile.ts` `DOWNGRADE_CHAIN` routed `testimonial -> founder-pov / brand-story` (both `cinematic_polished`, i.e. voiceover) whenever no product was uploaded, because the `testimonial` def wrongly required a product.
+   The def now matches its own skill doc and `research/00`: `testimonial` product is OPTIONAL, so a no-product "create a UGC ad" stays a talking testimonial (a pure talking-head endorsement) instead of being downgraded to a silent-presenter voiceover type.
+
+2. The lip-sync directive was compressed away by the prompt-writer LLM.
+   Even a correctly-classified testimonial only carried the "SPEAKS lip-synced, mouth visible" instruction inside the discretionary <=80-word LLM rewrite (`video/prompt.ts`), under a "be terse, front-load, never re-describe" budget.
+   The LLM routinely dropped it, and the composed wrapper (`video/index.ts` `composePrompt`) added no talking backstop - so Seedance saw floating quotes with no lip-sync cue and treated them as ambient audio.
+   The fix mirrors THIS file's template solution: a DETERMINISTIC, LLM-immune speech directive is now prepended in `composePrompt` for the talking looks (`ugc_authentic` + `service`) when a presenter has spoken lines - "the on-screen person SPEAKS every line themselves on camera, lip-synced with the mouth clearly visible and moving ... never a detached or off-screen voiceover".
+   It is added only for the LLM tier (the deterministic prompt already bakes it in) and survives regardless of how the LLM compresses the body.
+
+Deliberate scope.
+Per the product decision, only the UGC/testimonial and service looks are forced to lip-sync; the cinematic looks (brand-story, founder-pov, lifestyle) stay voiceover-by-design and are untouched.
+The normal pipeline still does NOT use per-line `speaker` keys (that stays a template-pipeline mechanism); it drives a single presenter's voice off the type + the person brief.
+`founder-pov`'s dual speak/VO fragment wording is a known soft ambiguity, deferred to the per-ad-type prompt rebuild (its golden fixtures would otherwise churn).
