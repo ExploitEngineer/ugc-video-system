@@ -92,13 +92,15 @@ export const DETECTOR_FIXTURES: DetectorFixture[] = [
     expected: { adType: "lifestyle", synthesizePerson: false },
   },
   {
-    name: "ugc-no-product-downgrades-to-founder",
+    name: "ugc-no-product-stays-a-talking-testimonial",
     prompt: "An honest hands-on take to camera, with no clear product shots",
     input: { hasProduct: false, hasPerson: true },
     rawDetector: { adType: "testimonial", hooks: ["testimonial"], confidence: 0.9 },
-    // UGC now needs a product; with a person but no product it downgrades to the
-    // person-led founder-pov.
-    expected: { adType: "founder-pov", synthesizePerson: false },
+    // Testimonial product is OPTIONAL, so a person-with-no-product UGC stays a
+    // talking testimonial (a pure talking-head endorsement) rather than being
+    // downgraded to a cinematic voiceover type — the on-camera person must keep
+    // speaking ("UGC always talks").
+    expected: { adType: "testimonial", synthesizePerson: false },
   },
   {
     name: "vague-empty-with-product",

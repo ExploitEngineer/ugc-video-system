@@ -1,16 +1,18 @@
-import type { AssetKind } from "@ugc/shared";
 import type { SkillContext, SkillResult } from "../types.js";
 import type { ImageRef } from "../../providers/openai/index.js";
+import { pollVideoTolerant } from "../../providers/video.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { db, schema } from "../../db/index.js";
 import { env } from "../../config/index.js";
 import { parseJsonObject } from "../json.js";
 import { persistSheet } from "../persist.js";
 import { writeStepEvent } from "../critic/events.js";
-import { type Logger, createLogger } from "../../lib/log.js";
-import { padToProviderAspect } from "../../lib/image/normalize.js";
-import { cleanSheet2x2 } from "../../lib/image/crop.js";
-import { uploadAsset } from "../../lib/storage.js";
+import { downloadToBuffer } from "../../lib/download.js";
+import { createLogger } from "../../lib/log.js";
+import {
+  cleanStoryboardRefUrl,
+  providerSafeRefUrl,
+} from "../../lib/provider-refs.js";
 import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
 import {
   buildDeterministicVideoPrompt,
@@ -61,6 +63,14 @@ export interface VideoBuilderInput {
   /** Scene metadata (incl. transcripts) from the storyboard_sheets row. */
   scenes: StoryboardScene[];
   /**
+   * How many panels the ATTACHED sheet actually has, for the clean-crop grid and
+   * the board-description wording. Normally equals `scenes.length`, but a
+   * template run whose `scenes` were projected from the beats can differ from the
+   * rendered sheet, so the orchestrator passes the sheet's own scene count.
+   * Defaults to `scenes.length`.
+   */
+  boardPanelCount?: number;
+  /**
    * Presenter identity (gender/age/hair) to PIN in the video prompt — from
    * `runs.person_brief`. Empty for no-person ads and uploaded persons; the
    * gender-locked scene text + `@Image 1` carry identity in that case.
@@ -87,15 +97,6 @@ export interface VideoBuilderInput {
 
 const DEFAULT_DURATION_SEC = 15;
 
-/**
- * Hard ceiling for downloading the finished mp4 from the provider CDN. The
- * clip is small (~a few MB at 1080p/15s), so 120s is generous — its job is to
- * turn a SILENTLY-stalled connection (opens, then never sends bytes) into a
- * clean abort→retry→error instead of an eternal spinner, since the fetch/body
- * read otherwise has no timeout.
- */
-const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
-
 type Video = typeof schema.videos.$inferSelect;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -106,94 +107,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * run hashes the SAME runId → the SAME seed, so the synthesized person/voice
  * stay consistent across the merged clips, while different runs still vary.
  */
-function stableSeed(s: string): number {
+export function stableSeed(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0) % 2147483647;
-}
-
-/**
- * Make a Seedance-bound reference URL provider-safe: (1) transcode to JPEG — 4K
- * sheets are now WebP, which BytePlus `CreateAsset` rejects; (2) pad aspect
- * ratios outside 0.4–2.5 into band — generated sheets/strips (which skip the
- * upload normalizer) occasionally drift out and fail the run with
- * `AspectRatioTooSmall/Large`. Upload a PROVIDER-ONLY copy when either applies
- * (the stored original — reused as an OpenAI reference + shown in the UI — stays
- * untouched, small WebP); an already-JPEG in-band ref and any fetch/encode
- * hiccup fall back to the original URL unchanged.
- */
-async function providerSafeRefUrl(
-  url: string,
-  runId: string,
-  kind: AssetKind,
-  log: Logger,
-): Promise<string> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return url;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const mime = res.headers.get("content-type") ?? "image/png";
-    // forceJpeg: WebP sheets must become JPEG for CreateAsset (+ some content
-    // image_url paths); padToProviderAspect also fixes any out-of-band aspect.
-    const norm = await padToProviderAspect(bytes, mime, { forceJpeg: true });
-    if (!norm.adjusted) return url;
-    const { url: safeUrl } = await uploadAsset({
-      runId,
-      kind,
-      bytes: norm.bytes,
-      contentType: norm.mime,
-    });
-    log.info("uploaded provider-safe (jpeg) ref copy", { kind });
-    return safeUrl;
-  } catch (err) {
-    // Never let a normalization hiccup mask the real generation — fall back to
-    // the raw URL and let CreateAsset speak if it's genuinely out of band.
-    log.warn("provider-safe ref normalization skipped", {
-      kind,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return url;
-  }
-}
-
-/**
- * Build the provider-facing storyboard reference: crop the LABELLED 2×2 sheet
- * into a CLEAN 2×2 (no scene badges / caption bars / gridlines) so those baked
- * annotations can't leak into the rendered clip, then normalize + upload a
- * provider-only copy. The stored labelled sheet (the UI/review artifact) is
- * untouched. Any fetch/crop/encode hiccup falls back to the labelled sheet via
- * `providerSafeRefUrl`, so a crop failure never fails the run.
- */
-async function cleanStoryboardRefUrl(
-  url: string,
-  runId: string,
-  log: Logger,
-): Promise<string> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const raw = new Uint8Array(await res.arrayBuffer());
-    const cleaned = await cleanSheet2x2(raw);
-    const norm = await padToProviderAspect(cleaned, "image/png", {
-      forceJpeg: true,
-    });
-    const { url: safeUrl } = await uploadAsset({
-      runId,
-      kind: "storyboard_sheet",
-      bytes: norm.bytes,
-      contentType: norm.mime,
-    });
-    log.info("uploaded cleaned storyboard ref copy (badges/captions cropped)");
-    return safeUrl;
-  } catch (err) {
-    log.warn("storyboard clean-crop skipped — using labelled sheet", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return providerSafeRefUrl(url, runId, "storyboard_sheet", log);
-  }
 }
 
 /**
@@ -266,6 +186,7 @@ export async function videoBuilder(
       hasProductSheet: Boolean(input.productSheetRef?.source),
       brandText: ctx.brandText,
       supportingCast: ctx.supportingCast,
+      boardPanelCount: input.boardPanelCount,
     });
     let llmVideoPrompt = "";
     for (let attempt = 1; attempt <= 2 && !llmVideoPrompt.trim(); attempt++) {
@@ -284,11 +205,15 @@ export async function videoBuilder(
     }
     // The simpler, camerafixed deterministic prompt — the retry ladder's final
     // tier (and the fallback when the LLM returned nothing). Built lazily so a
-    // healthy first attempt never pays for it.
-    let detVideoPromptCache: string | undefined;
-    const detVideoPrompt = (): string => {
-      if (detVideoPromptCache === undefined) {
-        detVideoPromptCache = buildDeterministicVideoPrompt({
+    // healthy first attempt never pays for it. `audioSafe` swaps the verbatim
+    // scripted lines for a generic brand-safe audio directive (the ladder's
+    // "safe" audioMode, used after an OUTPUT-AUDIO moderation block).
+    const detCache = new Map<boolean, string>();
+    const detVideoPrompt = (audioSafe = false): string => {
+      const cached = detCache.get(audioSafe);
+      if (cached !== undefined) return cached;
+      const built = buildDeterministicVideoPrompt(
+        {
           adStyle: ctx.adStyle,
           adType: ctx.adType,
           scenes: input.scenes,
@@ -299,17 +224,26 @@ export async function videoBuilder(
           hasProductSheet: Boolean(input.productSheetRef?.source),
           brandText: ctx.brandText,
           supportingCast: ctx.supportingCast,
-        });
-      }
-      return detVideoPromptCache;
+          boardPanelCount: input.boardPanelCount,
+        },
+        { audioSafe },
+      );
+      detCache.set(audioSafe, built);
+      return built;
     };
-    // The prompt BODY for a ladder tier: the LLM prompt for early attempts (or
-    // the deterministic one if the LLM returned nothing), the deterministic
-    // prompt for the final attempt.
-    const videoPromptBody = (tier: "llm" | "deterministic"): string =>
-      tier === "deterministic" || !llmVideoPrompt
-        ? detVideoPrompt()
-        : llmVideoPrompt;
+    // The prompt BODY for a ladder tier + audio mode: "safe" audioMode always
+    // uses the audio-safe deterministic prompt (the flagged verbatim lines are
+    // dropped); otherwise the LLM prompt for early attempts (or the
+    // deterministic one if the LLM returned nothing), deterministic on the final.
+    const videoPromptBody = (
+      tier: "llm" | "deterministic",
+      audioMode: "full" | "safe" = "full",
+    ): string =>
+      audioMode === "safe"
+        ? detVideoPrompt(true)
+        : tier === "deterministic" || !llmVideoPrompt
+          ? detVideoPrompt()
+          : llmVideoPrompt;
     if (!llmVideoPrompt) {
       log.warn("video prompt: LLM failed twice — using deterministic fallback");
     }
@@ -354,7 +288,12 @@ export async function videoBuilder(
       : [];
     personReferences = [];
     personReferences.push(
-      await cleanStoryboardRefUrl(storyboardUrl, ctx.runId, log),
+      await cleanStoryboardRefUrl(
+        storyboardUrl,
+        ctx.runId,
+        log,
+        input.boardPanelCount ?? input.scenes.length,
+      ),
     );
     if (faceUrl) {
       personReferences.push(
@@ -363,22 +302,21 @@ export async function videoBuilder(
     }
 
     // Compact @Image legend prepended to the Seedance prompt (deterministic, so
-    // the numbers can never drift from the submit order). Kept terse — the
-    // anti-grid / one-continuous-scene rule lives ONCE in `renderDirective` below
-    // (it was previously restated here too), so beat content sits nearer the front.
+    // the numbers can never drift from the submit order). Kept to a bare NAMING of
+    // each reference — the images already carry identity/appearance, and
+    // re-describing what the still holds ("keep its exact shape, colour…") makes the
+    // model re-assert stillness instead of animating (official image-to-video
+    // guidance: restating the image's details REDUCES motion). The one exception is
+    // a merged multi-segment run, where a 4-word identity anchor is the documented
+    // cross-clip-drift guard.
     const boardNo = productUrl ? 2 : 1;
+    const isSegment = input.segmentIndex != null;
     const roles: string[] = [];
-    if (productUrl) {
-      roles.push(
-        "@Image1 (the product) — keep its exact identity, shape, colour, finish and markings in every beat",
-      );
-    }
-    roles.push(
-      `@Image${boardNo} (the storyboard) — match its look, identity and shot order`,
-    );
+    if (productUrl) roles.push("@Image1 the product");
+    roles.push(`@Image${boardNo} the storyboard (follow its shot order)`);
     if (faceUrl) {
       roles.push(
-        `@Image${boardNo + 1} (the on-screen face) — keep this exact face and identity throughout`,
+        `@Image${boardNo + 1} the on-screen person${isSegment ? " (same face every part)" : ""}`,
       );
     }
     // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
@@ -397,7 +335,7 @@ export async function videoBuilder(
     // gets its own directive + negatives.
     const isService = ctx.adType === "service";
     const negatives = isService
-      ? "Each character stays consistent within their own scenes; ONE speaker per shot, never two voices at once; clean CUTS between the distinct scenes; one full-frame scene per shot, no panel grid or split-screen. Follow the storyboard for what each scene shows — do NOT invent an app/UI screen that is not on the board; IF a scene does show an app/device screen, render its text abstract and non-readable; keep ONLY the hero stat and the end-card line crisp and legible; the final beat is a clean brand END CARD (logo + short tagline + URL on the brand colour, no people)."
+      ? "Clean cuts between the distinct scenes, one full-frame scene per shot, one speaker per shot. Follow the storyboard; keep only the hero stat and the end-card line legible; the last beat is a clean brand end card (logo + short tagline, no people)."
       : videoNegatives(lookFamily);
     // Per-look render directive (single source of truth in ./prompt.js): service
     // = skit cuts; cinematic_polished + demo_clean = clean cuts between beats
@@ -406,8 +344,34 @@ export async function videoBuilder(
     // composed prompt can never carry a cut-vs-continuous contradiction.
     const renderDirective = videoRenderDirective(ctx.adType);
     const cameraFixed = isHandheld ? "" : " --camerafixed true";
-    const composePrompt = (tier: "llm" | "deterministic"): string =>
-      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier)}\n\n${negatives}${cameraFixed}`;
+
+    // DETERMINISTIC lip-sync directive (LLM-immune). The UGC/testimonial look and
+    // the service skit are supposed to show the on-screen person TALKING; the
+    // cinematic looks (brand-story, founder-pov, lifestyle) narrate over the action
+    // by design and are left untouched. The LLM prompt-writer is given the quoted
+    // lines + an audio line, but under the 80-word "be terse, front-load, never
+    // re-describe" budget it routinely COMPRESSES AWAY the lip-sync instruction —
+    // leaving Seedance to treat the quotes as ambient voiceover, so the person's
+    // mouth never moves (the reported "character not talking"). Baking the directive
+    // into the wrapper (not the rewritten body) guarantees it survives, exactly as
+    // the template pipeline's frozen `buildVoiceBlock` does. Only added for the LLM
+    // tier — the deterministic prompt already states it.
+    const isUgcLook = lookFamily === "ugc_authentic";
+    const hasPresenter =
+      Boolean(input.hasPerson) || Boolean(input.characterAnchor?.trim());
+    const hasSpokenLines = input.scenes.some((s) => s.transcript?.trim());
+    const wantsOnCameraSpeech =
+      (isUgcLook || isService) && hasPresenter && hasSpokenLines;
+    const speechDirective = wantsOnCameraSpeech
+      ? isService
+        ? " Each on-screen person says their own line on camera, lips clearly moving; one speaker per shot."
+        : " The on-screen person says each line on camera, lips clearly moving, one natural voice throughout."
+      : "";
+    const composePrompt = (
+      tier: "llm" | "deterministic",
+      audioMode: "full" | "safe" = "full",
+    ): string =>
+      `${roles.join(". ")}. ${renderDirective}${tier === "llm" ? speechDirective : ""}\n\n${videoPromptBody(tier, audioMode)}\n\n${negatives}${cameraFixed}`;
 
     // RETRY LADDER: submit → poll → download, up to MAX_VIDEO_ATTEMPTS times.
     // A TRANSIENT provider failure (network / 5xx / timeout / expired /
@@ -424,10 +388,14 @@ export async function videoBuilder(
     let bytes: Uint8Array | undefined;
     let hasAudio = true;
     let videoPrompt = "";
+    // Audio moderation recovery (see the catch below): after Seedance flags the
+    // OUTPUT AUDIO, we retry ONCE in "safe" mode — the verbatim scripted lines
+    // are dropped for generic brand-safe speech, and the seed re-rolls.
+    let audioMode: "full" | "safe" = "full";
     for (let attempt = 1; attempt <= MAX_VIDEO_ATTEMPTS; attempt++) {
       const tier = promptTierForAttempt(attempt);
-      videoPrompt = videoPromptBody(tier);
-      const prompt = composePrompt(tier);
+      videoPrompt = videoPromptBody(tier, audioMode);
+      const prompt = composePrompt(tier, audioMode);
       try {
         task = await ctx.video.submitVideo({
           referenceImages,
@@ -446,8 +414,12 @@ export async function videoBuilder(
           // Multi-segment runs share ONE run-stable seed (same runId → same
           // seed) so the synthesized person/voice stay consistent across the
           // merged clips. Single 15s clips omit it for per-run variety; the eval
-          // env seed still overrides either way (handled in the provider).
-          seed: isSegment ? stableSeed(ctx.runId) : undefined,
+          // env seed still overrides either way (handled in the provider). In
+          // audio-safe mode a segment's seed is salted so the retry actually
+          // re-rolls (a single clip already re-rolls via an unset seed).
+          seed: isSegment
+            ? stableSeed(audioMode === "safe" ? `${ctx.runId}-safe` : ctx.runId)
+            : undefined,
           prompt,
           durationSec,
           aspectRatio: ctx.aspectRatio,
@@ -463,7 +435,11 @@ export async function videoBuilder(
           attempt,
           tier,
         });
-        let result = await ctx.video.pollVideo(task);
+        // `pollVideoTolerant` absorbs a transient DNS/connect blip while polling
+        // (EAI_AGAIN etc.): the clip is still rendering on BytePlus, so it returns a
+        // synthetic "processing" and the loop re-polls the SAME task instead of
+        // discarding a paid generation. The deadline still bounds a total outage.
+        let result = await pollVideoTolerant(ctx.video, task, log);
         lastStatus = result.status ?? "running";
         // Split the wall-clock into BytePlus QUEUE wait vs actual RENDER: mark
         // the first poll that reports `running`. Tells us whether a slow run is
@@ -479,7 +455,7 @@ export async function videoBuilder(
             );
           }
           await sleep(env.BYTEPLUS_POLL_INTERVAL_MS);
-          result = await ctx.video.pollVideo(task);
+          result = await pollVideoTolerant(ctx.video, task, log);
           lastStatus = result.status ?? lastStatus;
           if (runningSince === undefined && lastStatus === "running") {
             runningSince = Date.now();
@@ -520,40 +496,14 @@ export async function videoBuilder(
           durationSec,
         });
 
-        // 4. Download the mp4. Pass any auth headers the provider supplied
-        // (Seedance's video_url is directly fetchable, so this is usually
-        // empty). A single AbortController per attempt bounds BOTH the fetch AND
-        // the body read (arrayBuffer) — otherwise a connection that opens then
-        // never sends hangs the run forever with no error. Retry transient blips
-        // so a flaky download doesn't waste the already-generated (paid) clip.
+        // 4. Stream the mp4 to disk, bounded by a STALL (idle) timeout — never a
+        // total-duration cap, so a healthy large clip download is never aborted
+        // mid-transfer. Passes any provider auth headers; retries internally.
         log.info("downloading video", { taskId: task.taskId });
-        let lastErr = "";
-        for (let dl = 1; dl <= 3; dl++) {
-          const ac = new AbortController();
-          const timer = setTimeout(() => ac.abort(), VIDEO_DOWNLOAD_TIMEOUT_MS);
-          try {
-            const res = await fetch(result.videoUrl, {
-              headers: result.downloadHeaders,
-              signal: ac.signal,
-            });
-            if (!res.ok) throw new Error(`status ${res.status}`);
-            bytes = new Uint8Array(await res.arrayBuffer());
-            break;
-          } catch (err) {
-            const cause = (
-              err as { cause?: { code?: string; message?: string } }
-            ).cause;
-            lastErr =
-              (err as Error)?.name === "AbortError"
-                ? `download timed out after ${VIDEO_DOWNLOAD_TIMEOUT_MS}ms`
-                : (cause?.code ?? cause?.message ?? (err as Error).message);
-            log.warn("video download retry", { dl, err: lastErr });
-            if (dl < 3) await sleep(800 * dl);
-          } finally {
-            clearTimeout(timer);
-          }
-        }
-        if (!bytes) throw new Error(`failed to download video: ${lastErr}`);
+        bytes = await downloadToBuffer(result.videoUrl, {
+          label: "seedance-clip-download",
+          ...(result.downloadHeaders ? { headers: result.downloadHeaders } : {}),
+        });
         log.info("✓ video downloaded", {
           taskId: task.taskId,
           bytes: bytes.length,
@@ -563,6 +513,37 @@ export async function videoBuilder(
       } catch (attemptErr) {
         const failure = classifyRunError(attemptErr, "VIDEO_GENERATION_FAILED");
         const isLast = attempt >= MAX_VIDEO_ATTEMPTS;
+        // OUTPUT-AUDIO moderation block: the verbatim scripted lines were
+        // flagged. Retry ONCE in "safe" audioMode — drop the exact lines for
+        // generic brand-safe speech + a fresh re-roll (keeps audio). A second
+        // audio block (or a block on the last attempt) falls through below to
+        // the soft-fail disposition → the run parks at awaiting_regen.
+        if (
+          failure.code === "PROVIDER_AUDIO_BLOCKED" &&
+          audioMode === "full" &&
+          !isLast
+        ) {
+          audioMode = "safe";
+          log.warn("video audio blocked — retrying with brand-safe speech", {
+            attempt,
+            ...(taskId ? { taskId } : {}),
+          });
+          await writeStepEvent({
+            runId: ctx.runId,
+            step,
+            status: "regenerated",
+            payload: {
+              ladderAttempt: attempt,
+              tier,
+              code: failure.code,
+              reason: "audio-safe",
+              ...(taskId ? { taskId } : {}),
+              ...(isSegment ? { segmentIndex: input.segmentIndex } : {}),
+            },
+          }).catch(() => {});
+          await sleep(1500 * attempt);
+          continue;
+        }
         const retryable =
           videoFailureDisposition(failure.code, step) === "retry";
         if (!retryable || isLast) throw attemptErr; // outer catch classifies + throws

@@ -245,6 +245,24 @@ export async function persistedFinalVideo(runId: string): Promise<boolean> {
   return Boolean(row);
 }
 
+/**
+ * Public URL of the run's single FINAL clip — the `final_video` asset (the
+ * `videos` row with `segment_index IS NULL`, joined to its asset). This is the
+ * clip the `template_render` step feeds into a Nexrender template. Returns the
+ * NEWEST such asset; undefined if the final video is not persisted yet.
+ */
+export async function latestFinalVideoUrl(
+  runId: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ url: schema.assets.url })
+    .from(schema.assets)
+    .where(and(eq(schema.assets.runId, runId), eq(schema.assets.kind, "final_video")))
+    .orderBy(desc(schema.assets.createdAt))
+    .limit(1);
+  return row?.url ?? undefined;
+}
+
 /** Newest generated person sheet URL for the run (none when person uploaded). */
 export async function latestPersonSheetUrl(
   runId: string,

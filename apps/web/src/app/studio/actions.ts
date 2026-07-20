@@ -12,7 +12,7 @@ import { apiUrl } from "@/lib/api";
 
 async function mutateRun(
   runId: string,
-  action: "cancel",
+  action: "cancel" | "regenerate-template",
 ): Promise<RunDetail | null> {
   try {
     const res = await fetch(apiUrl(`/runs/${runId}/${action}`), {
@@ -68,6 +68,19 @@ export async function cancelRunAction(
 }
 
 /**
+ * Retry a `pipeline: "template"` run that failed on the automatic
+ * text-fill/render step (`TEMPLATE_FILL_FAILED`/`TEMPLATE_RENDER_FAILED`).
+ * Rewinds to the pre-fill checkpoint and flips back to `running`; the driver
+ * re-enters `template_fill` → `template_render` (re-running the LLM fill too —
+ * cheap, and self-healing if bad text caused the failure).
+ */
+export async function regenerateTemplateAction(
+  runId: string,
+): Promise<RunDetail | null> {
+  return mutateRun(runId, "regenerate-template");
+}
+
+/**
  * Re-render the video clip(s) of a finished or soft-failed run, reusing the
  * existing storyboard + reference sheets. `segmentIndex` targets one clip of a
  * multi-segment run (omit for the 15s clip / all segments); `note` is an
@@ -82,7 +95,9 @@ export async function regenerateVideoAction(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...(opts.segmentIndex != null ? { segmentIndex: opts.segmentIndex } : {}),
+        ...(opts.segmentIndex != null
+          ? { segmentIndex: opts.segmentIndex }
+          : {}),
         ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
       }),
     });
@@ -91,5 +106,44 @@ export async function regenerateVideoAction(
   } catch (err) {
     console.error("[regenerateVideoAction] request to API failed:", err);
     return null;
+  }
+}
+
+export type RetemplateResult =
+  | { ok: true; run: RunDetail }
+  | { ok: false; error: string };
+
+/**
+ * Composite this ad's EXISTING video into a different template.
+ *
+ * The reference sheets, the storyboard and the 15s master clip are reused; only
+ * the plan, the on-screen copy, the template's stills and the composite are
+ * re-derived for the new slots. The run flips back to `running` and the worker
+ * drives the short chain.
+ *
+ * Unlike the actions above this one surfaces the API's message rather than
+ * collapsing to `null`: its refusals ("that is already this ad's template", an
+ * aspect-ratio mismatch) are the whole point, and the user has to read them.
+ */
+export async function retemplateAction(
+  runId: string,
+  templateId: string,
+): Promise<RetemplateResult> {
+  try {
+    const res = await fetch(apiUrl(`/runs/${runId}/retemplate`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      return { ok: false, error: body?.error ?? `Failed (${res.status}).` };
+    }
+    return { ok: true, run: (await res.json()) as RunDetail };
+  } catch (err) {
+    console.error("[retemplateAction] request to API failed:", err);
+    return { ok: false, error: "Could not reach the server." };
   }
 }

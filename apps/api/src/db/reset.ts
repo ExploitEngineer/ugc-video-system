@@ -9,6 +9,14 @@ import { BUCKET, supabase } from "../lib/storage.js";
 
 // Order is irrelevant — RESTART IDENTITY CASCADE clears FK-linked rows in one
 // atomic statement.
+//
+// `templates` is deliberately NOT in this list. The template library is not run
+// data: rebuilding it means re-uploading .aep files to Nexrender Cloud and
+// paying for a preview render per template. A dev wiping their runs almost never
+// means "and destroy the library too". `runs.template_id` is ON DELETE SET NULL,
+// so truncating runs leaves the library rows untouched and valid. Template
+// preview files live under the `templates/` storage prefix, which `emptyBucket`
+// below never walks (it only descends into `runs/`), so they survive too.
 const TABLES = [
   "projects",
   "runs",

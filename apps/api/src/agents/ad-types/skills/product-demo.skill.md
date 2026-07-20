@@ -169,7 +169,7 @@ a clear, confident, instructive voiceover
 ### videoAudioLine
 
 ```
-Audio: a clear off-screen VOICEOVER (neutral, instructive, the SAME voice throughout, NOT lip-synced on screen) walks the steps, each line quoted verbatim and short; tactile interaction SFX (click, tap, pour, snap, mechanism) where they fit, light or no music; no garbled product label, keep the product unwarped.
+Audio: real interaction SFX (click, tap, pour, snap) where they fit; light or no music.
 ```
 
 ### narrativeTreatment

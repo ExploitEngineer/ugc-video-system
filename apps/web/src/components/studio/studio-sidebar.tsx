@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeftIcon,
+  LayoutTemplateIcon,
   MenuIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
@@ -11,6 +12,7 @@ import {
   PanelLeftOpenIcon,
   PlusIcon,
   Trash2Icon,
+  VideoIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -33,6 +35,11 @@ import {
   removeRun,
   useRunHistory,
 } from "@/lib/run-history";
+import {
+  type PipelineTab,
+  setPipelineTab,
+  usePipelineTab,
+} from "@/lib/studio-pipeline-tab";
 import { useRunsStream } from "@/lib/use-runs-stream";
 import { cn } from "@/lib/utils";
 
@@ -148,6 +155,7 @@ function SidebarInner({
   onClose?: () => void;
 }) {
   const localRuns = useRunHistory();
+  const tab = usePipelineTab();
   // Keep the run list live over SSE instead of polling — pushes on every
   // create / delete / status change.
   useRunsStream();
@@ -177,9 +185,13 @@ function SidebarInner({
           id: r.id,
           prompt: r.prompt,
           createdAt: r.createdAt,
+          pipeline: r.pipeline,
         })),
-      ),
-    [localRuns, dbRuns],
+        // Legacy entries recorded before the pipeline switch shipped carry no
+        // `pipeline` field — default them to "video" so they stay visible on
+        // the Normal tab instead of vanishing from both.
+      ).filter((r) => (r.pipeline ?? "video") === tab),
+    [localRuns, dbRuns, tab],
   );
 
   return (
@@ -239,10 +251,20 @@ function SidebarInner({
         </div>
       )}
 
+      {/* Pipeline switch — Normal video vs Template. Also filters the recent
+          chats list below (each tab shows only its own pipeline's runs). */}
+      <div className={cn("px-3 pt-3", collapsed && "flex justify-center px-0")}>
+        <PipelineTabSwitch
+          collapsed={collapsed}
+          value={tab}
+          onChange={setPipelineTab}
+        />
+      </div>
+
       {/* New chat */}
       <div
         className={cn(
-          "px-3 pt-3 pb-2",
+          "px-3 pt-2 pb-2",
           collapsed && "flex justify-center px-0 pt-2",
         )}
       >
@@ -254,9 +276,15 @@ function SidebarInner({
             collapsed && "size-10 w-10 p-0",
           )}
         >
-          <Link href="/studio" aria-label="New chat" title="New chat">
+          <Link
+            // A template ad starts by PICKING a template, not by writing a brief.
+            href={tab === "template" ? "/studio/templates" : "/studio"}
+            aria-label={tab === "template" ? "New template ad" : "New chat"}
+            title={tab === "template" ? "New template ad" : "New chat"}
+          >
             <PlusIcon className="size-4" />
-            {!collapsed && "New chat"}
+            {!collapsed &&
+              (tab === "template" ? "New template ad" : "New chat")}
           </Link>
         </Button>
       </div>
@@ -316,6 +344,70 @@ function SidebarInner({
         </Button>
         <ThemeToggle />
       </div>
+    </div>
+  );
+}
+
+/** Two-segment sliding-pill switch between the normal video pipeline and the
+ *  Nexrender template pipeline — same pattern as the composer's ModeToggle.
+ *  Collapsed sidebar shows a vertical icon-only stack instead of labels. */
+function PipelineTabSwitch({
+  collapsed,
+  value,
+  onChange,
+}: {
+  collapsed: boolean;
+  value: PipelineTab;
+  onChange: (tab: PipelineTab) => void;
+}) {
+  const opts: Array<{
+    value: PipelineTab;
+    label: string;
+    icon: typeof VideoIcon;
+  }> = [
+    { value: "video", label: "Normal", icon: VideoIcon },
+    { value: "template", label: "Template", icon: LayoutTemplateIcon },
+  ];
+  return (
+    <div
+      className={cn(
+        "border-border/60 bg-background/40 relative inline-flex items-center rounded-full border p-0.5",
+        collapsed ? "flex-col gap-0.5 rounded-2xl" : "w-full",
+      )}
+    >
+      {opts.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={selected}
+            title={
+              opt.value === "video"
+                ? "Normal video pipeline"
+                : "Template pipeline — wrap the ad in an After Effects template"
+            }
+            className={cn(
+              "relative isolate inline-flex items-center justify-center gap-1.5 rounded-full py-1 text-xs font-medium transition-colors",
+              collapsed ? "size-8" : "flex-1 px-2.5",
+              selected
+                ? "text-foreground"
+                : "text-muted-foreground hover:bg-brand/10 hover:text-foreground",
+            )}
+          >
+            {selected && (
+              <motion.span
+                layoutId="sidebar-pipeline-pill"
+                className="bg-brand/20 ring-1 ring-inset ring-brand/30 absolute inset-0 -z-10 rounded-full"
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              />
+            )}
+            <opt.icon className="size-3.5" />
+            {!collapsed && opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

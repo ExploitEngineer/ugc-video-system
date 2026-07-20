@@ -171,7 +171,7 @@ a sincere, grounded, personal founder voice
 ### videoAudioLine
 
 ```
-Audio: the founder SPEAKS each line in the SAME sincere human voice throughout (fitting their apparent age, gender and energy) — lip-synced and camera locked while on screen, or as their own intimate voiceover over a filmed beat; quote each line verbatim, keep it short, calm and deliberate, over quiet room tone and a sparse piano underscore; no identity drift, no on-screen text, no loud hard-sell music.
+Audio: quiet room tone under a sparse piano underscore, no loud hard-sell music.
 ```
 
 ### narrativeTreatment

@@ -39,10 +39,22 @@ export const RUN_ERROR_MESSAGES: Record<RunErrorCode, string> = {
     "One of the reference images has a shape the video service can't use. If you uploaded a person photo, try one closer to a standard portrait or square format.",
   PROVIDER_CONTENT_BLOCKED:
     "Part of this generation was blocked by the provider's safety filters. Try a different photo or adjust your prompt.",
+  PROVIDER_AUDIO_BLOCKED:
+    "The generated voiceover was flagged by the provider's audio safety filter. Regenerate to try again.",
   PROVIDER_RATE_LIMITED:
     "The generation service is busy right now. Please try again in a few minutes.",
   VIDEO_MERGE_FAILED:
     "We couldn't assemble the final video from its segments. Please try the run again.",
+  TEMPLATE_PLAN_FAILED:
+    "We couldn't analyze that template. Please try again.",
+  TEMPLATE_KEYFRAME_FAILED:
+    "We couldn't set up your template's look. Please try again.",
+  TEMPLATE_VIDEO_FAILED:
+    "We couldn't generate the footage for your template. Please try again.",
+  TEMPLATE_RENDER_FAILED:
+    "We couldn't render your video into that template. Try a different template, or skip the template step.",
+  TEMPLATE_FILL_FAILED:
+    "We couldn't write the text for your template. Please try again.",
   VIDEO_GENERATION_FAILED: "Video generation failed. Please try the run again.",
   VIDEO_GENERATION_TIMEOUT:
     "Video generation took too long and timed out. Please try the run again.",
@@ -61,6 +73,13 @@ const CLASSIFIERS: Array<{ pattern: RegExp; code: RunErrorCode }> = [
   {
     pattern: /aspectratiotoo(small|large)|aspect ratio must be between/i,
     code: "PERSON_IMAGE_INVALID",
+  },
+  // Output-AUDIO moderation, BEFORE the generic content-block row (first match
+  // wins): the video ladder retries this specific code with brand-safe speech.
+  // The generic row below would otherwise swallow it via "sensitive information".
+  {
+    pattern: /output\s*audio.*(sensitive|moderation|blocked)|audio may contain sensitive/i,
+    code: "PROVIDER_AUDIO_BLOCKED",
   },
   {
     pattern:
@@ -102,6 +121,24 @@ export function classifyRunError(
   if (err instanceof RunFailure) return err;
   const raw = err instanceof Error ? err.message : String(err);
   const code = CLASSIFIERS.find((c) => c.pattern.test(raw))?.code ?? defaultCode;
+  return new RunFailure(code, RUN_ERROR_MESSAGES[code], raw, { cause: err });
+}
+
+/**
+ * Wrap ANY error as a `RunFailure` with a FORCED code — skipping the provider-
+ * signature classifier. Use this at a throw-site that knows exactly which step
+ * failed and must keep that code, even when the raw text looks like a generic
+ * provider error. The template steps rely on this: a Seedance/gpt-image failure
+ * inside `template_video`/`template_keyframe` would otherwise reclassify to a
+ * `VIDEO_*`/`IMAGE_*` code, and the template retry (`rewindStepForTemplateRegen`,
+ * keyed on the `TEMPLATE_*` code) would then not know where to resume.
+ */
+export function runFailureWithCode(
+  code: RunErrorCode,
+  err: unknown,
+): RunFailure {
+  if (err instanceof RunFailure && err.code === code) return err;
+  const raw = err instanceof Error ? err.message : String(err);
   return new RunFailure(code, RUN_ERROR_MESSAGES[code], raw, { cause: err });
 }
 

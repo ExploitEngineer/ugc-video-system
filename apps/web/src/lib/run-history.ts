@@ -15,6 +15,10 @@ export type RunHistoryEntry = {
   id: string;
   prompt: string;
   createdAt: string;
+  /** Which pipeline this run uses — drives the sidebar's tab filter. Absent
+   *  on legacy entries recorded before the pipeline switch shipped; the
+   *  sidebar treats a missing value as `"video"`. */
+  pipeline?: "video" | "template";
 };
 
 const listeners = new Set<() => void>();

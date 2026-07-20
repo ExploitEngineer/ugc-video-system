@@ -6,11 +6,19 @@
 // null), and (2) make sure internal-only
 // columns (notably `assets.storagePath`) NEVER reach the frontend.
 
-import type { Asset, RunDetail, Scene, Step, StepEvent } from "@ugc/shared";
+import type {
+  Asset,
+  RunDetail,
+  RunTemplate,
+  Scene,
+  Step,
+  StepEvent,
+} from "@ugc/shared";
 import type { Run } from "@ugc/shared";
 import {
   hookSelectionSchema,
   isMultiSegment,
+  templatePlanSchema,
   narrativeOutlineSchema,
   runErrorCodeSchema,
   sceneSchema,
@@ -92,6 +100,7 @@ export type RunListRow = Pick<
   | "mode"
   | "aspectRatio"
   | "duration"
+  | "pipeline"
   | "criticEnabled"
   | "characterEnabled"
   | "status"
@@ -99,6 +108,9 @@ export type RunListRow = Pick<
   | "error"
   | "errorCode"
   | "feedback"
+  | "templateId"
+  | "template"
+  | "retemplating"
   | "createdAt"
   | "updatedAt"
 >;
@@ -119,6 +131,7 @@ export function toRunDto(row: RunListRow): Run {
     mode: row.mode,
     aspectRatio: row.aspectRatio,
     duration: row.duration,
+    pipeline: row.pipeline,
     criticEnabled: row.criticEnabled,
     characterEnabled: row.characterEnabled,
     status: row.status,
@@ -132,6 +145,12 @@ export function toRunDto(row: RunListRow): Run {
     // degrade an unknown value to null rather than 500-ing the poll.
     errorCode: runErrorCodeSchema.nullable().catch(null).parse(row.errorCode ?? null),
     feedback: row.feedback ?? null,
+    templateId: row.templateId ?? null,
+    // Off the run's own immutable snapshot, not a join: the library row can be
+    // archived (which nulls `template_id`) while the ad keeps rendering.
+    templateName:
+      (row.template as { displayName?: string } | null)?.displayName ?? null,
+    retemplating: row.retemplating,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -188,6 +207,47 @@ export function toRunDetailDto(
   if (run.adType !== "service") skippedSteps.push("creative_brief");
   if (!willGenerateProduct(assetCtx)) skippedSteps.push("product_sheet");
   if (!willGeneratePerson(assetCtx)) skippedSteps.push("person_sheet");
+  // Every step must be classified for SOME pipeline, or the timeline renders it
+  // as a stuck "pending" row forever. This cuts BOTH ways.
+  if (run.pipeline === "template") {
+    // Template runs are single-clip, so the multi-segment chain never runs.
+    skippedSteps.push(
+      "narrative_outline",
+      "segment_storyboard",
+      "segment_video",
+      "merge",
+    );
+    // The template pipeline owns its authoring steps — it never runs the shared
+    // 2×2 storyboard, the Critic inspections, or the video-pipeline `video` step.
+    skippedSteps.push(
+      "storyboard",
+      "storyboard_inspection",
+      "product_inspection",
+      "video",
+    );
+    // Before the plan exists we can only say the step is POSSIBLE (some slot is
+    // a content image). Once it exists, the plan is authoritative: it may have
+    // declined every slot, in which case the Image Agent has nothing to do and
+    // the timeline should say "skipped", not sit on "pending" forever.
+    const slots = (run.template as RunTemplate | null)?.slots ?? [];
+    const plan = templatePlanSchema.safeParse(run.templatePlan).data;
+    const willGenerate = plan
+      ? plan.slots.some((s) => s.asset === "IMAGE" && s.fill)
+      : slots.some((s) => s.asset === "IMAGE" && s.imageClass === "content");
+    if (!willGenerate) skippedSteps.push("template_images");
+    // A service ad has no product to photograph, so it never enters the
+    // reference phase — but `creative_brief` above is only skipped for
+    // non-service runs, so nothing more is needed here.
+  } else {
+    skippedSteps.push(
+      "template_plan",
+      "template_keyframe",
+      "template_fill",
+      "template_images",
+      "template_video",
+      "template_render",
+    );
+  }
   return {
     ...toRunDto(run),
     assets: assets.map(toAssetDto),

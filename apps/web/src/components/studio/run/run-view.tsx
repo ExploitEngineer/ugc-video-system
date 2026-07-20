@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { RunDetail, Step } from "@ugc/shared";
 import { isMultiSegment, segmentCountFor } from "@ugc/shared";
 import { motion } from "framer-motion";
 import {
@@ -11,6 +12,7 @@ import {
   ExpandIcon,
   FilmIcon,
   GaugeIcon,
+  LayoutTemplateIcon,
   ListChecksIcon,
   PencilIcon,
   RectangleHorizontalIcon,
@@ -25,17 +27,23 @@ import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
-import { cancelRunAction, submitFeedbackAction } from "@/app/studio/actions";
+import {
+  cancelRunAction,
+  regenerateTemplateAction,
+  submitFeedbackAction,
+} from "@/app/studio/actions";
 import { CreateRunForm } from "@/components/studio/create-run-form";
 import { ArtifactCard } from "@/components/studio/run/artifact-card";
 import { FeedbackBar } from "@/components/studio/run/feedback-bar";
 import { AgentMessage, UserMessage } from "@/components/studio/run/message";
 import { NowRunning } from "@/components/studio/run/now-running";
 import { RegenerateClip } from "@/components/studio/run/regenerate-clip";
+import { RetemplateDialog } from "@/components/studio/run/retemplate-dialog";
 import {
   GATE_NEXT_LABEL,
   gateOf,
   isTerminal,
+  optimisticRegen,
 } from "@/components/studio/run/run-meta";
 import { ScriptPanel } from "@/components/studio/run/script-panel";
 import { StepTimeline } from "@/components/studio/run/step-timeline";
@@ -51,6 +59,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchRun } from "@/lib/api";
 import { addRun, removeRun } from "@/lib/run-history";
 import { useRunStream } from "@/lib/use-run-stream";
+
+/**
+ * Template-step failure code → the step the server re-runs FIRST on
+ * `POST /runs/:id/regenerate-template` (the failed step itself). The single source
+ * of truth for BOTH the reachable "Retry" gate and the optimistic amber seed, kept
+ * in lockstep with the API's `RESUME_STEP_BY_CODE` / `rewindStepForTemplateRegen`.
+ */
+const TEMPLATE_RESUME_STEP: Record<string, Step> = {
+  TEMPLATE_PLAN_FAILED: "template_plan",
+  TEMPLATE_KEYFRAME_FAILED: "template_keyframe",
+  TEMPLATE_FILL_FAILED: "template_fill",
+  TEMPLATE_VIDEO_FAILED: "template_video",
+  TEMPLATE_RENDER_FAILED: "template_render",
+};
+const TEMPLATE_RETRYABLE_CODES = Object.keys(TEMPLATE_RESUME_STEP);
 
 /** Kebab hook id → a readable label, e.g. "problem-solution" → "Problem Solution". */
 function prettyHook(id: string): string {
@@ -128,7 +151,11 @@ export function RunView({ runId }: { runId: string }) {
   // Confirmed-missing run → stop the SSE stream so it can't reconnect-loop on a
   // 404 (the not-found UI is driven by the query error below).
   const notFound = isError && (error as Error).message === "not-found";
-  useRunStream(runId, !notFound);
+  // The run's OWN settled-ness (failed/completed) — reflects the same cache a
+  // regenerate mutation writes to, so the stream reopens the instant one flips
+  // a settled run back to running (see use-run-stream.ts for why this matters).
+  const settled = run?.status === "failed" || run?.status === "completed";
+  useRunStream(runId, !notFound, settled);
 
   const mutation = useMutation({
     mutationFn: (_action: "cancel") => cancelRunAction(runId),
@@ -152,6 +179,31 @@ export function RunView({ runId }: { runId: string }) {
     onError: () => toast.error("Couldn’t send feedback — try again"),
   });
 
+  const regenerateTemplateMutation = useMutation({
+    mutationFn: () => regenerateTemplateAction(runId),
+    // Amber loader on the click, lit on the SAME step the server re-runs first
+    // (the failed step), so the optimistic state matches the authoritative seed for
+    // every retryable code — not just fill/render.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<RunDetail>(queryKey);
+      if (prev) {
+        const target =
+          TEMPLATE_RESUME_STEP[prev.errorCode ?? ""] ?? "template_plan";
+        queryClient.setQueryData(queryKey, optimisticRegen(prev, target));
+      }
+      return { prev };
+    },
+    onSuccess: (detail) => {
+      if (detail) queryClient.setQueryData(queryKey, detail);
+      toast.message("Retrying the template…");
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
+      toast.error("Couldn’t retry — try again");
+    },
+  });
+
   // Record this run in the sidebar history — covers both freshly-created runs
   // and ones opened directly by URL. addRun is idempotent per id. If the run is
   // confirmed missing (404), drop it from history so the ghost entry can't keep
@@ -164,6 +216,7 @@ export function RunView({ runId }: { runId: string }) {
   const historyId = run?.id;
   const historyPrompt = run?.prompt;
   const historyCreatedAt = run?.createdAt;
+  const historyPipeline = run?.pipeline;
   const fetchErrorMessage = isError ? (error as Error).message : null;
   useEffect(() => {
     if (historyId && historyPrompt && historyCreatedAt) {
@@ -171,11 +224,19 @@ export function RunView({ runId }: { runId: string }) {
         id: historyId,
         prompt: historyPrompt,
         createdAt: historyCreatedAt,
+        pipeline: historyPipeline,
       });
     } else if (fetchErrorMessage === "not-found") {
       removeRun(runId);
     }
-  }, [historyId, historyPrompt, historyCreatedAt, fetchErrorMessage, runId]);
+  }, [
+    historyId,
+    historyPrompt,
+    historyCreatedAt,
+    historyPipeline,
+    fetchErrorMessage,
+    runId,
+  ]);
 
   if (isError && (error as Error).message === "not-found") {
     return (
@@ -218,13 +279,40 @@ export function RunView({ runId }: { runId: string }) {
     );
   }
 
-  // Prefer the user's latest CE.SDK edit (newest `edited_video`) over the
-  // originally generated `final_video`; the original is always kept.
-  const editedVideo = run.assets
-    .filter((a) => a.kind === "edited_video")
+  // The deliverable shown depends on the pipeline: a `template` run's ONLY
+  // deliverable is its Nexrender-rendered `templated_video` (it never gets a
+  // CE.SDK edit); a normal `video` run keeps today's precedence — the user's
+  // CE.SDK edit (`edited_video`) over the originally generated `final_video`.
+  // The original is always kept alongside, never replaced.
+  const isTemplateRun = run.pipeline === "template";
+  const templatedVideo = run.assets
+    .filter((a) => a.kind === "templated_video")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  const finalVideo =
-    editedVideo ?? run.assets.find((a) => a.kind === "final_video");
+  const editedVideo = isTemplateRun
+    ? undefined
+    : run.assets
+        .filter((a) => a.kind === "edited_video")
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const finalVideo = isTemplateRun
+    ? templatedVideo
+    : (editedVideo ?? run.assets.find((a) => a.kind === "final_video"));
+  // The precondition for re-templating: there has to be a generated video to
+  // re-composite. Mirrors the API's own check, so a run that failed before the
+  // clip existed never offers the action.
+  const hasGeneratedVideo = run.assets.some((a) => a.kind === "final_video");
+  // `template_images` is non-fatal BY DESIGN: a slot whose still fails to generate
+  // silently keeps the template's own placeholder artwork and the step still
+  // passes. That silence can ship an ad with stock art and no signal — so surface
+  // the count (read from the passed step's payload) as an informational note.
+  const imageFallbackCount = (() => {
+    const ev = [...run.stepEvents]
+      .reverse()
+      .find((e) => e.step === "template_images" && e.status === "passed");
+    const n = Number(
+      (ev?.payload as { fellBack?: number } | undefined)?.fellBack,
+    );
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
   // Multi-segment: the N 15s segment clips + the N segment storyboard rows.
   // Segments finish in parallel (random order), so order by the `segmentIndex`
   // stamped on each asset's meta, falling back to original order if absent.
@@ -277,9 +365,14 @@ export function RunView({ runId }: { runId: string }) {
         )}
         {/* Only the options the USER picked live in the user's bubble. */}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Chip icon={isMulti ? FilmIcon : ClockIcon}>
-            {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
-          </Chip>
+          {/* A template run's length is template-derived (not a user choice), and
+              `run.duration` is a placeholder enum for it — so show no duration chip;
+              the Template chip below labels it and the picker/brief show its runtime. */}
+          {!isTemplateRun && (
+            <Chip icon={isMulti ? FilmIcon : ClockIcon}>
+              {isMulti ? `${run.duration} · ${segCount}×15s` : run.duration}
+            </Chip>
+          )}
           <Chip
             icon={
               run.aspectRatio === "16:9"
@@ -292,6 +385,7 @@ export function RunView({ runId }: { runId: string }) {
           <Chip icon={run.mode === "automatic" ? GaugeIcon : ListChecksIcon}>
             {run.mode === "automatic" ? "Automatic" : "Step-by-step"}
           </Chip>
+          {isTemplateRun && <Chip icon={LayoutTemplateIcon}>Template</Chip>}
         </div>
       </UserMessage>
 
@@ -341,6 +435,22 @@ export function RunView({ runId }: { runId: string }) {
 
       {/* Agent — live progress + the pipeline timeline. */}
       <AgentMessage label="Pipeline">
+        {/* A re-template lights up only four of the eight rows and greys the
+            rest. Say why, at the moment it is true, rather than leaving a
+            half-lit timeline to be puzzled over. */}
+        {run.retemplating && (
+          <div className="border-warning/40 bg-warning/5 mb-3 flex items-start gap-3 rounded-xl border px-4 py-3">
+            <LayoutTemplateIcon className="text-warning mt-0.5 size-4 shrink-0" />
+            <p className="text-muted-foreground text-sm">
+              Rebuilding in{" "}
+              <span className="text-foreground font-medium">
+                {run.templateName ?? "the new template"}
+              </span>
+              . Keeping your video, reference sheets and storyboard — only the
+              copy, the template's images and the final assembly are redone.
+            </p>
+          </div>
+        )}
         {running && <NowRunning run={run} />}
         <Card>
           <CardContent className="py-6">
@@ -429,12 +539,14 @@ export function RunView({ runId }: { runId: string }) {
         </AgentMessage>
       )}
 
-      {/* Agent — the run failed. */}
+      {/* Agent — the run failed. A template-pipeline run that failed on the
+          automatic text-fill/render step gets a Retry button — cheap and
+          self-healing (POST /runs/:id/regenerate-template). */}
       {run.status === "failed" && (
         <AgentMessage label="Run ended">
           <div className="border-destructive/40 bg-destructive/5 flex items-center gap-3 rounded-xl border px-4 py-3">
             <TriangleAlertIcon className="text-destructive size-5 shrink-0" />
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-1 flex-col gap-0.5">
               <p className="text-muted-foreground text-sm">
                 {run.error ?? "The run was stopped."}
               </p>
@@ -443,6 +555,39 @@ export function RunView({ runId }: { runId: string }) {
                   Error code: {run.errorCode}
                 </p>
               )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Retry re-renders the run's FROZEN template snapshot. When the
+                  template itself is at fault, retrying hits the same wall every
+                  time — so offer the way out beside it. */}
+              {isTemplateRun && hasGeneratedVideo && (
+                <RetemplateDialog
+                  runId={run.id}
+                  aspectRatio={run.aspectRatio}
+                  currentTemplateId={run.templateId}
+                  currentTemplateName={run.templateName}
+                  // Re-picking the same template re-resolves its snapshot, which
+                  // is how an admin-side template fix reaches a failed ad.
+                  allowCurrent
+                />
+              )}
+              {/* Retry is reachable for EVERY template-step failure the server can
+                  rewind (plan / keyframe / fill / video / render) — not just the
+                  last two. The plan/keyframe/video failures produce no final video,
+                  so `RetemplateDialog` (gated on hasGeneratedVideo) never shows for
+                  them; without this they had NO recovery button at all even though
+                  `rewindStepForTemplateRegen` fully supports them. */}
+              {isTemplateRun &&
+                TEMPLATE_RETRYABLE_CODES.includes(run.errorCode ?? "") && (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    onClick={() => regenerateTemplateMutation.mutate()}
+                    disabled={regenerateTemplateMutation.isPending}
+                  >
+                    Retry
+                  </Button>
+                )}
             </div>
           </div>
         </AgentMessage>
@@ -460,15 +605,21 @@ export function RunView({ runId }: { runId: string }) {
               </p>
             </div>
             <div className="flex justify-end pl-8">
-              <RegenerateClip runId={run.id} variant="brand" label="Regenerate" />
+              <RegenerateClip
+                runId={run.id}
+                variant="brand"
+                label="Regenerate"
+              />
             </div>
           </div>
         </AgentMessage>
       )}
 
-      {/* Agent — the finished video, the closing reply of the thread. */}
+      {/* Agent — the finished video, the closing reply of the thread. A
+          template-pipeline run's ONLY deliverable is its templated_video — no
+          "Edit video" CE.SDK link (that flow doesn't apply to this pipeline). */}
       {run.status === "completed" && finalVideo && (
-        <AgentMessage label="Your ad video">
+        <AgentMessage label={isTemplateRun ? "Your ad" : "Your ad video"}>
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -477,26 +628,55 @@ export function RunView({ runId }: { runId: string }) {
             <div className="flex items-center justify-between gap-2 border-b p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <CheckCircle2Icon className="size-4 text-success" />
-                {editedVideo
-                  ? "Your edited ad video"
-                  : "Your ad video is ready"}
+                {isTemplateRun
+                  ? "Your ad is ready"
+                  : editedVideo
+                    ? "Your edited ad video"
+                    : "Your ad video is ready"}
               </div>
               <div className="flex items-center gap-2">
                 {/* Regenerate the whole clip (no segmentIndex → 15s final, or
                     all segments of a multi run) reusing the same sheets. */}
                 <RegenerateClip runId={run.id} />
-                <Button asChild variant="brand" size="sm">
-                  <Link href={`/studio/${run.id}/edit`}>
-                    <PencilIcon className="size-4" />
-                    Edit video
-                  </Link>
-                </Button>
+                {isTemplateRun ? (
+                  /* Keep the generated video, composite it into a different
+                     template. The template run's counterpart to "Edit video". */
+                  <RetemplateDialog
+                    runId={run.id}
+                    aspectRatio={run.aspectRatio}
+                    currentTemplateId={run.templateId}
+                    currentTemplateName={run.templateName}
+                  />
+                ) : (
+                  <Button asChild variant="brand" size="sm">
+                    <Link href={`/studio/${run.id}/edit`}>
+                      <PencilIcon className="size-4" />
+                      Edit video
+                    </Link>
+                  </Button>
+                )}
               </div>
             </div>
+            {isTemplateRun && imageFallbackCount > 0 && (
+              <div className="border-warning/30 bg-warning/5 flex items-center gap-2 border-b px-4 py-2">
+                <TriangleAlertIcon className="text-warning size-4 shrink-0" />
+                <p className="text-warning text-xs">
+                  {imageFallbackCount} template image
+                  {imageFallbackCount === 1 ? "" : "s"} could not be generated
+                  and kept the template&apos;s built-in artwork.
+                </p>
+              </div>
+            )}
             <div className="p-4">
               <ArtifactCard
                 asset={finalVideo}
-                title={editedVideo ? "Edited ad video" : "Final ad video"}
+                title={
+                  isTemplateRun
+                    ? "Your ad"
+                    : editedVideo
+                      ? "Edited ad video"
+                      : "Final ad video"
+                }
               />
             </div>
           </motion.div>

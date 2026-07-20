@@ -38,12 +38,18 @@ import { cropRowsAs2x2 } from "../../lib/image/crop.js";
 import { fetchWithRetry } from "../../lib/http.js";
 import { logRun, logRunError } from "../../lib/log.js";
 import { notifyRunChanged } from "../../lib/run-events.js";
-import { classifyRunError, truncateDetail } from "../../lib/run-failure.js";
+import {
+  classifyRunError,
+  RunFailure,
+  RUN_ERROR_MESSAGES,
+  truncateDetail,
+} from "../../lib/run-failure.js";
 import { criticAgent } from "../critic/index.js";
 import type { CriticOutcome } from "../critic/types.js";
 import { imageAgent } from "../image/index.js";
 import type { StoryboardScene } from "../image/storyboard/prompt.js";
 import { mergeAgent } from "../merge/index.js";
+import { templateAgent } from "../template/index.js";
 import { videoAgent } from "../video/index.js";
 import { dispositionAfterLadder } from "../video/retry.js";
 import type { SkillContext } from "../types.js";
@@ -192,12 +198,14 @@ function buildCtx(
     personBrief: run.personBrief ?? "",
     aspectRatio: run.aspectRatio,
     duration: run.duration,
-    // Multi-segment only — the locked visual-style bible. Each driveRun loop
-    // iteration re-reads the run and rebuilds ctx, so by the time
-    // segment_storyboard/segment_video run it is populated.
-    visualStyle: isMultiSegment(run.duration)
-      ? (run.visualStyle ?? undefined)
-      : undefined,
+    // The locked look bible. Multi-segment (60s) runs plan it in the narrative
+    // outline; TEMPLATE runs derive it from the template's own frames in
+    // `template_plan` (persisted to `runs.visual_style`). Both feed the same
+    // channel so the keyframe + clip prompts match the intended look.
+    visualStyle:
+      isMultiSegment(run.duration) || run.pipeline === "template"
+        ? (run.visualStyle ?? undefined)
+        : undefined,
     // Service ads only — the creative-director brief (cast + scenes + hook + CTA),
     // planned by the `creative_brief` step and read back here on the next loop.
     creativeBrief:
@@ -406,7 +414,8 @@ async function executeStep(
       const productSheetRef: ImageRef | undefined = product
         ? { source: product.assetUrl, mime: "image/png" }
         : undefined;
-      // videoBuilder writes its own video step_events.
+      // videoBuilder writes its own video step_events. Template runs never reach
+      // this step — they use the separate `template_video` builder.
       await videoAgent.videoBuilder(ctx, {
         storyboardSheetRef: { source: storyboard.assetUrl } as ImageRef,
         hasPerson: Boolean(personRef),
@@ -634,6 +643,104 @@ async function executeStep(
       await mergeAgent.mergeSegments(ctx);
       return {};
     }
+
+    case "template_plan": {
+      // pipeline:"template" only. The FIRST step of a template run, before any
+      // image or video spend: one cheap call on the small model turns the
+      // template's slots + the ad brief into a per-slot plan that the
+      // copywriter, the image agent and the video agent all read. That single
+      // plan is what stops them describing three unrelated ads.
+      //
+      // Idempotent on resume: a run that crashed after planning does not re-plan.
+      if (runRow?.templatePlan) return {};
+      await writeStepEvent({ runId, step, status: "started" });
+      const plan = await templateAgent.planTemplate(ctx);
+      // Persist the blueprint. Its vision-derived look bible is mirrored onto
+      // `runs.visual_style` (→ `ctx.visualStyle`, read by the keyframe + clip) and
+      // `runs.ad_style` (→ `ctx.adStyle`, read by the reference sheets + stills),
+      // so every generated asset matches the template's own look WITHOUT the
+      // ad-type detector.
+      await setRun(runId, {
+        templatePlan: plan,
+        ...(plan.visualStyle
+          ? { visualStyle: plan.visualStyle, adStyle: plan.visualStyle }
+          : {}),
+      });
+      const images = plan.slots.filter(
+        (s) => s.asset === "IMAGE" && s.fill,
+      ).length;
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { slots: plan.slots.length, imagesToGenerate: images },
+      });
+      return {};
+    }
+
+    case "template_keyframe": {
+      // pipeline:"template" only. Renders ONE clean look-reference image (no
+      // baked text/logos/UI) and authors a timestamped per-slot script from the
+      // plan's video scenes. Writes its own started/passed/failed events and
+      // persists a `storyboard_sheet` (image + scenes) that template_fill and
+      // template_video read. Template-owned — no ad-type, no 2×2 board.
+      await templateAgent.buildTemplateKeyframe(ctx);
+      return {};
+    }
+
+    case "template_video": {
+      // pipeline:"template" only. The PLAIN Seedance clip (no baked graphics —
+      // the template composites those), its length the template's own
+      // composition length. Writes its own step events; hard-fails on error
+      // (recovery rewinds to template_images via regenerate-template).
+      await templateAgent.buildTemplateVideo(ctx);
+      return {};
+    }
+
+    case "template_images": {
+      // pipeline:"template" only. One gpt-image-2 still per fillable IMAGE slot,
+      // sized to the slot and conditioned on the plan's subject + the product
+      // sheet. Writes its own events, and NEVER hard-fails: a slot that cannot
+      // be generated keeps the template's own artwork.
+      await templateAgent.generateTemplateImages(ctx);
+      return {};
+    }
+
+    case "template_fill": {
+      // pipeline:"template" only, automatic (never gated): an LLM writes every
+      // discovered TEXT slot's value from the run's prompt/brand text. Writes
+      // its own started/passed/failed events and persists the result to
+      // `runs.template_text_fill`, which template_render then consumes.
+      await writeStepEvent({ runId, step, status: "started" });
+      const fills = await templateAgent.fillTemplateText(ctx);
+      await setRun(runId, { templateTextFill: fills });
+      await writeStepEvent({
+        runId,
+        step,
+        status: "passed",
+        payload: { fields: fills.length },
+      });
+      return {};
+    }
+
+    case "template_render": {
+      // pipeline:"template" only, automatic (never gated): composite the
+      // final_video + the template_fill text into the template registered at
+      // run creation. Writes its own started/passed events (the single `failed`
+      // is written by `failRun` below on the re-thrown RunFailure) and persists
+      // the templated_video alongside the final_video.
+      await templateAgent.applyTemplate(ctx);
+      // The composite is the last step of a re-template, so the short chain is
+      // spent. Leaving the flag set would make a later `regenerate-video` skip
+      // the `video` step and re-render the template over the clip it just
+      // deleted. Cleared here rather than in the route: this is the only place
+      // that knows the re-template actually finished.
+      await db
+        .update(schema.runs)
+        .set({ retemplating: false })
+        .where(eq(schema.runs.id, runId));
+      return {};
+    }
   }
 }
 
@@ -807,7 +914,16 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
   // deferred into the parallel reference phase (concurrent with the product
   // sheet), so the product sheet — which needs neither the brief nor its vision
   // call — starts at once.
-  if (run.status === "queued") {
+  if (run.status === "queued" && run.pipeline === "template") {
+    // The template pipeline is driven ENTIRELY by the picked template — it never
+    // runs the ad-type detector, so `adType`/`adStyle`/`hooks` stay null and no
+    // ad-type logic threads into any template prompt. Flip to running so the
+    // driver loop enters `template_plan` (its analysis step) directly.
+    logRun(runId, "▶ template run — skipping ad-type detection", tag);
+    if (!(await setRunIfActive(runId, { status: "running", currentStep: null }))) {
+      return; // cancelled during setup — leave it terminal
+    }
+  } else if (run.status === "queued") {
     const ctx = buildCtx(run, uploads);
     logRun(runId, "▶ interpreting ad style …", tag);
     try {
@@ -1026,48 +1142,62 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     let referenceExists = true;
     const t0 = Date.now();
 
+    // ── Which step runs now ──────────────────────────────────────────────
+    // `person_sheet` as a FORWARD step MEANS the parallel reference phase (see
+    // the dispatch below). That equivalence is what lets a template run put
+    // `template_plan` in front of the phase: before this, the phase was welded
+    // to `currentStep === null` and nothing could precede it.
+    // Template runs skip the detector, so `adType` is null — but guard explicitly
+    // so a template run can never be routed down the service `creative_brief`
+    // path; its reference phase flows straight into `template_keyframe`.
+    const isService =
+      run.pipeline !== "template" && (run.adType ?? "") === "service";
     if (run.currentStep === null) {
-      if ((run.adType ?? "") === "service") {
-        // Service path: the creative-director brief runs FIRST (it plans the
-        // synthesized cast + scenes). No product/person reference sheets, so
-        // there is no reference gate.
-        step = "creative_brief";
-        logRun(runId, "▶ creative brief …", tag);
-        try {
-          ({ outcome } = await executeStep(ctx, step));
-        } catch (err) {
-          await failRun(runId, step, err);
-          return;
-        }
-        referenceExists = false;
-      } else {
-        // First generation: product + person sheets run CONCURRENTLY (each
-        // skipped when its asset is optional + not uploaded). `person_sheet` is
-        // always the checkpoint the phase advances to — the gate/advance block
-        // below treats it exactly like a single completed reference step.
-        step = "person_sheet";
-        logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
-        const { failedStep, err, hasReference } = await runReferencePhase(
-          ctx,
-          tag,
-        );
-        if (failedStep) {
-          await failRun(runId, failedStep, err);
-          return;
-        }
-        referenceExists = hasReference;
-      }
+      // A template run plans first, before any image or video spend.
+      step = run.pipeline === "template"
+        ? "template_plan"
+        : isService
+          ? "creative_brief"
+          : "person_sheet";
     } else {
       step = nextStep(
         run.currentStep,
         personUploaded,
         run.criticEnabled,
         run.duration,
+        run.pipeline,
+        run.retemplating,
       );
       if (!step) {
         await setRun(runId, { status: "completed" });
         return;
       }
+      // `nextStep` hands `template_plan` to the reference phase, but a service
+      // ad has no product or person to reference — it goes straight to the
+      // creative brief instead. `nextStep` cannot know this; only the run's
+      // adType does, and that already lives here.
+      if (run.currentStep === "template_plan" && isService) {
+        step = "creative_brief";
+      }
+    }
+
+    if (step === "person_sheet") {
+      // Product + person sheets run CONCURRENTLY (each skipped when its asset is
+      // optional and not uploaded). `person_sheet` is the checkpoint the phase
+      // advances to, so the gate/advance block below treats it exactly like a
+      // single completed reference step.
+      //
+      // Safe as a forward step: `person_sheet` is only ever reached from
+      // `currentStep === null` or from `template_plan`. `product_sheet` is never
+      // a forward step at all — it runs INSIDE the phase.
+      logRun(runId, "▶ reference phase (product + person, parallel) …", tag);
+      const { failedStep, err, hasReference } = await runReferencePhase(ctx, tag);
+      if (failedStep) {
+        await failRun(runId, failedStep, err);
+        return;
+      }
+      referenceExists = hasReference;
+    } else {
       logRun(runId, `▶ ${step} …`, tag);
       try {
         ({ outcome } = await executeStep(ctx, step));
@@ -1075,6 +1205,9 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
         await failRun(runId, step, err);
         return;
       }
+      // The service path plans a synthesized cast instead of reference sheets,
+      // so there is nothing for the reference gate to pause on.
+      if (step === "creative_brief") referenceExists = false;
     }
     logRun(
       runId,
@@ -1100,9 +1233,17 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
       return;
     }
 
-    // Success — advance the checkpoint, then decide the next state. The pipeline
-    // terminates at `video` (15s) or `merge` (60s).
-    if (step === "video" || step === "merge") {
+    // Success — advance the checkpoint, then decide the next state.
+
+    // ── Completion. `template_render` is always terminal (pipeline:"template").
+    // The plain final clip is ready at `video` (15s) or `merge` (multi) for the
+    // normal `video` pipeline; a `template` run instead advances through its own
+    // chain (template_video → template_render — never gated, "full auto").
+    const finalClipStep: Step = isMultiSegment(run.duration) ? "merge" : "video";
+    if (
+      step === "template_render" ||
+      (step === finalClipStep && run.pipeline === "video")
+    ) {
       logRun(runId, "✓ run completed — final video ready", tag);
       await setRunIfActive(runId, { status: "completed", currentStep: step });
       return;
@@ -1111,7 +1252,14 @@ export async function driveRun(runId: string, workerId?: string): Promise<void> 
     // boundary (next step is storyboard/outline or video/segment_video).
     // Independent of the Critic — gateForNext works whether or not inspection
     // steps run.
-    const next = nextStep(step, personUploaded, run.criticEnabled, run.duration);
+    const next = nextStep(
+      step,
+      personUploaded,
+      run.criticEnabled,
+      run.duration,
+      run.pipeline,
+      run.retemplating,
+    );
     const gate = gateForNext(next, referenceExists);
     if (run.mode === "confirm" && gate) {
       logRun(
@@ -1154,6 +1302,12 @@ export async function failRun(
 ): Promise<void> {
   const failure = classifyRunError(err);
   const raw = err instanceof Error ? err.message : String(err);
+
+  // `template_fill`/`template_render` (pipeline:"template" only) hard-fail like
+  // any other non-video step — `dispositionAfterLadder` already returns
+  // `hard_fail` for anything outside `VIDEO_STEPS`. There is no recovery gate
+  // to park at (the template was validated at run creation, before any AI cost
+  // was spent); `POST /runs/:id/regenerate-template` is the recovery path.
   const soft = dispositionAfterLadder(failure.code, step) === "soft_fail";
   const finalStatus: RunStatus = soft ? "awaiting_regen" : "failed";
   logRunError(

@@ -30,6 +30,19 @@ const serverEnvSchema = z.object({
     .string()
     .min(1)
     .default("anthropic/claude-sonnet-4.6"),
+  /**
+   * The SMALL reasoning model (`backend: "small"`), for short, mechanical,
+   * high-volume calls where the big model's judgement buys nothing: the template
+   * pipeline's per-slot plan and its on-screen copy.
+   *
+   * Same OpenRouter endpoint as `OPENROUTER_CLAUDE_MODEL`, so it needs no extra
+   * key, and it degrades to the default backend when `OPENROUTER_API_KEY` is
+   * unset. Swap the slug per-deploy if quality disappoints.
+   */
+  OPENROUTER_SMALL_MODEL: z
+    .string()
+    .min(1)
+    .default("anthropic/claude-haiku-4.5"),
 
   // BytePlus ModelArk — Seedance 2.0 video (sole video provider).
   // The `ark-` key authenticates VIDEO GENERATION (inference) only.
@@ -70,6 +83,69 @@ const serverEnvSchema = z.object({
   BYTEPLUS_ASSET_SERVICE: z.string().default("ark"),
   BYTEPLUS_ASSET_API_VERSION: z.string().default("2024-01-01"),
 
+  // Nexrender Cloud — After Effects template rendering, the `pipeline:
+  // "template"` run kind. Cloud is the only viable host on this Linux stack
+  // (self-host needs AE on Windows/macOS). The user registers a template
+  // BEFORE the run exists (`POST /templates/register`); once the ad clip
+  // generates, `template_fill` (LLM text) → `template_render` (Nexrender
+  // composite) run automatically. All keys OPTIONAL so the server boots
+  // without them; when the key is absent (or NEXRENDER_STUB=true) the provider
+  // falls back to a STUB that echoes the input clip as the "render", so the
+  // whole flow is testable without credits.
+  // Master switch for the whole template pipeline. OFF by default — `POST
+  // /runs` rejects `pipeline: "template"` until this is flipped, so the
+  // pipeline stays dark until it's been smoke-tested end to end.
+  TEMPLATE_STEP_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Which provider ANALYZES the template in `template_plan`. `claude` (default)
+  // = Claude Sonnet vision over the preview poster + frames sampled from the
+  // preview clip (still images). `gemini` = true frame-by-frame .mp4 understanding
+  // (deferred — the provider is a stub) and only takes effect with a live
+  // GEMINI_API_KEY, else it degrades back to Claude.
+  TEMPLATE_VISION_PROVIDER: z.enum(["claude", "gemini"]).default("claude"),
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  // Which Gemini model runs the video analysis when TEMPLATE_VISION_PROVIDER=gemini.
+  // Env-swappable — any video-capable Gemini slug (gemini-2.5-pro for the richest
+  // read, gemini-2.5-flash for a cheaper/faster pass).
+  GEMINI_VISION_MODEL: z.string().default("gemini-2.5-pro"),
+  // How many frames to sample from the preview clip for the Claude vision pass.
+  // Adapts to clip length (~1/sec) up to this cap; 0 disables sampling (poster
+  // only). Bounded so a long template can't blow the vision call's token budget.
+  TEMPLATE_VISION_FRAME_COUNT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(16)
+    .default(12),
+  /**
+   * Shared secret for the `/admin/*` routes (template library management),
+   * sent as an `x-admin-key` header. Auth (F8) is not started and the rest of
+   * the API is unauthenticated, so this is a SOFT GUARD — it stops a stranger
+   * who finds the URL from uploading a 200MB .aep and burning Nexrender
+   * credits. It is not real auth and must never be described as such.
+   *
+   * Optional so the server still boots without it, but the admin routes then
+   * return 503 in EVERY environment rather than defaulting open: a misread
+   * NODE_ENV in a deploy must not silently expose template upload.
+   */
+  ADMIN_API_KEY: z.string().min(16).optional(),
+  NEXRENDER_API_KEY: z.string().optional(),
+  NEXRENDER_BASE_URL: z.string().url().default("https://api.nexrender.com"),
+  NEXRENDER_STUB: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  NEXRENDER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  // Dead-man's switch for one stuck Nexrender job (NOT a network timeout).
+  // AE renders can take minutes; 30 min mirrors the BytePlus poll timeout.
+  NEXRENDER_POLL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1800000),
+
   // Supabase — Postgres (Drizzle), Storage, Auth (F8)
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
@@ -92,6 +168,64 @@ const serverEnvSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1500),
+  // Large-media downloads (renders, clips, masters) are governed by a STALL
+  // timeout, not a total-duration cap: abort only after this many ms of NO
+  // received bytes (a silent socket), so a healthy slow-but-progressing 100MB+
+  // download is never killed mid-transfer. See lib/download.ts.
+  MEDIA_DOWNLOAD_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(120_000),
+  // Absolute backstop for a single media download so a bytes-trickle can't hang
+  // forever. Generous — the stall timeout is the real guard.
+  MEDIA_DOWNLOAD_MAX_MS: z.coerce.number().int().positive().default(1_800_000),
+  // Whole-download attempts, each on a fresh connection. A stall is usually a
+  // network TRANSITION (a resume's DHCP lease, a wifi reconnect) rather than a
+  // dead host, and it outlives a couple of quick retries — so retry a few times
+  // with a seconds-scale backoff instead of giving up in under 5s.
+  MEDIA_DOWNLOAD_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  // Inject `template_images`' generated stills into the template render.
+  //
+  // This was OFF, and the cost of that was total: every still the pipeline
+  // generated was PAID FOR and then dropped, so an image slot could never be
+  // anything but the template's own artwork. It was off because Nexrender
+  // rejected our image assets ("assetRedefinition must include src, layerName,
+  // and filename") and one bad asset aborts the WHOLE job — the alternative to
+  // "no stills" was "no render".
+  //
+  // ON now, because both halves of that rejection are addressed and the downside
+  // is no longer the ad:
+  //   - the stills are PNG, not WebP. After Effects cannot import WebP without a
+  //     third-party plugin, and the template spec bans those (`images/index.ts`).
+  //   - an index-targeted image now carries a `name`, so it has the filename the
+  //     rejection asks for (`providers/nexrender/index.ts`).
+  //   - if it is STILL refused, `self-heal.ts` drops the stills and re-renders,
+  //     landing exactly where this flag being `false` landed.
+  // Set `false` to skip them entirely without a code change.
+  TEMPLATE_RENDER_INJECT_IMAGES: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Hold an OS sleep inhibitor while a run is in flight (best-effort, needs
+  // systemd — a no-op elsewhere). A run costs real OpenAI/BytePlus money and
+  // takes ~20min, which is far longer than a laptop's idle-suspend timer: one
+  // `systemctl suspend` mid-run kills every socket the worker holds and can
+  // fail the run outright. See lib/sleep-inhibitor.ts.
+  WORKER_INHIBIT_SLEEP: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Files larger than this are NOT uploaded to Supabase Storage — the hosted
+  // project rejects an object over its global cap (~50MB by default, raisable
+  // only on a paid plan). A render past this is kept at the provider's own URL
+  // (e.g. the ~14d Nexrender output) so a big video is still viewable rather than
+  // failing the run on the upload. Raise this once you raise the Supabase limit.
+  STORAGE_UPLOAD_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(50 * 1024 * 1024),
   // Max concurrent Seedance segment-video tasks per 60s run (fan-out throttle).
   // Lower if BytePlus rejects parallel tasks; 4 = all segments at once.
   SEGMENT_VIDEO_CONCURRENCY: z.coerce.number().int().positive().default(4),

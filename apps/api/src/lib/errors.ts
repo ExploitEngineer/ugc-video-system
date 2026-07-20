@@ -43,6 +43,10 @@ export const conflict = (message: string) =>
 export const unprocessable = (message: string) =>
   new ApiError(422, "UNPROCESSABLE", message);
 
+/** The body is larger than the route accepts. Always name the two numbers. */
+export const payloadTooLarge = (message: string) =>
+  new ApiError(413, "PAYLOAD_TOO_LARGE", message);
+
 export const internal = (message: string) =>
   new ApiError(500, "INTERNAL", message);
 

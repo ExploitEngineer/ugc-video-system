@@ -18,10 +18,10 @@ export const testimonial: AdTypeDef = {
     "A real person speaks to camera giving a first-person review/endorsement with an authentic, phone-captured feel. Home of the legacy 'ugc' type. Differs from founder-pov (a customer/creator, not the founder).",
   whenToUse: "consideration|conversion",
   assetPolicy: {
-    product: "required",
+    product: "optional",
     person: "required",
     rationale:
-      "UGC reviews a real product: the person holds, shows or uses THIS product on camera, so a product image is mandatory; the credible human voice is mandatory too.",
+      "The credible human voice on camera is mandatory; the product is optional — held or shown when uploaded, otherwise a pure talking-head endorsement. Product is OPTIONAL (not required) so a no-product 'create a UGC ad' stays a talking testimonial instead of being downgraded to a voiceover type (matches the skill doc + research/00 edge case 1).",
   },
   lookFamily: "ugc_authentic",
   defaultHooks: ["confession", "relatable-scenario"],

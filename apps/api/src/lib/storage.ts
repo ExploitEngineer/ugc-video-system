@@ -24,9 +24,18 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
+  "image/gif": "gif",
   "video/mp4": "mp4",
+  "video/quicktime": "mov",
   "audio/mp4": "m4a", // audio track extracted from the final video (AAC in MP4)
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
   "application/json": "json", // serialized CE.SDK editor scene
+  // User-uploaded template projects (kept for retention; registered to Nexrender
+  // from the raw bytes). Custom mimes set by the template-register/asset routes.
+  "application/zip": "zip",
+  "application/x-aep": "aep",
+  "application/x-mogrt": "mogrt",
 };
 
 function extFor(contentType: string): string {
@@ -37,12 +46,29 @@ function extFor(contentType: string): string {
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_BACKOFF_MS = 800;
 /**
- * Hard ceiling per upload attempt. The Supabase client has no upload timeout, so
- * a silently-stalled connection (opens, never responds) would hang the caller
+ * Ceiling per upload attempt. The Supabase client has no upload timeout, so a
+ * silently-stalled connection (opens, never responds) would hang the caller
  * forever. On timeout we surface a synthetic transient error so the attempt is
  * retried, then fails cleanly — never an eternal hang.
+ *
+ * It MUST scale with the payload. A flat 120s is not a stall detector, it is a
+ * throughput budget: it silently demands that whatever we upload sustain
+ * `bytes / 120s`, so the bigger the file the more likely a healthy connection is
+ * called dead. A finished template composite is the largest artifact this
+ * pipeline produces (full-quality h264 over the template's whole runtime) — a
+ * real 43MB one timed out three times on a link that had just uploaded the
+ * Seedance master fine, and the run was lost AFTER the render had already
+ * succeeded and been paid for.
+ *
+ * The floor still covers small assets; past that we allow a deliberately
+ * pessimistic ~100KB/s (a ~1Mbit uplink), so a genuine stall is still caught in
+ * bounded time while a slow-but-alive link is left alone.
  */
-const UPLOAD_TIMEOUT_MS = 120_000;
+const UPLOAD_TIMEOUT_FLOOR_MS = 120_000;
+const UPLOAD_MIN_BYTES_PER_MS = 100; // ~100 KB/s
+export function uploadTimeoutFor(byteLength: number): number {
+  return Math.max(UPLOAD_TIMEOUT_FLOOR_MS, Math.ceil(byteLength / UPLOAD_MIN_BYTES_PER_MS));
+}
 
 /**
  * A bare undici/network failure (the `fetch failed` / connection-reset / timeout
@@ -80,12 +106,48 @@ export async function uploadAsset({
   // The random UUID keeps `storagePath` stable across retries, so re-uploading
   // after a transient failure can never collide with a prior attempt.
   const storagePath = `runs/${runId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  return uploadBytes(storagePath, bytes, contentType);
+}
 
+/**
+ * A template's preview video / poster frame, under `templates/{templateId}/…`.
+ *
+ * These are NOT `assets` rows: `assets.run_id` is NOT NULL with an FK to `runs`,
+ * and a template preview belongs to no run. Their URLs live as columns on the
+ * `templates` row instead, and this prefix is deliberately outside `runs/` so
+ * `deleteRunObjects` and `db:reset` never touch them — rebuilding the library
+ * means re-uploading .aep files and paying for a preview render each.
+ */
+export async function uploadTemplateObject({
+  templateId,
+  kind,
+  bytes,
+  contentType,
+}: {
+  templateId: string;
+  kind: "preview" | "poster";
+  bytes: Uint8Array;
+  contentType: string;
+}): Promise<UploadAssetResult> {
+  const storagePath = `templates/${templateId}/${kind}-${crypto.randomUUID()}.${extFor(contentType)}`;
+  return uploadBytes(storagePath, bytes, contentType);
+}
+
+/**
+ * The retrying upload core, shared by run assets and template objects. Races
+ * each attempt against a timeout (the Supabase client has none, so a stalled
+ * connection would hang forever) and retries only network blips.
+ */
+async function uploadBytes(
+  storagePath: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<UploadAssetResult> {
   let lastMessage = "";
+  const timeoutMs = uploadTimeoutFor(bytes.byteLength);
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
-    // Race the upload against a timeout — the client itself has none, so a
-    // stalled connection would otherwise hang forever. A timeout resolves to a
-    // synthetic transient error (matches TRANSIENT_UPLOAD_ERROR → retried).
+    // A timeout resolves to a synthetic transient error (matches
+    // TRANSIENT_UPLOAD_ERROR → retried).
     let timer: ReturnType<typeof setTimeout> | undefined;
     const { error } = await Promise.race([
       supabase.storage
@@ -96,10 +158,12 @@ export async function uploadAsset({
           () =>
             resolve({
               error: {
-                message: `storage upload timed out after ${UPLOAD_TIMEOUT_MS}ms (network)`,
+                message:
+                  `storage upload timed out after ${timeoutMs}ms ` +
+                  `(${Math.round(bytes.byteLength / 1e6)}MB, network)`,
               },
             }),
-          UPLOAD_TIMEOUT_MS,
+          timeoutMs,
         );
       }),
     ]).finally(() => {
@@ -133,7 +197,15 @@ export function getPublicUrl(storagePath: string): string {
  * objects, well under the list page size).
  */
 export async function deleteRunObjects(runId: string): Promise<void> {
-  const prefix = `runs/${runId}`;
+  return deletePrefix(`runs/${runId}`, `run ${runId}`);
+}
+
+/** Delete a template's preview objects (`templates/{templateId}/…`). */
+export async function deleteTemplateObjects(templateId: string): Promise<void> {
+  return deletePrefix(`templates/${templateId}`, `template ${templateId}`);
+}
+
+async function deletePrefix(prefix: string, label: string): Promise<void> {
   const PAGE = 100;
   // Page through the flat prefix until a short/empty page. We always list from
   // offset 0 because each iteration REMOVES what it listed, so the next "first
@@ -143,7 +215,7 @@ export async function deleteRunObjects(runId: string): Promise<void> {
       .from(BUCKET)
       .list(prefix, { limit: PAGE });
     if (error) {
-      throw internal(`Storage list failed for run ${runId}: ${error.message}`);
+      throw internal(`Storage list failed for ${label}: ${error.message}`);
     }
     if (!data || data.length === 0) return;
 
@@ -153,7 +225,7 @@ export async function deleteRunObjects(runId: string): Promise<void> {
       .remove(paths);
     if (removeError) {
       throw internal(
-        `Storage delete failed for run ${runId}: ${removeError.message}`,
+        `Storage delete failed for ${label}: ${removeError.message}`,
       );
     }
     if (data.length < PAGE) return; // last page — nothing more to remove

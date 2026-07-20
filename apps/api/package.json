@@ -20,20 +20,25 @@
     "critic:verify": "tsx scripts/verify-critic.ts",
     "video:verify": "tsx scripts/verify-video.ts",
     "cda:verify": "tsx scripts/verify-cda.ts",
-    "byteplus:probe": "tsx scripts/probe-byteplus.ts"
+    "byteplus:probe": "tsx scripts/probe-byteplus.ts",
+    "nexrender:inspect": "tsx scripts/inspect-nexrender-layers.ts",
+    "template:probe": "tsx scripts/probe-template-render.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.11.0",
     "@hono/node-server": "^1.19.14",
     "@supabase/supabase-js": "^2.106.2",
     "@ugc/shared": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "fflate": "^0.8.3",
     "ffmpeg-static": "^5.2.0",
     "hono": "^4.12.23",
     "openai": "^6.39.1",
     "postgres": "^3.4.9",
     "sharp": "^0.34.5",
     "tsx": "^4.7.1",
+    "undici": "^8.7.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

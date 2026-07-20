@@ -13,6 +13,11 @@ import { z } from "zod";
  * tweak the clip via `POST /runs/:id/regenerate-video`. `failed` is reserved for
  * truly unrecoverable errors. Like `awaiting_confirmation`, it is terminal for
  * the worker (not in CLAIMABLE); the regenerate route flips it back to `running`.
+ *
+ * There is no mid-pipeline template choice gate: a `pipeline: "template"` run
+ * (see `pipelineSchema`) has its Nexrender template registered and introspected
+ * BEFORE the run is even created, so it flows straight through to `completed`
+ * like a normal run — see `template_fill`/`template_render` in `stepSchema`.
  */
 export const runStatusSchema = z.enum([
   "queued",
@@ -49,6 +54,44 @@ export const stepSchema = z.enum([
   "segment_storyboard",
   "segment_video",
   "merge",
+  // ── `pipeline: "template"` steps. Automatic, never gated (template runs are
+  // forced `mode: "automatic"`, `criticEnabled: false` at the create route).
+  // The template pipeline is SEPARATE from the video pipeline: it owns its own
+  // authoring steps and never runs the ad-type detector, the 2×2 storyboard, or
+  // the shared `video` step. Full chain:
+  //   template_plan → [product_sheet ∥ person_sheet] → template_keyframe
+  //     → template_fill → template_images → template_video → template_render
+  //
+  // Runs FIRST, before any image/video spend: analyzes the template (its slot
+  // inventory + timeline windows, and — Phase 2 — its look/animation via vision)
+  // and emits a per-slot blueprint (`runs.template_plan`). Every downstream agent
+  // reads it, which keeps the copy, the images and the clip describing the SAME
+  // ad the template asks for.
+  "template_plan",
+  // The template pipeline's STORYBOARD: renders a labelled multi-panel sheet
+  // (one panel per beat) + a timestamped per-slot script from the blueprint's
+  // video scenes. The sheet (clean-cropped) is the Seedance shot guide, so the
+  // master holds a consistent look instead of drifting from a single frame.
+  // Template-owned: imports nothing from the ad-type registry or shared storyboard.
+  "template_keyframe",
+  // Writes every TEXT slot's value from the blueprint + the per-slot script
+  // (`runs.template_text_fill`). Placed after the keyframe so the copy can draw
+  // on the product brief and the spoken script, not just the raw prompt.
+  "template_fill",
+  // Generates the CONTENT image slots with gpt-image-2 (`template_image`
+  // assets), conditioned on the blueprint + product sheet + template look. Slots
+  // classified `brand` (logo/icon) or `decorative` (background/texture) are
+  // never generated — the template keeps its own art. Never hard-fails: a
+  // failed slot falls back to the template's default asset.
+  "template_images",
+  // The PLAIN Seedance clip (no baked text/graphics — the template composites
+  // those), driven by the blueprint + the keyframe's reference image + script,
+  // its length the template's own composition length. Template-owned prompt.
+  "template_video",
+  // ...then the clip + those text values + those images are composited into the
+  // template picked at run creation (`runs.template`), persisting a
+  // `templated_video`.
+  "template_render",
 ]);
 export type Step = z.infer<typeof stepSchema>;
 
@@ -79,12 +122,46 @@ export const assetKindSchema = z.enum([
   "edited_video",
   "editor_scene",
   "final_audio",
+  // One gpt-image-2 still generated for a CONTENT image slot of the run's
+  // template (`template_images`). `meta.jobLayerName` maps it back to its slot
+  // at render time. N per run, one per fillable slot.
+  "template_image",
+  // One slice of the 15s master clip, cut to the exact length of ONE video slot
+  // in the template. A template with 7s/2s/2s video layers gets three of these,
+  // showing three DIFFERENT moments of the same continuous shot — Nexrender
+  // cannot offset a source's in-point, so the cut happens here (ffmpeg).
+  // `meta.jobLayerName` maps it back to its slot; muted unless it is the one
+  // slice carrying the voiceover (see `template_audio`).
+  "template_clip",
+  // The master clip's full 15s audio track, extracted so it can be injected
+  // into the template's own AUDIO layer. Without this, slicing the master would
+  // chop the voiceover into stuttering half-words across the video slots.
+  "template_audio",
+  // The Nexrender output: the `pipeline: "template"` run's clip composited into
+  // the template registered at run creation, re-hosted from Nexrender Cloud to
+  // Supabase. The sole deliverable a template-pipeline run shows once completed.
+  "templated_video",
+  // The MODIFIED .aep Nexrender returns from a render — the editable project,
+  // re-hosted from Nexrender Cloud to Supabase alongside the `templated_video`.
+  "template_aep",
 ]);
 export type AssetKind = z.infer<typeof assetKindSchema>;
 
 /** Run mode — controls step gating, not the Critic auto-checks. */
 export const modeSchema = z.enum(["automatic", "confirm"]);
 export type Mode = z.infer<typeof modeSchema>;
+
+/**
+ * Which generation pipeline a run uses (`runs.pipeline`), picked up front via
+ * the studio sidebar switch — NOT a mid-run choice. `video` (default) is the
+ * unchanged product/person/storyboard/video pipeline. `template` registers +
+ * introspects a Nexrender After Effects template BEFORE the run is created
+ * (so a bad template file fails fast, before any AI cost is spent), then runs
+ * the same agent pipeline and automatically composites the clip + AI-written
+ * text into the template (`template_fill` → `template_render`).
+ */
+export const pipelineSchema = z.enum(["video", "template"]);
+export type Pipeline = z.infer<typeof pipelineSchema>;
 
 /**
  * Output aspect ratio, chosen by the user at run creation. Propagated to the
@@ -163,6 +240,27 @@ export const runErrorCodeSchema = z.enum([
   // The provider expired the task on its own side before it finished.
   "VIDEO_GENERATION_EXPIRED",
   "VIDEO_MERGE_FAILED",
+  // Seedance's OUTPUT-AUDIO moderation flagged the generated voiceover as
+  // sensitive ("output audio may contain sensitive information"). Distinct from
+  // the generic content block so the video ladder can retry it with neutralized,
+  // brand-safe spoken lines before parking the run.
+  "PROVIDER_AUDIO_BLOCKED",
+  // The `template_plan` LLM step failed (provider error / unparseable reply)
+  // after its retry. Nothing downstream has run, so recovery restarts the run.
+  "TEMPLATE_PLAN_FAILED",
+  // The `template_keyframe` step failed (LLM script / look-still render). The
+  // reference sheets already exist, so recovery re-runs only the keyframe.
+  "TEMPLATE_KEYFRAME_FAILED",
+  // The `template_video` step failed — the PLAIN Seedance clip for a template
+  // run. Distinct from the video-pipeline `VIDEO_*` codes so recovery rewinds to
+  // `template_images` (the clip only) rather than the shared video-regen path.
+  "TEMPLATE_VIDEO_FAILED",
+  // The Nexrender template render failed or timed out (provider error, bad
+  // template/layer mapping, or output never reached a terminal status).
+  "TEMPLATE_RENDER_FAILED",
+  // The `template_fill` LLM step failed (provider error / unparseable reply)
+  // after its retry.
+  "TEMPLATE_FILL_FAILED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_CONTENT_BLOCKED",
   "RUN_CANCELLED",

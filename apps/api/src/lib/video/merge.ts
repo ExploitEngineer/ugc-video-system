@@ -24,7 +24,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegPath from "ffmpeg-static";
-import { fetchWithRetry } from "../http.js";
+import { streamDownload } from "../download.js";
 import { createLogger } from "../log.js";
 
 const log = createLogger("merge");
@@ -112,13 +112,26 @@ function release(): void {
   if (next) next();
 }
 
-async function fetchToFile(url: string, dest: string): Promise<void> {
-  const res = await fetchWithRetry(url, undefined, { label: "segment-download" });
-  if (!res.ok) throw new Error(`segment download failed: ${res.status} ${url}`);
-  await writeFile(dest, new Uint8Array(await res.arrayBuffer()));
+// Stream a media URL to disk with a stall (idle) timeout — never a total-duration
+// cap, so a healthy large render/clip download is never aborted mid-transfer.
+async function fetchToFile(
+  url: string,
+  dest: string,
+  opts: { label?: string; headers?: Record<string, string> } = {},
+): Promise<void> {
+  await streamDownload(url, dest, {
+    label: opts.label ?? "media-download",
+    ...(opts.headers ? { headers: opts.headers } : {}),
+  });
 }
 
-function runFfmpeg(args: string[], label: string): Promise<void> {
+/**
+ * Run ffmpeg. Resolves the process's STDERR — where ffmpeg prints everything it
+ * knows about the input, including the container's `Duration:` header, which is
+ * the only way to read a media file's length here (see `probeVideoDuration`).
+ * Callers that only care about the output file ignore the value.
+ */
+function runFfmpeg(args: string[], label: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
       reject(new Error("ffmpeg-static binary path is null"));
@@ -151,7 +164,7 @@ function runFfmpeg(args: string[], label: string): Promise<void> {
           ),
         );
       } else if (code === 0) {
-        resolve();
+        resolve(stderr);
       } else if (signal != null || code == null) {
         // Killed by a signal (close reports code=null) — on a busy/small host
         // this is almost always the kernel OOM killer.
@@ -174,9 +187,9 @@ function runFfmpeg(args: string[], label: string): Promise<void> {
  * memory pressure usually clears. Real encode failures (nonzero exit) are
  * deterministic and not retried.
  */
-async function runFfmpegWithRetry(args: string[], label: string): Promise<void> {
+async function runFfmpegWithRetry(args: string[], label: string): Promise<string> {
   try {
-    await runFfmpeg(args, label);
+    return await runFfmpeg(args, label);
   } catch (err) {
     // Retry ONLY a signal/OOM kill (usually transient memory pressure). A
     // TIMEOUT means the pass is genuinely stuck — retrying just holds the single
@@ -184,8 +197,7 @@ async function runFfmpegWithRetry(args: string[], label: string): Promise<void> 
     // run's merge + audio-extract. A nonzero `exit` is deterministic, not retried.
     if (err instanceof FfmpegError && err.kind === "signal") {
       log.warn(`ffmpeg (${label}) ${err.kind} — retrying once`, { err: err.message });
-      await runFfmpeg(args, label);
-      return;
+      return await runFfmpeg(args, label);
     }
     throw err;
   }
@@ -362,6 +374,348 @@ export async function mergeSegmentUrls(
  * download, and signal/timeout-aware ffmpeg runner as `mergeSegmentUrls` —
  * `-vn` drops the video so this is a cheap, audio-only re-encode.
  */
+/**
+ * Cut `[startSec, startSec + durationSec)` out of a clip.
+ *
+ * Used to fill a template's video slots: one 15s master is sliced into a piece
+ * per slot, each showing a different moment of the same continuous shot.
+ * Nexrender cannot do this — a job asset replaces the footage item and carries
+ * no in-point — so the cut happens here.
+ *
+ * Seeks AFTER `-i` (output seeking). Input seeking is faster but lands on the
+ * nearest keyframe, which would silently shift a 2s cutaway by up to a second.
+ * These clips are 15 seconds; accuracy is worth the decode.
+ *
+ * ALWAYS MUTED. Slicing a clip with a baked-in voiceover yields stuttering
+ * half-words across the slots, with silence in the gaps between them. The
+ * master's speech is laid over the finished render whole instead
+ * (`muxVoiceover`).
+ */
+export async function sliceClip(
+  videoUrl: string,
+  opts: {
+    startSec: number;
+    durationSec: number;
+    /**
+     * Resize the slice to exactly this, cropping rather than letterboxing.
+     *
+     * The template's placeholder layer carries the designer's transform, sized
+     * for the source they expected. `replaceSource` keeps that transform, and an
+     * unnamed layer cannot be autoscaled afterwards — so footage of the original
+     * source's dimensions is the only way the shot lands where they put it.
+     */
+    targetSize?: { width: number; height: number };
+  },
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  const { startSec, durationSec, targetSize } = opts;
+  if (!(durationSec > 0)) {
+    throw new Error(`sliceClip: durationSec must be positive, got ${durationSec}`);
+  }
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-slice-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.mp4");
+
+    // h264 needs even dimensions; a layer box can be fractional.
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    const scaleCrop = targetSize
+      ? [
+          "-vf",
+          `scale=${even(targetSize.width)}:${even(targetSize.height)}:force_original_aspect_ratio=increase,` +
+            `crop=${even(targetSize.width)}:${even(targetSize.height)},setsar=1`,
+        ]
+      : [];
+
+    log.info("▶ slicing clip", {
+      startSec,
+      durationSec,
+      size: targetSize ? `${targetSize.width}x${targetSize.height}` : "source",
+    });
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-ss", String(startSec),
+        "-t", String(durationSec),
+        "-an",
+        ...scaleCrop,
+        // Match mergeSegmentUrls' normalize pass, so slices and merged clips
+        // decode identically in After Effects.
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "slice-clip",
+    );
+
+    const bytes = await readFile(out);
+    if (bytes.length === 0) {
+      throw new Error(
+        `sliceClip: produced an empty file for [${startSec}, ${startSec + durationSec}]`,
+      );
+    }
+    log.info("✓ clip sliced", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** One slot's cut spec against a shared master (see `sliceClipsFromMaster`). */
+export interface SliceSpec {
+  startSec: number;
+  durationSec: number;
+  /** Resize the slice to exactly this, cropping rather than letterboxing. */
+  targetSize?: { width: number; height: number };
+}
+
+/**
+ * Cut MANY slices from ONE master, downloading the master a SINGLE time.
+ *
+ * `template_render` cuts a slice per video slot, and a slideshow template can have
+ * dozens. `sliceClip` re-downloads the master on every call, so N slots meant N
+ * downloads of a full 45–60s clip (slow, and N chances to hit a network blip). This
+ * fetches the master ONCE into a temp dir and ffmpeg-cuts each spec from the local
+ * file, holding the merge semaphore for the whole batch. Results come back in
+ * `specs` order. Same encode params + accurate output-seek as `sliceClip`.
+ */
+export async function sliceClipsFromMaster(
+  masterUrl: string,
+  specs: SliceSpec[],
+): Promise<{ bytes: Uint8Array; mime: string }[]> {
+  if (specs.length === 0) return [];
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-slices-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(masterUrl, input);
+    log.info("▶ slicing master into pieces", { count: specs.length });
+
+    // h264 needs even dimensions; a layer box can be fractional.
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    const out: { bytes: Uint8Array; mime: string }[] = [];
+    for (let i = 0; i < specs.length; i++) {
+      const spec = specs[i] as SliceSpec;
+      if (!(spec.durationSec > 0)) {
+        throw new Error(
+          `sliceClipsFromMaster: durationSec must be positive, got ${spec.durationSec}`,
+        );
+      }
+      const dest = join(dir, `out-${i}.mp4`);
+      const scaleCrop = spec.targetSize
+        ? [
+            "-vf",
+            `scale=${even(spec.targetSize.width)}:${even(spec.targetSize.height)}:force_original_aspect_ratio=increase,` +
+              `crop=${even(spec.targetSize.width)}:${even(spec.targetSize.height)},setsar=1`,
+          ]
+        : [];
+      await runFfmpegWithRetry(
+        [
+          "-y",
+          "-i", input,
+          "-ss", String(spec.startSec),
+          "-t", String(spec.durationSec),
+          "-an",
+          ...scaleCrop,
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "20",
+          "-pix_fmt", "yuv420p",
+          "-threads", String(FFMPEG_THREADS),
+          "-movflags", "+faststart",
+          dest,
+        ],
+        `slice-${i}`,
+      );
+      const bytes = await readFile(dest);
+      if (bytes.length === 0) {
+        throw new Error(
+          `sliceClipsFromMaster: produced an empty file for [${spec.startSec}, ${spec.startSec + spec.durationSec}]`,
+        );
+      }
+      out.push({ bytes: new Uint8Array(bytes), mime: "video/mp4" });
+      // Free each slice eagerly so a 60-slot batch can't fill the temp dir.
+      await rm(dest, { force: true }).catch(() => {});
+    }
+    log.info("✓ sliced master into pieces", { count: out.length });
+    return out;
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Grab a single frame from a video as a JPEG poster.
+ *
+ * Used for the template library's preview cards: the `<video>` element shows
+ * this until the card is hovered, so the grid never has to decode a dozen clips
+ * just to render. Seeks ~1s in rather than to frame 0, because the first frame
+ * of a rendered AE template is very often a black or empty fade-in.
+ *
+ * Seeking BEFORE `-i` is the fast path (ffmpeg jumps to the nearest keyframe
+ * instead of decoding up to it). If the clip is shorter than the seek target
+ * that yields no frames, so we retry from the very start.
+ */
+/** `  Duration: 00:00:21.00, start: 0.000000, bitrate: 5067 kb/s` */
+const DURATION_RE = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/;
+
+/**
+ * The REAL length of a video, in seconds. Null when the container reports none
+ * (`Duration: N/A`) or the header can't be read.
+ *
+ * There is no ffprobe to call: `ffmpeg-static` ships exactly one binary, `ffmpeg`
+ * (a system ffprobe may exist on a dev box, but depending on it works locally and
+ * breaks in the container). So ask ffmpeg itself:
+ *   - `-t 0` decodes NOTHING (`frame=0`, ~90ms on a 36s clip vs ~1.5s for a full
+ *     decode) while still printing the container header we want;
+ *   - `-f null -` gives it the output it insists on, so it exits 0. Plain
+ *     `ffmpeg -i FILE` prints the same header but exits 1, and `runFfmpeg`
+ *     rejects any non-zero code.
+ *
+ * Used to learn a TEMPLATE's true length: After Effects renders a composition's
+ * WORK AREA, not its `duration` property, and Nexrender's API exposes no work
+ * area — so the only honest answer is to measure what it actually rendered.
+ */
+export async function probeVideoDuration(videoUrl: string): Promise<number | null> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-probe-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const stderr = await runFfmpegWithRetry(
+      ["-hide_banner", "-i", input, "-t", "0", "-f", "null", "-"],
+      "probe-duration",
+    );
+    const m = DURATION_RE.exec(stderr);
+    if (!m) return null;
+    const sec = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+    return Number.isFinite(sec) && sec > 0 ? sec : null;
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export async function extractPoster(
+  videoUrl: string,
+  atSeconds = 1,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-poster-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const out = join(dir, "out.jpg");
+
+    const grab = (seek: number) =>
+      runFfmpegWithRetry(
+        [
+          "-y",
+          ...(seek > 0 ? ["-ss", String(seek)] : []),
+          "-i", input,
+          "-frames:v", "1",
+          "-q:v", "3", // visually lossless enough for a card thumbnail
+          "-threads", String(FFMPEG_THREADS),
+          out,
+        ],
+        "extract-poster",
+      );
+
+    log.info("▶ extracting poster frame", { atSeconds });
+    await grab(atSeconds);
+    let bytes = await readFile(out).catch(() => null);
+    if (!bytes || bytes.length === 0) {
+      // Clip shorter than the seek target — take the first frame instead.
+      log.warn("poster seek past end of clip; retrying from frame 0");
+      await grab(0);
+      bytes = await readFile(out);
+    }
+
+    log.info("✓ poster extracted", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "image/jpeg" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Sample a set of frames from a video at the given timestamps, each scaled to
+ * fit within `maxEdge`×`maxEdge` and returned as a JPEG data URI — the shape the
+ * chat providers inline directly (`ImageRef`).
+ *
+ * The template-vision analysis feeds these to Claude so it can read the
+ * template's LOOK and ANIMATION across the whole preview clip (a single poster
+ * shows no motion). Best-effort per frame: one bad seek is skipped, never fatal —
+ * the analysis degrades to whatever frames it did get. Downscaled hard, because
+ * a dozen full-res stills would blow the vision call's token budget.
+ */
+export async function sampleFrames(
+  videoUrl: string,
+  timestampsSec: number[],
+  opts: { maxEdge?: number } = {},
+): Promise<{ source: string; mime: string }[]> {
+  if (timestampsSec.length === 0) return [];
+  const maxEdge = opts.maxEdge ?? 512;
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-frames-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await fetchToFile(videoUrl, input);
+    const frames: { source: string; mime: string }[] = [];
+    for (let i = 0; i < timestampsSec.length; i++) {
+      const ts = Math.max(0, timestampsSec[i] ?? 0);
+      const out = join(dir, `f${i}.jpg`);
+      try {
+        await runFfmpegWithRetry(
+          [
+            "-y",
+            ...(ts > 0 ? ["-ss", String(ts)] : []),
+            "-i", input,
+            "-frames:v", "1",
+            // Fit inside maxEdge×maxEdge, preserving aspect — bounds token cost.
+            "-vf", `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`,
+            "-q:v", "4",
+            "-threads", String(FFMPEG_THREADS),
+            out,
+          ],
+          "sample-frame",
+        );
+        const bytes = await readFile(out).catch(() => null);
+        if (bytes && bytes.length > 0) {
+          frames.push({
+            source: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`,
+            mime: "image/jpeg",
+          });
+        }
+      } catch (err) {
+        log.warn("frame sample failed — skipping", {
+          ts,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    log.info("✓ frames sampled", {
+      requested: timestampsSec.length,
+      got: frames.length,
+    });
+    return frames;
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function extractAudio(
   videoUrl: string,
 ): Promise<{ bytes: Uint8Array; mime: string }> {
@@ -390,6 +744,159 @@ export async function extractAudio(
     const bytes = await readFile(out);
     log.info("✓ audio extracted", { bytes: bytes.length });
     return { bytes: new Uint8Array(bytes), mime: "audio/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Does this file carry an audio stream?
+ *
+ * There is no ffprobe in this image — `ffmpeg-static` ships the encoder alone —
+ * so ask the stream mapper. `-map 0:a:0` against a silent file fails with
+ * "Stream map '0:a:0' matches no streams"; decoding 0.1s to nowhere is cheap.
+ */
+async function hasAudioStream(file: string): Promise<boolean> {
+  try {
+    await runFfmpeg(
+      ["-y", "-i", file, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+      "probe-audio",
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lay a voiceover over a finished video.
+ *
+ * This is how a template ad gets its speech. Most After Effects templates have
+ * no audio layer at all, so there is nowhere for Nexrender to inject the track —
+ * and even the ones that do would only receive it if the designer happened to
+ * name a layer we can find. Muxing afterwards works for every template, and the
+ * result is one continuous voiceover across the whole ad rather than a fragment
+ * under each scene.
+ *
+ * `-shortest` trims the 15s master's track to the composition's real runtime.
+ * If the render brought its own audio — a music bed the designer baked in — the
+ * bed is ducked under the voice rather than discarded.
+ */
+export async function muxVoiceover(
+  videoUrl: string,
+  audioUrl: string,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-mux-${randomUUID()}-`));
+  try {
+    const video = join(dir, "in.mp4");
+    const audio = join(dir, "vo.m4a");
+    await Promise.all([
+      fetchToFile(videoUrl, video),
+      fetchToFile(audioUrl, audio),
+    ]);
+    const out = join(dir, "out.mp4");
+
+    const bed = await hasAudioStream(video);
+    log.info("▶ muxing voiceover", { musicBed: bed });
+
+    // The video is stream-copied in both branches: only audio re-encodes.
+    const audioArgs = bed
+      ? [
+          "-filter_complex",
+          "[0:a]volume=0.25[bed];[1:a][bed]amix=inputs=2:duration=first:dropout_transition=0[a]",
+          "-map", "0:v:0",
+          "-map", "[a]",
+        ]
+      : ["-map", "0:v:0", "-map", "1:a:0"];
+
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", video,
+        "-i", audio,
+        ...audioArgs,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        // The voiceover outlives the composition; the render decides the length.
+        "-shortest",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "mux-voiceover",
+    );
+
+    const bytes = await readFile(out);
+    if (bytes.length === 0) {
+      throw new Error("muxVoiceover: produced an empty file");
+    }
+    log.info("✓ voiceover muxed", { bytes: bytes.length });
+    return { bytes: new Uint8Array(bytes), mime: "video/mp4" };
+  } finally {
+    release();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Hard-cap a finished video at `maxSec`, cropping anything past it.
+ *
+ * A template composition can run longer than the 15s master (many or long
+ * slots), but the product is always a 15s ad, so the render is trimmed to length
+ * here. Re-encodes rather than stream-copying so the cut lands exactly at maxSec,
+ * not the nearest earlier keyframe. The muxed voiceover / baked audio is carried
+ * through. `-t` never pads: a clip already shorter than maxSec passes through at
+ * its own length.
+ */
+export async function capVideoDuration(
+  bytes: Uint8Array,
+  maxSec: number,
+): Promise<{ bytes: Uint8Array; mime: string }> {
+  if (!(maxSec > 0)) {
+    throw new Error(`capVideoDuration: maxSec must be positive, got ${maxSec}`);
+  }
+
+  await acquire();
+  const dir = await mkdtemp(join(tmpdir(), `ugc-cap-${randomUUID()}-`));
+  try {
+    const input = join(dir, "in.mp4");
+    await writeFile(input, bytes);
+    const out = join(dir, "out.mp4");
+
+    log.info("▶ capping video duration", { maxSec, bytesIn: bytes.length });
+    await runFfmpegWithRetry(
+      [
+        "-y",
+        "-i", input,
+        "-t", String(maxSec),
+        // Same normalize pass as sliceClip / mergeSegmentUrls, so the cropped
+        // output decodes identically to the rest of the pipeline's clips.
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-ac", "2",
+        "-threads", String(FFMPEG_THREADS),
+        "-movflags", "+faststart",
+        out,
+      ],
+      "cap-duration",
+    );
+
+    const capped = await readFile(out);
+    if (capped.length === 0) {
+      throw new Error("capVideoDuration: produced an empty file");
+    }
+    log.info("✓ video capped", { bytes: capped.length });
+    return { bytes: new Uint8Array(capped), mime: "video/mp4" };
   } finally {
     release();
     await rm(dir, { recursive: true, force: true }).catch(() => {});

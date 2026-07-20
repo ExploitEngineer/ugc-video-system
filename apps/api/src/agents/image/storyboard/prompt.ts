@@ -106,6 +106,38 @@ export interface StoryboardPromptInput {
   supportingCast?: SupportingRole[];
 }
 
+/**
+ * A person who SPEAKS in the ad — authored once per run, then carried on every
+ * scene they talk in.
+ *
+ * Exists because a bare `transcript` has no owner: with two people on screen the
+ * video model was told "here are four lines, all voiceover, use one voice", so it
+ * guessed who said what and put a woman's voice on a man. Seedance cannot clone a
+ * voice — it SYNTHESIZES one from the on-screen character plus whatever the prompt
+ * says about them (`research/04-seedance-2.0-prompting-research.md`) — so the only
+ * lever is describing each speaker explicitly, per line.
+ */
+export interface SceneSpeaker {
+  /** Stable key ("A"/"B"/"C"); the LLM's per-scene `speaker` matches on this. */
+  id: string;
+  /**
+   * SHORT on-screen noun phrase, which doubles as the per-line key in the video
+   * prompt: "the woman", "the man", "the barista". Exactly "voiceover" for an
+   * unseen narrator.
+   */
+  role: string;
+  /**
+   * How they SOUND, as ONE frozen string ("warm, upbeat woman in her late 20s,
+   * light American accent").
+   *
+   * Deliberately not split into gender/age/accent fields: a multi-segment ad
+   * reuses this descriptor in every segment, and recomposing a sentence from parts
+   * at two call sites is exactly the drift that makes a character's voice change
+   * mid-ad. One string means identity is guaranteed by `===`, not by convention.
+   */
+  voice: string;
+}
+
 export interface StoryboardScene {
   index: number;
   cameraAngle: string;
@@ -116,6 +148,12 @@ export interface StoryboardScene {
    * short action, ~8-14 words, e.g. "WIDE SHOT. A damaged robot turns on,
    * surveying the forest."). Burned into the panel as its caption; describes the
    * SAME moment as `sceneDescription`, just shortened to fit the label.
+   *
+   * The shot type is spelled out, never abbreviated. Asking only for "a shot type"
+   * in "a few words" let the model compress to film shorthand ("MCU", "OTS") to
+   * fit the budget — which is unreadable to the person reviewing the board, and
+   * drifts register run-to-run. Seedance never sees this (it is cropped off), so
+   * it exists purely for that reader.
    */
   panelCaption: string;
   /**
@@ -124,6 +162,15 @@ export interface StoryboardScene {
    */
   transcript: string;
   adStyle: string;
+  /**
+   * WHO says `transcript`, and in what voice.
+   *
+   * Optional, and absent rather than undefined when unknown: every row written
+   * before speaker identity existed has no speaker, and a script where nobody
+   * speaks has none either. Both degrade to the single-voice path unchanged.
+   * Authored by the TEMPLATE pipeline today; the normal pipeline ignores it.
+   */
+  speaker?: SceneSpeaker;
 }
 
 /** Shape the LLM must return as strict JSON. */
@@ -486,6 +533,17 @@ export function buildStoryboardPrompt({
     '  "thank me later"). Replace each with a concrete, product-specific detail.',
     "- The lines must match what the matching panel actually shows (same action /",
     "  setting), so the spoken script and the keyframes stay in sync.",
+    // These lines are SPOKEN aloud in the final video; the video provider's
+    // audio moderation rejects the whole clip if the generated voiceover reads
+    // as sensitive. Keep the copy brand-safe so it renders cleanly.
+    "- BRAND-SAFE SPEECH (these lines are spoken aloud, then audio-moderated by",
+    "  the video model): keep them plain, conversational product talk. NEVER put",
+    "  a phone number, email address, website/URL/domain, a spoken price or a",
+    "  percentage-as-claim, a medical / health cure-or-treatment claim, a",
+    "  financial or earnings guarantee, or absolute wording (\"guaranteed\",",
+    "  \"cure\", \"permanent\", \"miracle\", \"100%\") in a transcript line. Nothing",
+    "  political, violent, or adult. Describe the benefit in ordinary, honest",
+    "  words instead.",
   ];
 
   // How the hero product must appear — shared across ad types. Kills the
@@ -711,7 +769,10 @@ export function buildStoryboardPrompt({
     '  product (never a bare "it"/"this"). ~8-14 words, the SAME moment as',
     '  `sceneDescription`. GOOD (structure only): "MEDIUM SHOT. Smiling as she',
     '  holds up the [product] to camera." REJECTED: "Picks up the sunglasses."',
-    '  (no shot-type) / "Smiles and turns his head." (no product named).',
+    '  (no shot-type) / "Smiles and turns his head." (no product named) /',
+    '  "MCU. Holds up the sunglasses." (abbreviated shot-type).',
+    "  Write the shot type out in FULL — NEVER abbreviate it to MCU, CU, OTS, MS,",
+    "  ECU or XCU. A human reads this bar to review the board.",
     "",
     "STEP 3 — STORYBOARD IMAGE (`imagePrompt`). Author the full, self-contained",
     "text-to-image prompt for ONE composite storyboard sheet:",

@@ -9,6 +9,7 @@ import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { env } from "../../config/index.js";
 import { db, schema } from "../../db/index.js";
 import { createLogger } from "../../lib/log.js";
+import { inhibitSleep, releaseSleepInhibitor } from "../../lib/sleep-inhibitor.js";
 import { driveRun, failRun } from "./orchestrator.js";
 
 /** Statuses the driver can advance. Terminal + awaiting_confirmation are skipped. */
@@ -80,6 +81,12 @@ async function tick(): Promise<void> {
 
     log.info("CLAIMED", { run: id, status: claimed[0].status });
     inFlight.add(id);
+    // A run is ~20min of waiting on providers, which an idle daemon reads as an
+    // idle machine and suspends — killing the worker's sockets mid-step and
+    // failing a run that has already been paid for. Held until this run settles.
+    const uninhibit = env.WORKER_INHIBIT_SLEEP
+      ? inhibitSleep(`ugc run ${id.slice(0, 8)} in flight`)
+      : () => {};
     // Refresh the lock on its own timer, independent of the step's await, so
     // even a multi-minute video step keeps the lock fresh.
     const heartbeat = setInterval(() => {
@@ -131,6 +138,7 @@ async function tick(): Promise<void> {
       .finally(async () => {
         clearInterval(heartbeat);
         inFlight.delete(id);
+        uninhibit();
         // Release the lock so a paused→confirmed (or regenerating) run is
         // re-claimable on a later tick.
         await db
@@ -192,6 +200,7 @@ export function startWorker(): () => void {
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);
+    releaseSleepInhibitor();
     // Release locks THIS worker holds so a clean restart hands runs off
     // immediately — no stale wait, no overlap window where a dying process
     // still "owns" a run.

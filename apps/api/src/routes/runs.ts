@@ -12,9 +12,11 @@ import {
   feedbackInputSchema,
   isMultiSegment,
   regenerateVideoInputSchema,
+  retemplateInputSchema,
+  runTemplateSchema,
   segmentCountFor,
 } from "@ugc/shared";
-import type { Run, RunDetail } from "@ugc/shared";
+import type { Run, RunDetail, RunTemplate, Step } from "@ugc/shared";
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -26,10 +28,22 @@ import {
   getOpenAI,
   interpretFeedback,
   resumeStepForVideoRegen,
+  rewindStepForTemplateRegen,
 } from "../agents/creative-direction/index.js";
+import { latestFinalVideoUrl } from "../agents/creative-direction/inputs.js";
 import { getAdType } from "../agents/ad-types/registry.js";
-import { closeInFlightStepsOnCancel } from "../agents/events.js";
+import {
+  getTemplate,
+  incrementTemplateUse,
+  parseMetadata,
+  parseStructure,
+} from "../agents/template/library.js";
+import {
+  closeInFlightStepsOnCancel,
+  writeStepEvent,
+} from "../agents/events.js";
 import { persistAsset } from "../agents/persist.js";
+import { env } from "../config/index.js";
 import { db, schema } from "../db/index.js";
 import { badRequest, unprocessable } from "../lib/errors.js";
 import { normalizePersonImage } from "../lib/image/normalize.js";
@@ -156,6 +170,7 @@ async function loadRunList(): Promise<Run[]> {
       mode: schema.runs.mode,
       aspectRatio: schema.runs.aspectRatio,
       duration: schema.runs.duration,
+      pipeline: schema.runs.pipeline,
       criticEnabled: schema.runs.criticEnabled,
       characterEnabled: schema.runs.characterEnabled,
       status: schema.runs.status,
@@ -163,6 +178,13 @@ async function loadRunList(): Promise<Run[]> {
       error: schema.runs.error,
       errorCode: schema.runs.errorCode,
       feedback: schema.runs.feedback,
+      templateId: schema.runs.templateId,
+      // Only the name, never the whole snapshot: `runs.template` carries every
+      // slot, and the sidebar renders every run.
+      template: sql<{
+        displayName: string | null;
+      }>`jsonb_build_object('displayName', ${schema.runs.template} ->> 'displayName')`,
+      retemplating: schema.runs.retemplating,
       createdAt: schema.runs.createdAt,
       updatedAt: schema.runs.updatedAt,
     })
@@ -184,15 +206,27 @@ async function listSig(): Promise<string> {
   return `${agg?.n ?? 0}:${agg?.m ?? ""}`;
 }
 
-/** Cheap per-run change key — status + updatedAt only (no joins/jsonb). `null`
- *  when the run is gone (deleted mid-stream). */
+/** Cheap per-run change key — `null` when the run is gone (deleted mid-stream).
+ *
+ * Includes a step-event COUNT so a new step event moves the key. `writeStepEvent`
+ * does not bump `runs.updatedAt`, so without this the timeline only pushed at
+ * step boundaries (a `setRunIfActive`) or on the 30s worker heartbeat — a
+ * long-running step could sit grey for 30s, and a freshly-seeded `regenerated`
+ * event (the instant-loader path) would not push at all. The count is a single
+ * indexed scan on `step_events_run_id_idx`; events per run are tiny. */
 async function runHeadSig(id: string): Promise<string | null> {
   const [head] = await db
-    .select({ status: schema.runs.status, updatedAt: schema.runs.updatedAt })
+    .select({
+      status: schema.runs.status,
+      updatedAt: schema.runs.updatedAt,
+      events: sql<number>`(select count(*)::int from ${schema.stepEvents} where ${schema.stepEvents.runId} = ${schema.runs.id})`,
+    })
     .from(schema.runs)
     .where(eq(schema.runs.id, id))
     .limit(1);
-  return head ? `${head.status}:${head.updatedAt.getTime()}` : null;
+  return head
+    ? `${head.status}:${head.updatedAt.getTime()}:${head.events}`
+    : null;
 }
 
 /** A per-run stream closes once the run is terminal AND its final output landed
@@ -242,6 +276,52 @@ function validateVideo(value: unknown, field: string): File {
 
 async function fileToBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
+}
+
+/**
+ * Resolve OUR `templates.id` into the immutable `RunTemplate` snapshot a run
+ * renders from.
+ *
+ * `templateId` is never Nexrender's id. The admin already registered,
+ * introspected and validated this template when they added it to the library, so
+ * the structure is read straight from our DB: no network call, no trust in
+ * whatever the client cached, and a bad file could never have reached the picker
+ * in the first place.
+ *
+ * Shared by run creation and `POST /:id/retemplate`, so there is exactly one
+ * definition of "a template a run is allowed to use".
+ */
+async function resolveRunTemplate(
+  templateId: string | undefined,
+): Promise<RunTemplate> {
+  // Master switch — the pipeline stays dark until it's smoke-tested end to end.
+  if (!env.TEMPLATE_STEP_ENABLED) {
+    throw unprocessable("The template pipeline isn't enabled yet.");
+  }
+  if (!templateId) {
+    throw badRequest("A templateId is required for the template pipeline.");
+  }
+  const row = await getTemplate(templateId).catch(() => undefined);
+  if (!row || row.status !== "ready" || row.archivedAt) {
+    throw unprocessable("That template isn't available. Pick another one.");
+  }
+  const structure = parseStructure(row.structure);
+  const metadata = parseMetadata(row.metadata);
+  if (!structure || !metadata || !row.nexrenderTemplateId) {
+    throw unprocessable("That template is missing its structure. Pick another one.");
+  }
+
+  return runTemplateSchema.parse({
+    templateId: row.id,
+    nexrenderTemplateId: row.nexrenderTemplateId,
+    mainComposition: structure.mainComposition ?? "",
+    renderCompositions: structure.renderCompositions,
+    slots: structure.slots,
+    compositionWidth: structure.mainCompositionWidth,
+    compositionHeight: structure.mainCompositionHeight,
+    metadata,
+    displayName: row.displayName,
+  });
 }
 
 /**
@@ -313,6 +393,10 @@ runs.post(
     ...(body.adType ? { adType: body.adType } : {}),
     // Optional user-typed brand guidelines (multipart text field).
     ...(body.brandText ? { brandText: body.brandText } : {}),
+    // Which pipeline this run uses (Chunk: template pipeline redesign).
+    // FormData omits it on legacy clients → schema default "video".
+    ...(body.pipeline ? { pipeline: body.pipeline } : {}),
+    ...(body.templateId ? { templateId: body.templateId } : {}),
   });
   if (!parsed.success) {
     throw badRequest(
@@ -320,8 +404,41 @@ runs.post(
       parsed.error.issues,
     );
   }
-  const { prompt, mode, aspectRatio, duration, criticEnabled, adType, brandText } =
-    parsed.data;
+  const { prompt, adType, brandText, pipeline, templateId } = parsed.data;
+  let aspectRatio = parsed.data.aspectRatio;
+  let duration = parsed.data.duration;
+  // A template run is FULL AUTO by contract: `plan.ts` collapses its chain on
+  // the assumption that no gate ever fires and no inspection step ever runs.
+  // Enforce that here, at the boundary, rather than threading the exception
+  // through the gate map — a confirm-mode template run would otherwise pause at
+  // the reference gate and wait for a "continue" the studio never offers.
+  const isTemplateRun = pipeline === "template";
+  const mode = isTemplateRun ? ("automatic" as const) : parsed.data.mode;
+  const criticEnabled = isTemplateRun ? false : parsed.data.criticEnabled;
+
+  // ── Template pipeline gate ──────────────────────────────────────────
+  // Runs before any image upload, DB insert or AI call. `resolveRunTemplate`
+  // holds the rules; `POST /:id/retemplate` applies the same ones.
+  let runTemplate: RunTemplate | null = null;
+  if (pipeline === "template") {
+    runTemplate = await resolveRunTemplate(templateId);
+    const { metadata } = runTemplate;
+
+    // The template's composition dictates the output shape — never let a
+    // mismatched pick letterbox or stretch inside it.
+    if (metadata.aspectRatio) aspectRatio = metadata.aspectRatio;
+    // `duration` here only selects the run's step timeline, NOT the output length.
+    // A template run's real length is the template's own composition duration
+    // (`templateTotalSeconds`), generated as one or more ≤15s Seedance clips and
+    // read from the snapshot by the video agent — never from this enum. Pinned to
+    // "15s" so the template step chain is chosen; the UI hides it for template runs.
+    duration = "15s";
+
+    // Powers the picker's "popular" sort. Best-effort: a failed counter must
+    // never block a run the user has already paid for.
+    void incrementTemplateUse(runTemplate.templateId).catch(() => {});
+  }
+
   // Fix 8: detect unresolved bracket fill-in slots ([SHOCK STAT], [PRICE], …) so
   // they surface immediately in detector_meta (the worker re-derives + enriches
   // this with any invented values once the detector runs).
@@ -392,9 +509,15 @@ runs.post(
       mode,
       aspectRatio,
       duration,
+      pipeline,
       criticEnabled,
       characterEnabled,
       ...(brandText ? { brandText } : {}),
+      // The FK enables "which runs used this template"; the snapshot is what the
+      // pipeline actually reads, and stays valid even if the template is archived.
+      ...(runTemplate
+        ? { templateId: runTemplate.templateId, template: runTemplate }
+        : {}),
       ...(userAdType
         ? { adType: userAdType, adTypeSource: "user" as const }
         : {}),
@@ -824,12 +947,274 @@ runs.post("/:id/regenerate-video", async (c) => {
     if (assetIds.length) {
       await tx.delete(schema.assets).where(inArray(schema.assets.id, assetIds));
     }
+    // A template run's slices were cut FROM the clip we just deleted, so they
+    // show footage that no longer exists. `prepareTemplateClips` is idempotent
+    // by asset presence, so leaving them behind would silently re-render the old
+    // ad. The generated stills are NOT touched: they cost real money and are
+    // independent of the clip.
+    if (run.pipeline === "template") {
+      await tx
+        .delete(schema.assets)
+        .where(
+          and(
+            eq(schema.assets.runId, id),
+            inArray(schema.assets.kind, ["template_clip", "template_audio"]),
+          ),
+        );
+    }
     await tx
       .update(schema.runs)
       .set({
         status: "running",
-        currentStep: resumeStepForVideoRegen(run.duration),
+        currentStep: resumeStepForVideoRegen(run.duration, run.pipeline),
         feedback: note,
+        error: null,
+        errorCode: null,
+        // A template run re-renders after the new clip. A stale Nexrender job id
+        // would make `applyTemplate` poll the OLD render and persist its output,
+        // so the user would get a "regenerated" video containing the old clip.
+        //
+        // `retemplating` must go too: it makes `nextStep` skip `video`, and this
+        // route exists precisely to re-run `video`. A run that was re-templated
+        // and then had its clip regenerated would otherwise re-composite over the
+        // clip it just deleted.
+        ...(run.pipeline === "template"
+          ? { nexrenderJobId: null, retemplating: false }
+          : {}),
+        lockedAt: null,
+        lockedBy: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.runs.id, id));
+  });
+
+  // Seed a `regenerated` event on the video step so the timeline shows the amber
+  // loader the instant this response lands, instead of the old "Passed" until the
+  // worker (polling, up to 1.5s later) writes its own `started`. The worker's
+  // later events are additive; latest-event-wins keeps the state correct.
+  if (multi) {
+    // Whole run → every segment; a single target → just that one.
+    const segs =
+      segmentIndex != null
+        ? [segmentIndex]
+        : Array.from({ length: segmentCountFor(run.duration) }, (_, i) => i);
+    for (const seg of segs) {
+      await writeStepEvent({
+        runId: id,
+        step: "segment_video",
+        status: "regenerated",
+        payload: { source: "user_regen", segmentIndex: seg },
+      });
+    }
+  } else {
+    await writeStepEvent({
+      runId: id,
+      step: "video",
+      status: "regenerated",
+      payload: { source: "user_regen" },
+    });
+  }
+
+  notifyRunChanged(id);
+  return c.json(await loadRunDetail(id));
+});
+
+// ── POST /runs/:id/regenerate-template — retry a failed template step.
+//
+// The template pipeline never gates mid-run (the template was validated at
+// creation, and plan/fill/images/render are fully automatic), so a failure is a
+// hard `failed` with no gate to fall back into. This route is the recovery path.
+//
+// The rewind checkpoint is chosen by WHICH step failed — see
+// `rewindStepForTemplateRegen`. A single fixed checkpoint is wrong in both
+// directions: rewind too far and the run re-pays gpt-image-2 for stills it
+// already has; rewind too little and the composite renders with no copy and no
+// images in it.
+runs.post("/:id/regenerate-template", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  if (run.pipeline !== "template") {
+    throw badRequest("This run does not use the template pipeline.");
+  }
+  assertStatus(run, ["failed"], "Run is not in a failed state.");
+
+  const rewindTo = rewindStepForTemplateRegen(run.errorCode);
+  if (rewindTo === undefined) {
+    throw badRequest("This run's failure isn't a template step failure.");
+  }
+
+  log.info("regenerate-template", {
+    run: id,
+    errorCode: run.errorCode,
+    rewindTo: rewindTo ?? "(start)",
+  });
+
+  // A stale Nexrender job id would make `applyTemplate` poll the OLD render and
+  // persist ITS output instead of submitting a fresh one. Always clear it.
+  //
+  // The previous composite (a `videos` row with a null segmentIndex, whose
+  // `assets` row cascades) is dropped too — otherwise a retry that succeeds
+  // leaves two `templated_video` rows and the run view picks whichever is newest
+  // by luck.
+  await db
+    .delete(schema.videos)
+    .where(
+      and(
+        eq(schema.videos.runId, id),
+        isNull(schema.videos.segmentIndex),
+        sql`${schema.videos.providerMeta} ->> 'provider' = 'nexrender'`,
+      ),
+    );
+
+  await db
+    .update(schema.runs)
+    .set({
+      status: "running",
+      currentStep: rewindTo,
+      error: null,
+      errorCode: null,
+      nexrenderJobId: null,
+      // A failed plan is re-planned from scratch; a stale one would be skipped
+      // by `template_plan`'s idempotency guard.
+      ...(rewindTo === null ? { templatePlan: null } : {}),
+      lockedAt: null,
+      lockedBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.runs.id, id));
+
+  // Seed a `regenerated` event on the step the worker actually re-runs FIRST, so
+  // the amber loader lights the RIGHT step the instant this response lands. The
+  // step that re-runs is exactly the one that failed — the rewind checkpoint is the
+  // step just before it. The previous mapping branched on a "storyboard" checkpoint
+  // that `rewindStepForTemplateRegen` never returns and defaulted everything else
+  // to `template_render`, so a keyframe/fill/video failure lit the wrong step.
+  const RESUME_STEP_BY_CODE: Partial<Record<string, Step>> = {
+    TEMPLATE_PLAN_FAILED: "template_plan",
+    TEMPLATE_KEYFRAME_FAILED: "template_keyframe",
+    TEMPLATE_FILL_FAILED: "template_fill",
+    TEMPLATE_VIDEO_FAILED: "template_video",
+    TEMPLATE_RENDER_FAILED: "template_render",
+  };
+  const resumeTarget: Step =
+    RESUME_STEP_BY_CODE[run.errorCode ?? ""] ?? "template_plan";
+  await writeStepEvent({
+    runId: id,
+    step: resumeTarget,
+    status: "regenerated",
+    payload: { source: "user_regen" },
+  });
+
+  notifyRunChanged(id);
+  return c.json(await loadRunDetail(id));
+});
+
+// ── POST /runs/:id/retemplate — the same ad, in a different template ──
+//
+// The generated video is template-INDEPENDENT: the reference sheets, the
+// storyboard and the 15s Seedance master say nothing about which After Effects
+// project they end up inside. Only four artifacts are keyed to the template's
+// slots (the plan, the copy, the stills and the composite), and every one of
+// them is cheap next to the clip. So swapping the template re-derives those four
+// and reuses everything else.
+//
+// The short chain — `template_plan → template_fill → template_images →
+// template_render` — is `nextStep`'s doing, unlocked by `runs.retemplating`.
+// Rewinding to `currentStep: null` alone would drag the reference phase and the
+// storyboard back in, and a fresh storyboard writes a NEW transcript: the copy
+// would then be written against a script the kept clip never spoke.
+runs.post("/:id/retemplate", async (c) => {
+  const id = c.req.param("id");
+  const run = await getRunOr404(id);
+  if (run.pipeline !== "template") {
+    throw badRequest("This run does not use the template pipeline.");
+  }
+  // `failed` counts, and it is the case that matters most: a template whose
+  // render died is exactly the template a user wants to swap out. `completed`
+  // and `failed` are the only statuses where the worker is not driving the run.
+  assertStatus(run, ["completed", "failed"], "This ad is still being built.");
+
+  // The REAL precondition, and the one the feature is named after: there has to
+  // be a video to re-composite. A run that failed at `storyboard` has no master
+  // clip, and re-templating it would drive `applyTemplate` into "no final_video
+  // to feed the template" three steps later.
+  if (!(await latestFinalVideoUrl(id))) {
+    throw unprocessable("This ad has no generated video yet.");
+  }
+
+  const parsed = retemplateInputSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    throw badRequest("A templateId is required.", parsed.error.issues);
+  }
+  const { templateId } = parsed.data;
+  // Re-picking the SAME template is a no-op on a finished ad, but it is the
+  // recovery path on a failed one: the snapshot in `runs.template` is frozen at
+  // creation, so once the library row is re-introspected (a classifier fix, say)
+  // only a re-template can pick the corrected slots up. `Retry` cannot — it
+  // re-renders the frozen snapshot and fails identically, forever.
+  if (templateId === run.templateId && run.status === "completed") {
+    throw badRequest("That is already this ad's template.");
+  }
+
+  const runTemplate = await resolveRunTemplate(templateId);
+
+  // The master clip was SHOT in the original template's shape (run creation
+  // forces `aspectRatio` from the composition). Slicing a 9:16 master into a
+  // 16:9 slot centre-crops it to a third of the frame, so refuse rather than
+  // hand back a butchered ad.
+  if (runTemplate.metadata.aspectRatio !== run.aspectRatio) {
+    throw unprocessable(
+      `That template is ${runTemplate.metadata.aspectRatio}; this ad's video is ${run.aspectRatio}. Pick a template with the same shape.`,
+    );
+  }
+
+  log.info("retemplate", {
+    run: id,
+    from: run.templateId,
+    to: templateId,
+    name: runTemplate.displayName,
+  });
+
+  await db.transaction(async (tx) => {
+    // Delete the ASSETS, not the `videos` rows: the FK runs
+    // `videos.asset_id → assets.id ON DELETE CASCADE`, so dropping the asset
+    // takes its video row with it. (`regenerate-template` deletes the video row
+    // instead, which strands the asset.)
+    //
+    // The stills go too, unlike a clip regen: they are sized to the old slots'
+    // geometry and keyed by the old `jobLayerName`, so a new template with a
+    // colliding layer name would silently reuse the wrong picture.
+    await tx
+      .delete(schema.assets)
+      .where(
+        and(
+          eq(schema.assets.runId, id),
+          inArray(schema.assets.kind, [
+            "templated_video",
+            "template_aep",
+            "template_clip",
+            "template_audio",
+            "template_image",
+          ]),
+        ),
+      );
+
+    await tx
+      .update(schema.runs)
+      .set({
+        templateId: runTemplate.templateId,
+        template: runTemplate,
+        retemplating: true,
+        // Every one of these is keyed to the OLD template's `jobLayerName`s.
+        templatePlan: null,
+        templateTextFill: null,
+        // A stale job id would make `applyTemplate` poll the PREVIOUS render and
+        // persist its output — the old template, presented as the new one.
+        nexrenderJobId: null,
+        status: "running",
+        // `firstStep` sends a template run to `template_plan`, and from there
+        // `retemplating` short-circuits it to the copywriter.
+        currentStep: null,
         error: null,
         errorCode: null,
         lockedAt: null,
@@ -839,6 +1224,17 @@ runs.post("/:id/regenerate-video", async (c) => {
       .where(eq(schema.runs.id, id));
   });
 
+  // Seed `template_plan: regenerated` so the timeline shows the amber "Rebuilding"
+  // loader the moment this response lands — `template_plan` opens the retemplating
+  // chain (`firstStep` → `template_plan`, then the short chain).
+  await writeStepEvent({
+    runId: id,
+    step: "template_plan",
+    status: "regenerated",
+    payload: { source: "user_regen" },
+  });
+
+  void incrementTemplateUse(runTemplate.templateId).catch(() => {});
   notifyRunChanged(id);
   return c.json(await loadRunDetail(id));
 });

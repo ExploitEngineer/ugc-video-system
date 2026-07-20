@@ -60,10 +60,10 @@ export function usesCleanCuts(adType: string): boolean {
 export function videoRenderDirective(adType: string): string {
   const def = getAdType(adType);
   if (def.id === "service")
-    return "Render the storyboard's FOUR keyframes in order as a short live-action SKIT with a clean CUT between each distinct scene - each output frame is ONE full-frame scene; match the board's identity and look, never a split-screen or collage.";
+    return "Play the beats in order as a short live-action skit, a clean cut between each scene; one full-frame scene per shot.";
   if (usesCleanCuts(adType))
-    return `Render the storyboard's four beats in order as distinct shots with a clean CUT between each - each beat is ONE stable, full-frame shot (one camera move or a hold, one action), matching the board's framing and identity, never a split-screen or collage.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`;
-  return "Render ONE continuous live-action take that fills the whole frame the entire time - match the board's framing and identity, never a split-screen or collage.";
+    return "Play the beats in order as distinct shots, a clean cut between each; one full-frame shot per beat.";
+  return "One continuous live-action take, full frame throughout.";
 }
 
 /**
@@ -126,6 +126,8 @@ export function buildVideoPrompt(input: {
   brandText?: string;
   /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
   supportingCast?: SupportingRole[];
+  /** Panels on the attached sheet, for its description. Defaults to `scenes.length`. */
+  boardPanelCount?: number;
 }): ChatMessage[] {
   const {
     adStyle,
@@ -140,6 +142,9 @@ export function buildVideoPrompt(input: {
     visualStyle,
     hasProductSheet,
   } = input;
+  // How many panels the attached sheet actually has (a template board renders one
+  // per beat). Only the panel-count wording changes; 4 stays byte-identical.
+  const boardPanels = input.boardPanelCount ?? (scenes.length || 4);
   const anchor = (input.characterAnchor ?? "").trim();
   // Ad-type registry dispatch (Chunk F). `isUgcLook` carries the old `ugc`
   // label/speaker branches; presenter logic comes from `hasPerson`. Legacy ids
@@ -154,9 +159,6 @@ export function buildVideoPrompt(input: {
   // fallback + video/index.ts's renderDirective). cinematic_polished + demo_clean
   // (and service) CUT between beats; ugc_authentic runs one continuous take.
   const cuts = usesCleanCuts(adType);
-  const renderModeLine = cuts
-    ? "Render the beats in order as distinct shots with a clean CUT between each; each beat is ONE stable shot (one camera move or a hold, one action), all motion slow and smooth, never fast."
-    : "Render ONE continuous live-action take with NO cuts, the beats flowing smoothly into one another.";
   const hasPerson = input.hasPerson ?? false;
   // Chunk 4b — text-only supporting roles (product types). A SHORT mention only;
   // the storyboard still carries their look. Gated so no-cast runs are unchanged.
@@ -182,21 +184,7 @@ export function buildVideoPrompt(input: {
   // storyboard=2, face=3 with a product sheet; storyboard=1, face=2 otherwise.
   const boardNo = hasProductSheet ? 2 : 1;
   const boardImg = `@Image ${boardNo}`;
-  const faceImg = hasProductSheet ? `@Image ${boardNo + 1}` : "@Image 1";
   const hasPresenter = Boolean(anchor) || hasPerson;
-
-  // ONE-line identity legend — the load-bearing anchors, nothing more.
-  const legend = [
-    hasProductSheet
-      ? "@Image 1 is the product — keep its exact shape, colour, finish and markings identical in every shot"
-      : "",
-    `${boardImg} is the film storyboard — a 2×2 grid of four keyframe panels in reading order (top-left=1, top-right=2, bottom-left=3, bottom-right=4); follow the panels in order, one per time slice`,
-    hasPresenter
-      ? `${faceImg} is the on-screen person — keep this exact face and identity throughout`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
 
   // ONE short audio line — TYPE-driven fragment (registry dispatch).
   const audioLine = def.fragments.videoAudioLine(fctx)[0] ?? "";
@@ -239,39 +227,47 @@ export function buildVideoPrompt(input: {
     .map((s, i) => `${s}: <panel ${i + 1} action>`)
     .join("; ");
 
+  // The still already fixes appearance/identity/product/wardrobe/lighting/setting,
+  // so the prompt's whole job is MOTION. Re-describing what the image carries makes
+  // the model re-assert stillness instead of animating (official image-to-video
+  // guidance), which is why the old ~600-word writer produced stiff, fake action.
+  // This writer is short and spends its words on physically-grounded motion verbs.
   const system = [
-    "You are a prompt writer for Seedance 2.0, a multi-shot AI video model.",
-    `Write ONE short, SIMPLE video prompt for a ~${durationSec}s, fully photorealistic live-action ${isUgcLook ? "UGC-style ad" : "commercial"} in the "${adStyle}" style.`,
-    isService
-      ? `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first), ONE per scene. Use it as the LOOK + identity reference. Render the FOUR scenes in order as a short live-action SKIT with a clean CUT between each — they are DISTINCT settings/moments (the world and lighting may change between scenes), NOT one continuous take. Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`
-      : `A film storyboard is attached as ${boardImg}: a clean 2×2 of FOUR keyframe panels in reading order (top-left first). Use it as the LOOK reference — framing, identity, product, setting — NOT as a timeline; the beat order comes from the timestamped slices below. ${renderModeLine} Each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`,
-    `Identity anchors — ${legend}. After any \`@Image N\` reference, immediately name what it is.`,
-    lockedStyle
-      ? `Locked visual style — match this EXACTLY (identical across all clips of the ad; do not reinterpret it): ${lockedStyle}`
-      : "",
-    "FORMAT — return EXACTLY this shape as ONE single-line string:",
+    "You write ONE short motion prompt for Seedance 2.0, an image-to-video model.",
+    `A film storyboard is attached as ${boardImg} — ${boardPanels === 4 ? "four keyframe panels, 2×2, top-left first" : `${boardPanels} keyframe panels, row-major, top-left first`}. It ALREADY fixes the appearance, identity, product, wardrobe, lighting and setting. Your whole job is to describe the MOTION: one beat per panel, in order.`,
+    "FORMAT — return EXACTLY this ONE single-line string:",
     `"Generate a scene using shots in the uploaded film storyboard ${exampleSlices}."`,
+    // The realism lever: physically-grounded action, not generic verbs or adjectives.
+    `For EACH beat write ONE concrete physical action with its MECHANICS and a natural consequence — how the hands, body${hasProductSheet ? " or product" : ""} actually move: weight, contact, follow-through (e.g. "she lifts the mug, feels its weight, then sips, the cup tilting"). Add ONE camera move or a hold. Present tense, causal order ("as", "then").`,
+    'Do NOT re-describe appearance, wardrobe, lighting, the product or the setting — the storyboard carries them and re-describing them REDUCES the motion. No praise adjectives (beautiful, smooth, elegant, cinematic); spend the words on verbs.',
+    cuts
+      ? "Play the beats as distinct shots with a clean cut between each."
+      : "Render ONE continuous take, the beats flowing into one another.",
+    hasPresenter && (isUgcLook || isService)
+      ? 'Attribute each spoken line to the on-screen person with a speaking verb + DOUBLE quotes so it lip-syncs on camera — `she says: "…"` — never a bare quote.'
+      : 'Attribute narration as an off-screen voiceover — `a voiceover narrates: "…"`.',
     isService
-      ? "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the character's spoken line in quotes. ONE speaker per slice (never two people talking at once — cut to whoever speaks). Keep motion natural and stable. Do NOT restate the characters' looks, wardrobe or the lighting in each slice — the storyboard carries that; no adjective stacking."
+      ? "ONE speaker per beat — cut to whoever is talking, never two at once."
       : "",
-    isService ? "" : "For EACH slice: ONE SHORT clause — the camera's single move (or HOLD steady), the one key action, then the spoken line in quotes. Keep motion slow, smooth and stable - ONE camera move or hold and ONE action per beat, NEVER fast; the product holds ONE fixed shape (no morph or duplicate); any prep (opening, unclasping) comes in an EARLIER slice and persists. Do NOT restate the person's look, wardrobe, lighting or style in each slice — the reference images carry that; no adjective stacking.",
     supportLine,
     audioLine,
-    isService
-      ? ""
-      : hasPresenter
-        ? "Audio uses ONE single voice for the whole ad — the on-screen person's own voice, matching their apparent age and gender, the SAME voice in every beat; never a second or overlapping voice."
-        : "Audio uses ONE consistent voiceover — a single voice for the whole ad, the same in every beat; never a second or overlapping voice.",
     hookDirective,
     pacingLine,
+    lockedStyle ? `Match this locked look across every part of the ad: ${lockedStyle}` : "",
     formatBrand(input.brandText),
-    `Frame for ${FRAME_LABEL[aspectRatio].full}. HARD LIMIT — the WHOLE videoPrompt is at most 80 words; Seedance ignores long prompts, so be terse and front-load the first beat. Each slice is ONE short clause (ONE camera move or hold + ONE action + the quoted line), all motion slow and smooth, never fast; NEVER re-describe the person, wardrobe, lighting or style (the reference images carry that). End with ONE short render-constraint clause: no on-screen text, one full-frame scene (no split or collage).`,
+    `Frame for ${FRAME_LABEL[aspectRatio].full}. Keep the WHOLE prompt tight — one short clause per beat, about 70-90 words total, front-load the first beat. End with: one full-frame scene.`,
     'Return STRICT JSON only: {"videoPrompt": "<ONE single-line string, NO raw line breaks>"}.',
   ]
     .filter(Boolean)
     .join(" ");
 
-  const speakerLabel = isService || isUgcLook ? "spoken" : "voiceover";
+  // Research-validated lip-sync trigger (research/04, 2026 refresh): a speaking
+  // VERB attribution ("... says: ...") plus the line in DOUBLE quotes makes
+  // Seedance voice + lip-sync it to the on-screen speaker; a "narrates" verb keeps
+  // a voiceover OFF-screen. So UGC/service lines are attributed with `says`, VO
+  // lines with `narrates` — never the old bare `(spoken:/voiceover:)` label, which
+  // the model read as ambient audio.
+  const speakVerb = isService || isUgcLook ? "says" : "narrates";
   const slices = buildSliceBrackets(durationSec, scenes.length);
   const sceneLines = scenes
     .map((s, i) => {
@@ -281,7 +277,7 @@ export function buildVideoPrompt(input: {
         s.actionMovement?.trim() ||
         "continue the scene naturally";
       const said = s.transcript?.trim()
-        ? ` (${speakerLabel}: "${s.transcript.trim()}")`
+        ? ` — ${speakVerb}: "${s.transcript.trim()}"`
         : "";
       return `Panel ${i + 1} ${slice}: ${desc}${said}`;
     })
@@ -336,8 +332,20 @@ export function buildDeterministicVideoPrompt(input: {
   brandText?: string;
   /** Chunk 4b — text-only supporting roles (product types); a brief mention only. */
   supportingCast?: SupportingRole[];
+  /** Panels on the attached sheet, for its description. Defaults to `scenes.length`. */
+  boardPanelCount?: number;
+}, opts?: {
+  /**
+   * Audio-safe retry mode (the video ladder's `audioMode: "safe"`): the run's
+   * previous attempt tripped Seedance's OUTPUT-AUDIO moderation on the verbatim
+   * scripted lines. Drop the exact quoted transcript from every shot and tell
+   * the model to speak GENERIC brand-safe lines instead, so the re-roll keeps
+   * audio without repeating the flagged copy. Visuals/motion are unchanged.
+   */
+  audioSafe?: boolean;
 }): string {
   const { adStyle, adType, scenes, durationSec, aspectRatio } = input;
+  const audioSafe = opts?.audioSafe ?? false;
   const def = getAdType(adType);
   const ugc = def.lookFamily === "ugc_authentic";
   // Service ads are a multi-scene skit (clean cuts, synthesized characters
@@ -367,22 +375,16 @@ export function buildDeterministicVideoPrompt(input: {
   });
   // Same @Image numbering as buildVideoPrompt: product=1, storyboard=2, face=3
   // with a product sheet; storyboard=1, face=2 otherwise.
-  const boardNo = input.hasProductSheet ? 2 : 1;
-  const boardRef = `@Image ${boardNo}`;
-  const faceRef = input.hasProductSheet ? `@Image ${boardNo + 1}` : "@Image 1";
-  const productPin = input.hasProductSheet
-    ? "@Image 1 is the product — keep its exact identity, finish and markings identical in every shot. "
-    : "";
-  const presenterPin =
-    anchor || ugc
-      ? `${faceRef} is the on-screen person — keep this exact person (same apparent gender, age, face and hair) throughout. `
-      : "";
+  const boardRef = `@Image ${input.hasProductSheet ? 2 : 1}`;
   const voice = anchor
     ? `a natural, real human voice fitting ${anchor}`
     : (def.fragments.videoVoice(fctx)[0] ?? "");
   const count = scenes.length || 1;
   const slices = buildSliceBrackets(durationSec, count);
-  const speak = isService ? "speaks in English" : ugc ? "spoken" : "voiceover";
+  // Same research-validated attribution as the LLM path: a speaking VERB (`says`)
+  // + double-quoted line triggers on-camera lip-sync; `narrates` keeps a voiceover
+  // off-screen. (research/04, 2026 refresh.)
+  const speak = isService || ugc ? "says" : "narrates";
   const shots = scenes
     .map((s, i) => {
       const slice = slices[i] ?? "";
@@ -391,39 +393,55 @@ export function buildDeterministicVideoPrompt(input: {
         s.sceneDescription?.trim() ||
         s.actionMovement?.trim() ||
         "continue the scene naturally";
-      const said = s.transcript?.trim()
-        ? `, ${speak}: "${s.transcript.trim()}"`
-        : "";
+      // Audio-safe retry: omit the verbatim scripted line (it tripped the
+      // provider's audio moderation). The generic audio directive below tells
+      // the model what to say instead; the visuals/action are untouched.
+      const said =
+        audioSafe || !s.transcript?.trim()
+          ? ""
+          : `, ${speak}: "${s.transcript.trim()}"`;
       return `${slice}: ${action} (${cam})${said}`;
     })
     .join("; ");
-  const audio = isService
-    ? "Audio: each character speaks their line lip-synced with the mouth visible, ONE speaker per shot (cut to whoever speaks, never two voices at once); give each character a CONSISTENT voice matching their apparent age and gender, the same across their scenes; light location ambience and a fitting score."
-    : ugc
-      ? `Audio: the on-screen person speaks each line lip-synced in ${voice}, ONE single voice throughout with the mouth visible while speaking, never a second or overlapping voice; light room ambience, no music.`
-      : `Audio: ${voice} narrates each line as a single voiceover, the same ONE voice throughout, never a second or overlapping voice; a light score is allowed.`;
+  // In audio-safe mode the model IMPROVISES short, brand-safe spoken lines (no
+  // scripted copy is fed) — the earlier attempt's exact lines were flagged.
+  // Full mode is byte-identical to the pre-audioSafe strings (regression-locked).
+  const safeAudioTail =
+    " Keep the spoken lines short, natural and brand-safe — plain conversational talk about the product; do NOT say any specific numbers, prices, percentages, phone numbers, email addresses, URLs, brand or personal names, or any health, medical, or financial claim.";
+  let audio: string;
+  if (audioSafe) {
+    audio = isService
+      ? `Audio: each person speaks a short brand-safe line on camera, lips moving, one speaker per shot.${safeAudioTail}`
+      : ugc
+        ? `Audio: the on-screen person speaks a short brand-safe line on camera in ${voice}, lips moving; ambient room tone, no music.${safeAudioTail}`
+        : `Audio: ${voice} narrates a short brand-safe line as an off-screen voiceover.${safeAudioTail}`;
+  } else {
+    audio = isService
+      ? "Audio: each person says their line on camera, lips moving, one speaker per shot."
+      : ugc
+        ? `Audio: the on-screen person says each line on camera in ${voice}, lips moving; ambient room tone, no music.`
+        : `Audio: ${voice} narrates each line as an off-screen voiceover.`;
+  }
 
-  // Service ads: a multi-scene skit rendered with clean CUTS between distinct
-  // scenes (no continuous take, no product-object constraint).
+  // Deterministic fallback: the storyboard still carries appearance/identity, so
+  // this stays lean — the beats + audio, no re-description of look or product, no
+  // failure-naming rigidity clause (it fought natural handling). Physical grounding
+  // lives in the LLM path; here we keep the shot list functional and short.
   if (isService) {
     return (
-      `Generate a short live-action SKIT from the uploaded film storyboard ${boardRef} — a clean 2×2 of four keyframe panels (top-left first), ONE per scene, used as the LOOK + identity reference. Render the four scenes IN ORDER with a clean CUT between each (DISTINCT settings/moments; the lighting may shift) in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage. ${presenterPin}` +
-      `${shots}. ` +
-      `Each character's face, hair and wardrobe stay consistent across the scenes they appear in; ONE speaker per shot; motion natural and stable, ONE camera move per shot. ${audio}${brandTail} ` +
-      `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep any in-scene on-screen text from the keyframes (a stat, a price, the end-card line) legible. ONE full-frame scene per shot with clean cuts between scenes, never a split-screen or panel grid.`
+      `Generate a short live-action skit from the storyboard ${boardRef}, a clean cut between each distinct scene, one full-frame scene per shot, in the "${adStyle}" style. ` +
+      `${shots}. ${audio}${brandTail} ` +
+      `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep only the in-scene stat / end-card text legible.`
     );
   }
 
-  // Non-service looks: cinematic_polished + demo_clean CUT cleanly between beats;
-  // ugc_authentic is ONE continuous photoreal take. Same per-look decision as the
-  // LLM prompt + video/index.ts so the composed prompt never contradicts itself.
+  // Non-service: cinematic_polished + demo_clean CUT between beats; ugc_authentic
+  // is ONE continuous take. Same per-look decision as buildVideoPrompt + index.ts.
   const openLine = cuts
-    ? `Generate a scene from the uploaded film storyboard ${boardRef} - a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render the four beats in order as distinct shots with a clean CUT between each in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME - never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.${def.lookFamily === "demo_clean" ? " Keep the product rigid and dimensionally identical across every cut." : ""}`
-    : `Generate a scene using shots in the uploaded film storyboard ${boardRef} — a clean 2×2 of four keyframe panels (top-left first) used as the LOOK reference (framing, identity, product), NOT a timeline; the beat order is the timestamped slices below. Render ONE continuous, photorealistic live-action take with NO cuts in the "${adStyle}" style; each output frame is ONE single scene that FILLS THE WHOLE FRAME — never reproduce the 2×2 layout, never split the frame into panels or a side-by-side/collage.`;
+    ? `Generate a scene from the storyboard ${boardRef}, the beats in order as distinct shots with a clean cut between each, one full-frame shot per beat, in the "${adStyle}" style.${def.lookFamily === "demo_clean" ? " The product holds its shape across every cut." : ""}`
+    : `Generate a scene from the storyboard ${boardRef} as ONE continuous full-frame live-action take, in the "${adStyle}" style.`;
   return (
-    `${openLine} ${productPin}${presenterPin}${supportClause}` +
-    `${shots}. ` +
-    `The camera makes at most ONE slow move per beat (or holds steady) and ONE action per beat; all motion stays slow, smooth, steady and gentle, never fast; the product is ONE solid object that does not bend, stretch, melt or duplicate — the same shape, finish and exact part-count in every frame, hands touching its outer surface only and never passing through it; any prep comes in an earlier slice and its changed state persists. ${audio}${brandTail} ` +
-    `Frame for ${FRAME_LABEL[aspectRatio].short}. Keep the SAME single person and product across all beats. ONE full-frame scene per shot, never a split-screen or panel grid. No on-screen text, panel grid, split-screen or watermark${ugc ? "; no background music" : ""}.`
+    `${openLine} ${supportClause}${shots}. ${audio}${brandTail} ` +
+    `Frame for ${FRAME_LABEL[aspectRatio].short}. One full-frame scene${ugc ? "; ambient sound, no music" : ""}.`
   );
 }

@@ -106,7 +106,7 @@ a calm, measured narrator
 ### videoAudioLine
 
 ```
-Audio: a natural, real human VOICEOVER narrates each line (not lip-synced on screen), the SAME voice throughout; quote each line verbatim in its slice and keep it short; a light fitting score is allowed.
+Audio: natural ambience under a light, fitting score.
 ```
 
 ### narrativeTreatment

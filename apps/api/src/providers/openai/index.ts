@@ -18,13 +18,14 @@ import { createLogger } from "../../lib/log.js";
 import {
   DEFAULT_CHAT_MAX_TOKENS,
   DEFAULT_IMAGE_SIZE,
-  IMAGE_SIZE_FALLBACK,
+  nextImageSize,
   OPENAI_CHAT_MODEL,
   OPENAI_IMAGE_MODEL,
   OPENAI_IMAGE_OUTPUT_COMPRESSION,
   OPENAI_IMAGE_OUTPUT_FORMAT,
   OPENROUTER_BASE_URL,
   OPENROUTER_CLAUDE_MODEL,
+  OPENROUTER_SMALL_MODEL,
 } from "./constants.js";
 
 const log = createLogger("openai");
@@ -86,11 +87,16 @@ export interface ChatOptions {
    */
   jsonMode?: boolean;
   /**
-   * Reasoning backend. `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
-   * `"openai"` → forces gpt-4.1. When `OPENROUTER_API_KEY` is unset, the default
-   * silently falls back to gpt-4.1, so the server runs without the key.
+   * Reasoning backend.
+   *   `"claude"` (DEFAULT) → Claude Sonnet 4.6 via OpenRouter.
+   *   `"small"`            → Claude Haiku 4.5 via OpenRouter. For short,
+   *                          mechanical calls (the template plan + its copy).
+   *   `"openai"`           → forces gpt-4.1.
+   *
+   * Both OpenRouter backends silently fall back to gpt-4.1 when
+   * `OPENROUTER_API_KEY` is unset, so the server runs without the key.
    */
-  backend?: "openai" | "claude";
+  backend?: "openai" | "claude" | "small";
 }
 
 export interface OpenAIProvider {
@@ -144,6 +150,19 @@ function getOpenRouterClient(): OpenAI {
 
 /** Image-gen attempts before giving up (covers truncated-body JSON failures). */
 const IMAGE_MAX_ATTEMPTS = 5;
+
+/**
+ * Wall-clock ceiling for ONE `generateImage` call, retries and all.
+ *
+ * Counting attempts does not bound anything on its own: attempts multiply with
+ * whatever the SDK does underneath (5 here × 5 there × a 300s timeout = 125
+ * minutes on a single still). A real 4K sheet takes ~150-220s, so a slot that has
+ * burned this long is not slow, it is broken — and an image slot is non-fatal, so
+ * giving up cheaply and keeping the template's own artwork beats stalling the run.
+ *
+ * A DEADLINE is the bound that survives someone re-tuning either retry layer.
+ */
+const IMAGE_TOTAL_BUDGET_MS = 10 * 60 * 1000;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -306,26 +325,51 @@ async function imageRefToFile(ref: ImageRef): Promise<File> {
   return toFile(bytes, `ref.${ext}`, { type: mime });
 }
 
+/** Which model + transport a `chat()` call actually uses. */
+export interface ResolvedBackend {
+  /** `true` → the OpenRouter client; `false` → the OpenAI client (gpt-4.1). */
+  viaOpenRouter: boolean;
+  model: string;
+  /** For logs. Reflects the ACTUAL route, not what the caller asked for. */
+  label: "claude" | "small" | "openai";
+}
+
+/**
+ * Resolve the requested backend against what is actually configured. Pure, so
+ * the fallback rules are pinned by a test rather than rediscovered when a key
+ * goes missing in a deploy.
+ *
+ * Both OpenRouter backends degrade to gpt-4.1 when `OPENROUTER_API_KEY` is
+ * unset — the server must run without it.
+ */
+export function resolveBackend(
+  backend: ChatOptions["backend"],
+  hasOpenRouterKey: boolean,
+): ResolvedBackend {
+  const want = backend ?? "claude";
+  if (want !== "openai" && hasOpenRouterKey) {
+    return want === "small"
+      ? { viaOpenRouter: true, model: OPENROUTER_SMALL_MODEL, label: "small" }
+      : { viaOpenRouter: true, model: OPENROUTER_CLAUDE_MODEL, label: "claude" };
+  }
+  return { viaOpenRouter: false, model: OPENAI_CHAT_MODEL, label: "openai" };
+}
+
 export function createOpenAIProvider(): OpenAIProvider {
   return {
     async chat(messages, opts) {
       const sdkMessages = await Promise.all(messages.map(toChatMessage));
       const maxTokens = opts?.maxTokens ?? DEFAULT_CHAT_MAX_TOKENS;
-      // Claude Sonnet 4.6 (via OpenRouter) is the DEFAULT reasoning/vision
-      // backend. A call routes to Claude unless it explicitly forces
-      // `backend:"openai"`; if `OPENROUTER_API_KEY` is unset we degrade to
-      // gpt-4.1 (so the server still runs without the key).
-      const backend = opts?.backend ?? "claude";
-      const useClaude = backend === "claude" && Boolean(env.OPENROUTER_API_KEY);
-      const apiClient = useClaude ? getOpenRouterClient() : getClient();
-      const model = useClaude ? OPENROUTER_CLAUDE_MODEL : OPENAI_CHAT_MODEL;
+      const route = resolveBackend(opts?.backend, Boolean(env.OPENROUTER_API_KEY));
+      const apiClient = route.viaOpenRouter ? getOpenRouterClient() : getClient();
+      const model = route.model;
       // json_object is reliable on gpt-4.1; on Claude-via-OpenRouter it is not
       // guaranteed (and can error) — skip it there and trust the prompt + parser.
-      const wantJson = Boolean(opts?.jsonMode) && !useClaude;
+      const wantJson = Boolean(opts?.jsonMode) && !route.viaOpenRouter;
       const t0 = Date.now();
       log.debug("chat →", {
         model,
-        backend: useClaude ? "claude" : "openai",
+        backend: route.label,
         msgs: sdkMessages.length,
         maxTokens,
         jsonMode: wantJson,
@@ -362,7 +406,7 @@ export function createOpenAIProvider(): OpenAIProvider {
               : String(err);
         log.error("chat ✗ provider error", {
           model,
-          backend: useClaude ? "claude" : "openai",
+          backend: route.label,
           ms: Date.now() - t0,
           status: e?.status,
           detail,
@@ -393,6 +437,9 @@ export function createOpenAIProvider(): OpenAIProvider {
       // "experimental") steps DOWN the fallback ladder instead of retrying the
       // same doomed size — so 4K degrades to 2560×1440 → 2K rather than failing.
       let lastErr: unknown;
+      // Loop-scoped: the deadline bounds the WHOLE call. `t0` below restarts each
+      // attempt (it times that attempt for the log), so it cannot measure this.
+      const startedAt = Date.now();
       for (let attempt = 1; attempt <= IMAGE_MAX_ATTEMPTS; attempt++) {
         const t0 = Date.now();
         log.debug("image →", {
@@ -416,12 +463,24 @@ export function createOpenAIProvider(): OpenAIProvider {
               ? {}
               : { output_compression: outputCompression }),
           };
+          // `maxRetries: 1` — NOT the client's default 4. This loop already owns
+          // retrying (with backoff AND the size-fallback ladder the SDK knows
+          // nothing about), so the SDK's retries do not add resilience, they
+          // MULTIPLY the budget: 5 attempts here × 5 SDK tries × the 300s timeout
+          // is 125 minutes on one still, of which this loop logs a single line
+          // every 25 minutes. That reads as a hung step, and it is why a run sat
+          // for 40+ minutes with a live worker and no progress. One SDK retry is
+          // kept because it honours `Retry-After` on a 429, which this loop does not.
+          const perCall = { maxRetries: 1 };
           const result = refFiles
-            ? await getClient().images.edit({
-                ...baseParams,
-                image: refFiles,
-              } as never)
-            : await getClient().images.generate(baseParams as never);
+            ? await getClient().images.edit(
+                {
+                  ...baseParams,
+                  image: refFiles,
+                } as never,
+                perCall,
+              )
+            : await getClient().images.generate(baseParams as never, perCall);
 
           const b64 = result.data?.[0]?.b64_json;
           if (!b64) throw internal("OpenAI image response missing image data.");
@@ -435,8 +494,10 @@ export function createOpenAIProvider(): OpenAIProvider {
           const msg = err instanceof Error ? err.message : String(err);
           // Step down a resolution tier on a size-attributable failure (retrying
           // the same 4K size would just truncate again); otherwise retry as-is.
+          // `nextImageSize` handles the arbitrary per-slot sizes the template
+          // pipeline asks for, which have no entry in the fixed ladder.
           const smaller = isSizeAttributableImageError(msg)
-            ? IMAGE_SIZE_FALLBACK[size]
+            ? nextImageSize(size)
             : undefined;
           if (smaller) {
             log.warn("image size fallback", {
@@ -452,6 +513,19 @@ export function createOpenAIProvider(): OpenAIProvider {
               ms: Date.now() - t0,
               err: msg,
             });
+          }
+          // Stop on the wall clock, not just the attempt count — another attempt
+          // could sit in a 5-minute timeout, and this slot has already had its
+          // budget. Checked BEFORE the backoff so we never sleep on the way out.
+          const spent = Date.now() - startedAt;
+          if (spent > IMAGE_TOTAL_BUDGET_MS) {
+            log.warn("image budget exhausted — giving up on this slot", {
+              attempt,
+              ms: spent,
+              budgetMs: IMAGE_TOTAL_BUDGET_MS,
+              err: msg,
+            });
+            break;
           }
           // Capped exponential backoff + jitter (~2s, 4s, 8s, 12s): give a
           // truncating proxy / flaky connection time to clear, and keep the

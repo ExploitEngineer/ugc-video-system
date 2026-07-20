@@ -10,3 +10,6 @@ export * from "./dto";
 
 // Bracket-placeholder detection ([SHOCK STAT], [PRICE], …) for the ad prompt.
 export * from "./placeholders";
+
+// Upload ceilings the browser checks before sending and the API enforces.
+export * from "./limits";

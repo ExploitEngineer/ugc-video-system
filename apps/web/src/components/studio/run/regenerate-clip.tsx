@@ -7,11 +7,16 @@
 // RunDetail (the run flips to `running`; SSE takes over from there).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { RunDetail } from "@ugc/shared";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { regenerateVideoAction } from "@/app/studio/actions";
+import {
+  optimisticRegen,
+  videoRegenTarget,
+} from "@/components/studio/run/run-meta";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,26 +41,43 @@ export function RegenerateClip({
   size?: "sm" | "default";
 }) {
   const queryClient = useQueryClient();
+  const queryKey = ["run", runId] as const;
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
 
   const mutation = useMutation({
     mutationFn: () => regenerateVideoAction(runId, { segmentIndex, note }),
+    // Light the amber loader on the CLICK, before the round trip. The dialog
+    // closes immediately, so the user sees the pipeline react instantly.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<RunDetail>(queryKey);
+      if (prev) {
+        queryClient.setQueryData(
+          queryKey,
+          optimisticRegen(prev, videoRegenTarget(prev), { segmentIndex }),
+        );
+      }
+      setOpen(false);
+      setNote("");
+      return { prev };
+    },
     onSuccess: (detail) => {
       if (!detail) {
         toast.error("Couldn't start regeneration — try again");
         return;
       }
-      queryClient.setQueryData(["run", runId], detail);
+      queryClient.setQueryData(queryKey, detail);
       toast.message(
         segmentIndex != null
           ? `Regenerating segment ${segmentIndex + 1}…`
           : "Regenerating your clip…",
       );
-      setOpen(false);
-      setNote("");
     },
-    onError: () => toast.error("Couldn't start regeneration — try again"),
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(queryKey, ctx.prev);
+      toast.error("Couldn't start regeneration — try again");
+    },
   });
 
   return (

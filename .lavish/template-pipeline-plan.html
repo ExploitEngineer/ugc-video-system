@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Template Pipeline - Separation + Analysis Plan</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, h5, h6, li, dd, td, th, .badge) { overflow-wrap: anywhere; }
+  :where(img, svg, video, canvas) { max-width: 100%; height: auto; }
+  .mermaid { display: flex; justify-content: center; }
+  .track { position: relative; height: 46px; border-radius: 8px; overflow: hidden; background: color-mix(in oklab, var(--color-base-100), transparent 30%); border: 1px solid color-mix(in oklab, var(--color-base-content), transparent 88%); }
+  .slotbar { position: absolute; top: 6px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--color-primary-content); overflow: hidden; white-space: nowrap; }
+  .lead-num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="bg-base-200 text-base-content">
+<main class="mx-auto max-w-5xl p-5 lg:p-8 space-y-10">
+
+  <!-- HERO -->
+  <header class="space-y-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="badge badge-primary badge-soft">branch: feat/template-library-pipeline</span>
+      <span class="badge badge-ghost">plan review</span>
+      <span class="badge badge-ghost">confirm each part before I build</span>
+    </div>
+    <h1 class="text-4xl lg:text-5xl font-bold leading-[1.15] pb-1">Make the template pipeline <span class="text-primary">truly separate</span></h1>
+    <p class="text-lg opacity-80 max-w-3xl">
+      The template pipeline is supposed to be fully driven by the picked template. Today it piggybacks on the normal
+      pipeline's ad-type detector, 2&times;2 storyboard, and Seedance prompts. That coupling bakes text/UI into the
+      footage, the first "analysis" step never actually looks at the template, and every clip is force-cropped to 15s.
+    </p>
+    <div class="rounded-box border border-base-content/10 bg-base-100 p-4 text-sm opacity-80">
+      Scroll through each section. Use the <b>Approve</b> / <b>Change</b> buttons on every phase and decision, or select
+      any text / element to annotate it, then press <b>Send to Agent</b>. Nothing gets built until you approve.
+    </div>
+  </header>
+
+  <!-- THE BUG -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-bold">The concrete bug this fixes</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="card card-border bg-base-100 border-error/40">
+        <div class="card-body gap-2">
+          <div class="flex items-center gap-2"><span class="badge badge-error">now</span><h3 class="card-title text-base">Text &amp; graphics baked INTO the footage</h3></div>
+          <p class="text-sm opacity-80">
+            A "service" template makes Seedance render app-UI screens, stat cards and a brand end-card straight into the
+            clip. Then Nexrender composites the template's OWN text on top &rarr; garbled overlap.
+          </p>
+          <div class="mockup-code text-xs mt-1"><pre data-prefix=""><code>storyboard/prompt.ts:726-736  authors UI / stat / end-card panels</code></pre><pre data-prefix=""><code>video/index.ts:444-447        negatives PERMIT them for service</code></pre></div>
+        </div>
+      </div>
+      <div class="card card-border bg-base-100 border-success/40">
+        <div class="card-body gap-2">
+          <div class="flex items-center gap-2"><span class="badge badge-success">target</span><h3 class="card-title text-base">Plain footage; template owns overlays</h3></div>
+          <p class="text-sm opacity-80">
+            The generated clip is plain live action. Every headline, logo, stat and end-card comes from the template's
+            After Effects layers at composite time. If the template has an image slot, we generate an image for it -
+            matching your ad's content and the template's look - and drop it into that slot ("still" just means a static
+            image, not a video).
+          </p>
+          <ul class="text-sm mt-1 space-y-1">
+            <li>&bull; footage carries no text / UI / logos / end-cards</li>
+            <li>&bull; template layers render all graphics</li>
+            <li>&bull; clip length = the template's real length</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PIPELINE DIAGRAM -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-bold">Pipeline: now vs target</h2>
+    <p class="opacity-80 text-sm max-w-3xl">Same driver, same <code>runs.pipeline="template"</code> switch. Only the authoring steps change. The deterministic introspection / slicing / Nexrender render stays untouched.</p>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="card card-border bg-base-100">
+        <div class="card-body">
+          <h3 class="card-title text-base"><span class="badge badge-ghost">now</span> shares the normal pipeline</h3>
+          <div class="mermaid">
+flowchart TD
+  A["template_plan (text-only Haiku, no vision)"] --> B["person_sheet / product_sheet"]
+  B --> C["storyboard  (SHARED 2x2 board)"]
+  C --> D["template_fill"]
+  D --> E["template_images"]
+  E --> F["video  (SHARED Seedance + ad-type)"]
+  F --> G["template_render (Nexrender)"]
+  classDef shared fill:#7f1d1d,stroke:#ef4444,color:#fff;
+  class C,F shared;
+          </div>
+          <p class="text-xs opacity-70 mt-2">Red = shared normal-pipeline steps that drag in ad-type logic.</p>
+        </div>
+      </div>
+      <div class="card card-border bg-base-100 border-primary/40">
+        <div class="card-body">
+          <h3 class="card-title text-base"><span class="badge badge-primary">target</span> template-owned end to end</h3>
+          <div class="mermaid">
+flowchart TD
+  A["template_plan / blueprint (Claude VISION)"] --> B["person_sheet / product_sheet"]
+  B --> C["template_keyframe (NEW: clean look-still + script)"]
+  C --> D["template_fill"]
+  D --> E["template_images"]
+  E --> F["template_video (NEW: PLAIN Seedance, real duration)"]
+  F --> G["template_render (Nexrender)"]
+  classDef nu fill:#0e7490,stroke:#22d3ee,color:#fff;
+  class A,C,F nu;
+          </div>
+          <p class="text-xs opacity-70 mt-2">Cyan = new template-owned steps. No <code>storyboard</code>/<code>video</code>/ad-type anywhere.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- YOUR DECISIONS -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-bold">The 4 decisions <span class="text-primary">(revised per your notes)</span></h2>
+    <p class="opacity-80 text-sm">Updated from your annotations. If anything is still off, annotate it and <b>Send to Agent</b>.</p>
+    <div class="grid gap-3 md:grid-cols-2">
+      <div class="card card-border bg-base-100 border-accent/40"><div class="card-body gap-2">
+        <div class="flex items-center justify-between gap-2"><h3 class="card-title text-sm">Analysis scope</h3><span class="badge badge-accent badge-sm">revised</span></div>
+        <p class="text-sm"><b>Full template analysis, not "4 frames".</b> Exhaustive structural read of EVERY element (each text field, image, video, audio slot + the exact second it appears), plus Claude reading the look &amp; animations from a dense frame strip across the whole clip. Gemini adds true frame-by-frame motion later.</p>
+      </div></div>
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <div class="flex items-center justify-between gap-2"><h3 class="card-title text-sm">Audio</h3><span class="badge badge-primary badge-sm">chosen</span></div>
+        <p class="text-sm"><b>Seedance audio for now.</b> No template-audio-ownership branch; revisit later. Blueprint keeps a light voiceover-intent field only.</p>
+      </div></div>
+      <div class="card card-border bg-base-100 border-accent/40"><div class="card-body gap-2">
+        <div class="flex items-center justify-between gap-2"><h3 class="card-title text-sm">Footage look-lock</h3><span class="badge badge-accent badge-sm">confirmed</span></div>
+        <p class="text-sm"><b>ONE single reference image + script.</b> Confirmed per your Seedance research: one clean reference image (not four), which fixes palette/mood; a timestamped per-slot script drives the motion.</p>
+      </div></div>
+      <div class="card card-border bg-base-100 border-accent/40"><div class="card-body gap-2">
+        <div class="flex items-center justify-between gap-2"><h3 class="card-title text-sm">Autonomy &amp; sequencing</h3><span class="badge badge-accent badge-sm">revised</span></div>
+        <p class="text-sm"><b>Fully autonomous, no pauses.</b> The user sets the end goal; the system reaches it with zero runtime questions (template runs are already full-auto). Build order stays separation &rarr; analysis &rarr; Gemini, but I build straight through - no per-phase manual-test pause.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- PHASE 1 -->
+  <section class="space-y-4">
+    <div class="flex items-center gap-3">
+      <span class="badge badge-primary badge-lg lead-num">Phase 1</span>
+      <h2 class="text-2xl font-bold">Separation + real duration + clean footage</h2>
+    </div>
+    <p class="opacity-80 text-sm max-w-3xl">Fixes the visible bug. Template runs stop touching the ad-type detector and the shared prompts, produce plain footage, and match the template's real length. Analysis stays the existing text plan (minus ad-type) until Phase 2.</p>
+
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">New template-owned files</h3>
+        <ul class="text-sm space-y-1">
+          <li><code>template/keyframe/{index,prompt}.ts</code> - ONE clean look-still + per-slot script; imports nothing from <code>ad-types</code> or <code>image/storyboard</code>.</li>
+          <li><code>template/video/{index,prompt}.ts</code> - PLAIN Seedance, own negatives, <code>durationSec = masterClipSeconds(tpl)</code>.</li>
+          <li><code>lib/provider-refs.ts</code> - extract <code>providerSafeRefUrl</code> so both video builders share it without importing each other.</li>
+        </ul>
+      </div></div>
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">Decouple + de-thread</h3>
+        <ul class="text-sm space-y-1">
+          <li>Skip ad-type detector for template runs (<code>orchestrator.ts:935</code> guard).</li>
+          <li>Strip every <code>isTemplate</code> branch out of <code>storyboard/prompt.ts</code> &amp; <code>video/prompt.ts</code>.</li>
+          <li>New steps <code>template_keyframe</code>, <code>template_video</code> in <code>enums.ts</code>; sequencing in <code>plan.ts</code>.</li>
+          <li>Clean-footage rule (Phase 1): template has &ge;1 TEXT slot &rArr; footage carries none.</li>
+        </ul>
+      </div></div>
+    </div>
+
+    <div class="card card-border bg-base-100 border-accent/30"><div class="card-body gap-3">
+      <h3 class="card-title text-base">Duration = the template's real length <span class="badge badge-accent badge-sm align-middle">revised</span></h3>
+      <p class="text-sm opacity-80">Templates are limited to <b>8-15s at upload</b> (reject shorter/longer). The clip follows the template: <code>masterClipSeconds(tpl) = snapUp(min(templateDuration, 15))</code>, threaded through plan &rarr; beats &rarr; slices &rarr; video. Seedance only renders <code>{4,5,6,8,10,12,15}s</code>, so we generate the nearest supported length &ge; the template and After Effects trims the surplus (your "crop a second" idea, done at composite - e.g. a 9s template &rarr; 10s clip, AE keeps 9s). The number of beats/scenes scales with the template's own video slots, so a longer template gets more.</p>
+      <div class="track">
+        <div class="slotbar bg-primary" style="left:2%; width:33%;">PH_1 &middot; 0:00-0:03</div>
+        <div class="slotbar bg-secondary" style="left:37%; width:27%;">PH_2 &middot; 0:03-0:05</div>
+        <div class="slotbar bg-accent" style="left:66%; width:32%;">PH_3 &middot; 0:05-0:08</div>
+      </div>
+      <p class="text-xs opacity-70">Three video slots on the 8s master. &#128247; Claude samples a frame at each slot-window midpoint + t=0 (0:00, 0:01.5, 0:04, 0:06.5). An 8s template &rarr; 8s clip, not a forced 15s.</p>
+    </div></div>
+
+    <div class="flex flex-wrap gap-2">
+      <button class="btn btn-success btn-sm" onclick="approve('Phase 1 (separation + duration + clean footage)', this)">&#10003; Approve Phase 1</button>
+      <button class="btn btn-outline btn-warning btn-sm" onclick="change('Phase 1', this)">&#9998; Request a change</button>
+    </div>
+  </section>
+
+  <!-- PHASE 2 -->
+  <section class="space-y-4">
+    <div class="flex items-center gap-3">
+      <span class="badge badge-primary badge-lg lead-num">Phase 2</span>
+      <h2 class="text-2xl font-bold">Rich Claude vision analysis (the real "analyze the template")</h2>
+    </div>
+    <p class="opacity-80 text-sm max-w-3xl">Replace the blind text plan with a vision-driven blueprint the model produces after actually seeing the template. This is your headline requirement: analyze every part, then let the LLM decide how everything fits.</p>
+
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">Vision provider abstraction</h3>
+        <ul class="text-sm space-y-1">
+          <li><code>providers/template-vision/index.ts</code> - <code>TemplateVisionProvider</code> interface + env selection.</li>
+          <li><code>claude.ts</code> - v1: poster + a dense frame strip on one Sonnet turn.</li>
+          <li><code>gemini.ts</code> - v2 SEAM, throws "not implemented" (Phase 3).</li>
+          <li><code>lib/video/frames.ts</code> - <code>sampleFrames()</code> dense adaptive strip (~1 frame/sec, ffmpeg, ~512px JPEGs).</li>
+        </ul>
+      </div></div>
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">The blueprint (superset, no migration)</h3>
+        <p class="text-sm opacity-80">Persisted into the SAME <code>runs.template_plan</code> jsonb column. Every legacy field stays at the same path, so old consumers keep parsing (Zod strips extras).</p>
+        <div class="overflow-x-auto"><table class="table table-xs">
+          <tbody>
+            <tr><td class="font-semibold text-primary">visualStyle</td><td>palette / lighting / mood / pacing / motion - read from the frames</td></tr>
+            <tr><td class="font-semibold text-primary">onScreenText</td><td>owner: template | video | none &rarr; forces clean footage</td></tr>
+            <tr><td class="font-semibold text-primary">audio</td><td>light: voiceover intent + tone (Seedance for now)</td></tr>
+            <tr><td class="font-semibold text-primary">slots[]</td><td>role, copyIntent, imageSubject, videoScene + cameraAction + onScreenMoment, window</td></tr>
+            <tr><td class="font-semibold text-primary">visionSource</td><td>poster+frames | poster | video | text-only</td></tr>
+          </tbody>
+        </table></div>
+      </div></div>
+    </div>
+
+    <div class="alert alert-info alert-soft text-sm">
+      <span><b>How the FULL template is analyzed:</b> the deterministic introspection exhaustively extracts every text / image / video / audio element and the exact second it appears - nothing sampled, nothing missed. On top of that, Claude reads the look and the animations from a dense frame strip spanning the whole clip (~1 frame/sec, adaptive), each frame labelled with its timestamp. Style &amp; animation come from the frames, content from your brief. True per-frame motion understanding is the Gemini upgrade (Phase 3).</span>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <button class="btn btn-success btn-sm" onclick="approve('Phase 2 (Claude vision analysis + blueprint)', this)">&#10003; Approve Phase 2</button>
+      <button class="btn btn-outline btn-warning btn-sm" onclick="change('Phase 2', this)">&#9998; Request a change</button>
+    </div>
+  </section>
+
+  <!-- PHASE 3 -->
+  <section class="space-y-3">
+    <div class="flex items-center gap-3">
+      <span class="badge badge-ghost badge-lg lead-num">Phase 3</span>
+      <h2 class="text-2xl font-bold opacity-80">Gemini .mp4 understanding - deferred (seam only)</h2>
+    </div>
+    <p class="opacity-70 text-sm max-w-3xl">Implement <code>providers/template-vision/gemini.ts</code> against the Gemini Files API to watch the preview .mp4 frame-by-frame and emit the same blueprint JSON. Selection is the one-line factory swap built in Phase 2 - nothing else changes. Not started now, per your call.</p>
+  </section>
+
+  <!-- STAYS vs CHANGES -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-bold">What stays vs what changes</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="card card-border bg-base-100 border-success/40"><div class="card-body gap-2">
+        <h3 class="card-title text-base text-success">Untouched (the deterministic engine)</h3>
+        <p class="text-sm opacity-80"><code>introspect.ts</code>, <code>timeline.ts</code>, <code>aep.ts</code>, <code>geometry.ts</code> classification, <code>beats.ts</code>, <code>slices.ts</code>, <code>clips.ts</code>, <code>render-input.ts</code>, <code>self-heal.ts</code>, <code>providers/nexrender/*</code>, the whole <code>applyTemplate</code> render step.</p>
+      </div></div>
+      <div class="card card-border bg-base-100 border-primary/40"><div class="card-body gap-2">
+        <h3 class="card-title text-base text-primary">Changes (authoring + duration + coupling)</h3>
+        <p class="text-sm opacity-80">New keyframe/video prompts, the blueprint + vision provider, <code>masterClipSeconds</code>, ad-type decoupling, and reverting the shared storyboard/video prompts to video-only.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- DELIVERABLES + VERIFICATION -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-bold">Extras &amp; verification</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">Deliverables you asked for</h3>
+        <ul class="text-sm space-y-1">
+          <li>&bull; <code>research/07-template-pipeline-separation.md</code> written first (Claude vs Gemini, blueprint, duration model).</li>
+          <li>&bull; A <code>template-pipeline</code> skill via <code>/skill-creator</code> after Phase 1, so future sessions don't re-explore the subsystem.</li>
+          <li>&bull; Correct the stale <code>template-vision-analysis</code> memory (that vision upgrade is NOT in the tree).</li>
+        </ul>
+      </div></div>
+      <div class="card card-border bg-base-100"><div class="card-body gap-2">
+        <h3 class="card-title text-base">Smoke test (real run, not just tests)</h3>
+        <ul class="text-sm space-y-1">
+          <li>&bull; <code>step_events</code> shows the new chain, no detector / storyboard / video events.</li>
+          <li>&bull; <code>videos.durationSec == 8</code> for an 8s template.</li>
+          <li>&bull; Eyeball pre-composite footage: plain, no baked text/UI; overlays only in the composited output.</li>
+          <li>&bull; Regression: a normal video-pipeline "service" ad is byte-stable.</li>
+        </ul>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- SIGN OFF -->
+  <section class="card bg-primary text-primary-content"><div class="card-body gap-3">
+    <h2 class="card-title text-2xl">Ready to lock it in?</h2>
+    <p class="opacity-90 text-sm">Approve and I build straight through - Phase 1, then Phase 2 - no pauses. The pipeline itself stays fully autonomous at runtime (user sets the goal, system reaches it). Or flag any section above.</p>
+    <div class="card-actions">
+      <button class="btn btn-neutral" onclick="approve('the WHOLE plan - proceed to implement Phase 1', this)">&#10003; Approve the whole plan</button>
+      <button class="btn btn-outline btn-neutral" onclick="change('the overall plan', this)">&#9998; I have changes first</button>
+    </div>
+  </div></section>
+
+  <footer class="text-center text-xs opacity-50 pb-6">Full written plan lives at ~/.claude/plans/currently-i-am-working-nifty-donut.md - this page mirrors it for review.</footer>
+
+</main>
+
+<script>
+  function approve(what, el) {
+    if (el) { el.classList.add('btn-active'); el.textContent = '✓ approved'; }
+    window.lavish?.queuePrompt('Approved: ' + what + '.', { tag: 'approve', text: 'Approve: ' + what });
+  }
+  function change(what, el) {
+    window.lavish?.queuePrompt('I want to change ' + what + ' - see my annotations / note.', { tag: 'change', text: 'Change: ' + what });
+  }
+</script>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const paint = document.createElement("canvas").getContext("2d");
+  function toRgba(color){ paint.clearRect(0,0,1,1); paint.fillStyle="#000"; paint.fillStyle=color; paint.fillRect(0,0,1,1); return paint.getImageData(0,0,1,1).data; }
+  function compositeRgba(f,b){ const fa=f[3]/255, ba=b[3]/255, a=fa+ba*(1-fa); if(a===0)return[0,0,0,0]; return [(f[0]*fa+b[0]*ba*(1-fa))/a,(f[1]*fa+b[1]*ba*(1-fa))/a,(f[2]*fa+b[2]*ba*(1-fa))/a,a*255]; }
+  function pageIsDark(){ const root=document.documentElement; const rb=toRgba(getComputedStyle(root).backgroundColor); const bb=document.body?toRgba(getComputedStyle(document.body).backgroundColor):[0,0,0,0]; const [r,g,b,a]=compositeRgba(bb,rb); if(a>0)return (0.2126*r+0.7152*g+0.0722*b)/255<0.5; const cs=getComputedStyle(root).colorScheme; if(cs.includes("dark")&&!cs.includes("light"))return true; if(cs.includes("light")&&!cs.includes("dark"))return false; return darkQuery.matches; }
+  const diagrams=[...document.querySelectorAll(".mermaid")].map(el=>({el,src:el.textContent}));
+  let applied, rendering=false, queued=false;
+  function queueRender(){ queued=true; if(rendering)return; void render(); }
+  async function render(){ rendering=true; try{ while(queued){ queued=false; const theme=pageIsDark()?"dark":"default"; if(theme===applied)continue; mermaid.initialize({startOnLoad:false,theme,securityLevel:"strict"}); for(const {el,src} of diagrams){ el.removeAttribute("data-processed"); el.textContent=src; } try{ await mermaid.run({nodes:diagrams.map(d=>d.el)}); }catch(e){ console.error(e); return; } applied=theme; } } finally { rendering=false; if(queued)queueRender(); } }
+  if(document.readyState==="complete")queueRender(); else window.addEventListener("load",queueRender,{once:true});
+  const mo=new MutationObserver(queueRender);
+  for(const el of [document.documentElement,document.body]){ if(!el)continue; mo.observe(el,{attributes:true,attributeFilter:["data-theme","class","style"]}); }
+  document.addEventListener("change",queueRender,true);
+  darkQuery.addEventListener("change",queueRender);
+</script>
+</body>
+</html>

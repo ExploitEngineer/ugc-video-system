@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Add a template to your video - how it works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg: oklch(0.15 0.008 235);
+    --bg-2: oklch(0.13 0.008 235);
+    --fg: oklch(0.96 0.004 230);
+    --card: oklch(0.185 0.009 235);
+    --card-2: oklch(0.21 0.01 235);
+    --primary: oklch(0.8 0.13 205);
+    --primary-fg: oklch(0.2 0.04 220);
+    --muted: oklch(0.215 0.01 235);
+    --muted-fg: oklch(0.68 0.013 235);
+    --accent: oklch(0.26 0.03 215);
+    --accent-fg: oklch(0.9 0.06 205);
+    --border: oklch(1 0 0 / 8%);
+    --border-2: oklch(1 0 0 / 14%);
+    --success: oklch(0.75 0.15 155);
+    --warning: oklch(0.8 0.14 78);
+    --media: oklch(0.1 0.005 235);
+    --brand-grad: linear-gradient(135deg, oklch(0.8 0.13 205), oklch(0.74 0.14 225), oklch(0.68 0.14 250));
+    --radius: 0.7rem;
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 16px 50px -22px oklch(0 0 0 / 0.7);
+    --sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Space Grotesk", var(--sans);
+    --mono: "Geist Mono", ui-monospace, monospace;
+  }
+  *{ box-sizing:border-box; min-width:0; }
+  html,body{ margin:0; }
+  body{
+    background: radial-gradient(1200px 600px at 82% -10%, oklch(0.8 0.13 205 / 0.06), transparent 60%), var(--bg);
+    color: var(--fg); font-family: var(--sans); line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width: 980px; margin:0 auto; padding: 40px 22px 96px; }
+  h1,h2,h3{ font-family: var(--display); font-weight:600; letter-spacing:-0.01em; margin:0; }
+  h1{ font-size: clamp(1.7rem, 3.6vw, 2.35rem); line-height:1.2; padding-bottom:0.08em; }
+  h2{ font-size: 1.28rem; line-height:1.25; }
+  h3{ font-size: 1rem; }
+  p{ margin:0; }
+  .lead{ font-size: 1.08rem; color: oklch(0.88 0.01 230); max-width: 64ch; }
+  .muted{ color: var(--muted-fg); }
+  .mono{ font-family: var(--mono); font-size:0.85em; background: var(--muted); padding:1px 6px; border-radius:5px; border:1px solid var(--border); }
+  .eyebrow{ font-family: var(--mono); font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color: var(--primary); }
+
+  .section{ margin-top: 46px; }
+  .section > h2{ display:flex; align-items:center; gap:11px; margin-bottom:8px; }
+  .section > h2 .n{ font-family:var(--mono); font-size:0.8rem; color:var(--primary-fg); background:var(--brand-grad); width:26px;height:26px; border-radius:8px; display:grid;place-items:center; font-weight:700; flex:0 0 auto; }
+  .sub{ color: var(--muted-fg); margin: 0 0 18px 37px; font-size:0.96rem; max-width: 62ch; }
+
+  .card{ background: var(--card); border:1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .pad{ padding: 20px; }
+  .stack > * + *{ margin-top: 14px; }
+
+  .pill{ display:inline-flex; align-items:center; gap:7px; font-size:0.78rem; font-weight:500; padding:5px 11px; border-radius:999px; border:1px solid var(--border-2); background: var(--muted); white-space:nowrap; }
+  .pill .dot{ width:8px;height:8px;border-radius:50%; }
+  .pill.done .dot{ background: var(--success); box-shadow:0 0 10px var(--success); }
+  .pill.now .dot{ background: var(--primary); box-shadow:0 0 10px var(--primary); }
+  .pill.next .dot{ background: var(--muted-fg); }
+
+  .badge{ display:inline-flex; align-items:center; gap:6px; font-size:0.68rem; font-weight:600; letter-spacing:0.03em; padding:3px 9px; border-radius:6px; text-transform:uppercase; }
+  .badge.cat{ background: var(--accent); color: var(--accent-fg); border:1px solid var(--border-2); }
+  .badge.rec{ background: oklch(0.75 0.15 155 / 0.16); color: var(--success); }
+
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; font-family:var(--sans); font-weight:500; font-size:0.88rem; padding:10px 16px; border-radius:calc(var(--radius) - 2px); border:1px solid transparent; white-space:nowrap; }
+  .btn.brand{ background: var(--brand-grad); color: var(--primary-fg); font-weight:600; box-shadow:0 6px 24px -12px oklch(0.8 0.13 205 / 0.9); }
+  .btn.ghost{ background:transparent; color: var(--muted-fg); }
+  .btn.outline{ background:transparent; border-color: var(--border-2); color: var(--fg); }
+  .btn.sm{ padding:8px 13px; font-size:0.82rem; }
+
+  /* Browser mockup frame */
+  .mock{ border:1px solid var(--border-2); border-radius: 14px; background: var(--bg-2); overflow:hidden; }
+  .mock .bar{ display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--border); background: oklch(0.17 0.008 235); }
+  .mock .bar i{ width:10px;height:10px;border-radius:50%; background: var(--muted); display:block; }
+  .mock .bar .url{ font-family:var(--mono); font-size:0.72rem; color:var(--muted-fg); background: var(--bg); border:1px solid var(--border); border-radius:6px; padding:3px 10px; margin-left:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mock .body{ padding: 20px; }
+
+  .msg{ display:flex; gap:12px; align-items:flex-start; }
+  .avatar{ flex:0 0 auto; width:30px;height:30px;border-radius:9px; background: var(--brand-grad); display:grid;place-items:center; color:var(--primary-fg); font-family:var(--display); font-weight:700; font-size:0.8rem; }
+  .gatecard{ border:1px solid var(--border-2); background: linear-gradient(180deg, var(--card-2), var(--card)); border-radius: var(--radius); padding:16px; }
+  .gatecard .row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+
+  .poster{ aspect-ratio:16/9; position:relative; display:grid; place-items:center; background: linear-gradient(135deg, oklch(0.26 0.05 215), oklch(0.2 0.03 250)), var(--media); }
+  .poster.b{ background: linear-gradient(135deg, oklch(0.24 0.04 190), oklch(0.2 0.03 235)); }
+  .poster.c{ background: linear-gradient(135deg, oklch(0.25 0.05 285), oklch(0.19 0.03 240)); }
+  .poster .play{ width:44px;height:44px;border-radius:50%; background: oklch(1 0 0 / 0.14); backdrop-filter:blur(4px); display:grid;place-items:center; border:1px solid oklch(1 0 0 / 0.25); }
+  .poster .play::after{ content:""; width:0;height:0; border-left:12px solid var(--fg); border-top:8px solid transparent; border-bottom:8px solid transparent; margin-left:3px; }
+  .poster .tag{ position:absolute; top:8px; left:8px; }
+
+  .gallery{ display:grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap:14px; }
+  .tcard{ background: var(--card); border:1px solid var(--border); border-radius: var(--radius); overflow:hidden; display:flex; flex-direction:column; }
+  .tcard .info{ padding:11px 12px; display:flex; flex-direction:column; gap:9px; }
+  .tcard .info .name{ font-family:var(--display); font-weight:600; font-size:0.9rem; }
+
+  /* Plain 3-step how-it-works */
+  .steps{ display:grid; gap:16px; }
+  .step{ display:grid; grid-template-columns: 40px 1fr; gap:14px; align-items:start; }
+  .step .num{ width:40px;height:40px; border-radius:11px; background: var(--muted); border:1px solid var(--border-2); display:grid;place-items:center; font-family:var(--display); font-weight:700; color: var(--primary); font-size:1.05rem; }
+  .step .txt h3{ margin-bottom:3px; }
+  .step .txt p{ color: var(--muted-fg); font-size:0.95rem; }
+
+  /* Two-choice compare */
+  .compare{ display:grid; grid-template-columns:1fr; gap:16px; }
+  @media(min-width:720px){ .compare{ grid-template-columns:1fr 1fr; } }
+  .choicecard{ border:1px solid var(--border-2); border-radius: var(--radius); padding:18px; background: var(--card); }
+  .choicecard.primary{ border-color: oklch(0.8 0.13 205 / 0.5); background: linear-gradient(180deg, oklch(0.8 0.13 205 / 0.06), var(--card)); }
+  .choicecard .h{ display:flex; align-items:center; gap:9px; margin-bottom:8px; }
+  .choicecard .h .ic{ width:30px;height:30px;border-radius:8px; display:grid;place-items:center; font-size:1rem; background: var(--muted); }
+  .choicecard.primary .h .ic{ background: var(--brand-grad); }
+  .choicecard p{ color: var(--muted-fg); font-size:0.94rem; }
+
+  /* Decision / options blocks */
+  .decision{ border:1px solid var(--border); border-radius: var(--radius); background: var(--card); padding:18px; }
+  .decision .q{ font-family:var(--display); font-weight:600; font-size:1.02rem; margin-bottom:4px; }
+  .decision .hint{ color: var(--muted-fg); font-size:0.88rem; margin-bottom:14px; }
+  .opts{ display:grid; gap:10px; }
+  @media(min-width:640px){ .opts.two{ grid-template-columns:1fr 1fr; } }
+  .opt{ display:flex; gap:11px; align-items:flex-start; border:1px solid var(--border-2); border-radius:calc(var(--radius) - 2px); padding:13px 14px; background: var(--bg-2); }
+  .opt.pick{ border-color: oklch(0.75 0.15 155 / 0.5); background: oklch(0.75 0.15 155 / 0.05); }
+  .opt .radio{ flex:0 0 auto; width:18px;height:18px;border-radius:50%; border:2px solid var(--border-2); margin-top:2px; }
+  .opt.pick .radio{ border-color: var(--success); background: radial-gradient(circle at center, var(--success) 0 40%, transparent 42%); }
+  .opt .otxt strong{ font-weight:600; font-size:0.94rem; }
+  .opt .otxt p{ color: var(--muted-fg); font-size:0.86rem; margin-top:2px; }
+
+  .facts{ display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(min(100%,250px),1fr)); }
+  .fact{ border:1px solid var(--border); border-radius: var(--radius); background: var(--card); padding:15px 16px; }
+  .fact .ic{ font-size:1.1rem; }
+  .fact .t{ font-family:var(--display); font-weight:600; margin:6px 0 4px; }
+  .fact p{ color: var(--muted-fg); font-size:0.9rem; }
+
+  .callout{ display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius: var(--radius); border:1px solid oklch(0.8 0.13 205 / 0.3); background: oklch(0.8 0.13 205 / 0.05); }
+  .callout > span{ flex:0 0 auto; }
+  .fact .ic{ display:inline-block; }
+  .foot{ margin-top:48px; padding-top:18px; border-top:1px solid var(--border); color:var(--muted-fg); font-size:0.86rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HERO -->
+  <div class="card"><div class="pad">
+    <div class="eyebrow">Feature preview - plain-language walk-through</div>
+    <h1 style="margin-top:10px;">Add a ready-made template to your finished video</h1>
+    <p class="lead" style="margin-top:12px;">Right now a run ends with your plain video clip. This feature adds one optional step: when the video is done, we ask if you'd like to drop it into a designed template - a branded frame, a lower-third caption, an intro/outro - and we render the finished, dressed-up version for you. This page shows exactly what that looks like, in plain English. <b>Read it, then tell me your preferences in section 4.</b></p>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:16px;">
+      <span class="pill done"><span class="dot"></span> Behind-the-scenes plumbing: built &amp; tested</span>
+      <span class="pill now"><span class="dot"></span> The screens below: building next</span>
+    </div>
+  </div></div>
+
+  <!-- 1. HOW IT WORKS -->
+  <div class="section">
+    <h2><span class="n">1</span> How it works, in 3 steps</h2>
+    <p class="sub">Nothing changes about how you make a video. This only adds a step at the very end.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <div class="txt">
+          <h3>Your video finishes, and we ask one question</h3>
+          <p>A card appears in the chat: &ldquo;Add a template?&rdquo; with two buttons - <b>Edit with a template</b> or <b>Skip</b>. If you skip, you get your plain video exactly like today. Nothing forced.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <div class="txt">
+          <h3>If you say yes, you pick a design from a gallery</h3>
+          <p>A page opens showing template designs, each with a little preview you can watch. Click the one you like.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <div class="txt">
+          <h3>We render your video into that template</h3>
+          <p>Your clip drops into the design, we render it, and the finished templated video shows up in the chat - alongside your original, so you never lose it.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. THE SCREENS -->
+  <div class="section">
+    <h2><span class="n">2</span> What the screens look like</h2>
+    <p class="sub">Real colours and layout from the studio. (The video thumbnails here are stand-in gradients - real templates come later.)</p>
+
+    <div class="stack">
+      <!-- Screen A: the question -->
+      <div>
+        <div class="mock">
+          <div class="bar"><i></i><i></i><i></i><span class="url">your run</span></div>
+          <div class="body">
+            <div class="msg">
+              <div class="avatar">C</div>
+              <div style="flex:1;">
+                <div class="muted" style="font-size:0.78rem; margin-bottom:8px;">assistant</div>
+                <div class="gatecard">
+                  <h3>Add a template?</h3>
+                  <p class="muted" style="margin-top:8px; font-size:0.92rem;">Want to wrap your clip in a ready-made design (a branded frame, captions, an intro)? Or keep it plain - you can still edit it later either way.</p>
+                  <div class="row">
+                    <span class="btn brand">Edit with a template</span>
+                    <span class="btn ghost">Skip, keep it plain</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="muted" style="font-size:0.82rem; margin-top:8px;">Screen A &middot; the question, right after your video is ready.</p>
+      </div>
+
+      <!-- Screen B: the gallery -->
+      <div>
+        <div class="mock">
+          <div class="bar"><i></i><i></i><i></i><span class="url">template gallery</span></div>
+          <div class="body">
+            <div style="margin-bottom:14px;">
+              <span class="btn ghost sm" style="padding-left:0;">&larr; Back</span>
+              <h3 style="margin-top:4px;">Pick a template</h3>
+            </div>
+            <div class="gallery">
+              <div class="tcard"><div class="poster"><span class="badge cat tag">Frame</span><div class="play"></div></div><div class="info"><span class="name">Clean Frame</span><span class="btn brand sm">Use this</span></div></div>
+              <div class="tcard"><div class="poster b"><span class="badge cat tag">Caption</span><div class="play"></div></div><div class="info"><span class="name">Lower-Third + CTA</span><span class="btn brand sm">Use this</span></div></div>
+              <div class="tcard"><div class="poster c"><span class="badge cat tag">Intro/Outro</span><div class="play"></div></div><div class="info"><span class="name">Intro + End Card</span><span class="btn brand sm">Use this</span></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="muted" style="font-size:0.82rem; margin-top:8px;">Screen B &middot; the gallery you pick from (3 designs to start).</p>
+      </div>
+
+      <!-- Screen C: the result -->
+      <div>
+        <div class="mock">
+          <div class="bar"><i></i><i></i><i></i><span class="url">done</span></div>
+          <div class="body">
+            <div class="mock" style="max-width:340px; border-radius:10px;"><div class="poster c" style="border-radius:0;"><div class="play"></div></div></div>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+              <span class="badge rec">&check; With template</span>
+              <span class="muted" style="font-size:0.86rem;">Your finished video</span>
+              <span class="btn outline sm">Edit</span>
+              <span class="btn ghost sm">Download</span>
+            </div>
+          </div>
+        </div>
+        <p class="muted" style="font-size:0.82rem; margin-top:8px;">Screen C &middot; the finished, templated video (your original is kept too).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. THE TWO BUTTONS -->
+  <div class="section">
+    <h2><span class="n">3</span> The two buttons, explained</h2>
+    <p class="sub">These are the only two things you click on the question card.</p>
+    <div class="compare">
+      <div class="choicecard">
+        <div class="h"><span class="ic">&#8594;</span><h3>Skip, keep it plain</h3></div>
+        <p>You get your video exactly as it is today. No template, no extra render, no waiting. This is the same as how things work right now.</p>
+      </div>
+      <div class="choicecard primary">
+        <div class="h"><span class="ic">&#10024;</span><h3>Edit with a template</h3></div>
+        <p>Opens the gallery. You pick a design, we render your clip into it, and you get a more polished, branded final video. Takes a little longer (a render step).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. YOUR CHOICES -->
+  <div class="section">
+    <h2><span class="n">4</span> Your choices - tell me your preference</h2>
+    <p class="sub">A few product decisions are genuinely up to you. I marked what I'd recommend, but click/annotate the option you want on each. If you're happy with all the recommended ones, just say &ldquo;go with the recommended.&rdquo;</p>
+
+    <div class="stack">
+      <div class="decision">
+        <div class="q">A. When should the &ldquo;Add a template?&rdquo; question appear?</div>
+        <div class="hint">Every finished video, or only when you switch it on?</div>
+        <div class="opts two">
+          <div class="opt pick">
+            <span class="radio"></span>
+            <div class="otxt"><strong>After every video <span class="badge rec" style="margin-left:4px;">Recommended</span></strong><p>Simple and consistent - you're always offered the choice, and skipping is one click.</p></div>
+          </div>
+          <div class="opt">
+            <span class="radio"></span>
+            <div class="otxt"><strong>Only when I turn it on</strong><p>The question is hidden by default; a setting enables it. Fewer prompts, but easy to forget it exists.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decision">
+        <div class="q">B. How should the gallery open?</div>
+        <div class="hint">A full page, or a pop-up over the chat?</div>
+        <div class="opts two">
+          <div class="opt pick">
+            <span class="radio"></span>
+            <div class="otxt"><strong>A full page <span class="badge rec" style="margin-left:4px;">Recommended</span></strong><p>Roomy grid, bigger previews - matches how the &ldquo;Edit video&rdquo; screen already works.</p></div>
+          </div>
+          <div class="opt">
+            <span class="radio"></span>
+            <div class="otxt"><strong>A pop-up over the chat</strong><p>You stay on the run page. Quicker, but cramped for watching previews.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decision">
+        <div class="q">C. After templating, which video is &ldquo;the&rdquo; video?</div>
+        <div class="hint">The templated one is shown - what happens to the plain original?</div>
+        <div class="opts two">
+          <div class="opt pick">
+            <span class="radio"></span>
+            <div class="otxt"><strong>Show the templated one, keep the original too <span class="badge rec" style="margin-left:4px;">Recommended</span></strong><p>You can always fall back to the plain clip. Nothing is ever thrown away.</p></div>
+          </div>
+          <div class="opt">
+            <span class="radio"></span>
+            <div class="otxt"><strong>Replace it with the templated one</strong><p>Cleaner, but the plain original is gone.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. GOOD TO KNOW -->
+  <div class="section">
+    <h2><span class="n">5</span> Good to know</h2>
+    <p class="sub">Three things about how it behaves - no jargon.</p>
+    <div class="facts">
+      <div class="fact"><div class="ic">&#128274;</div><div class="t">Off until we switch it on</div><p>The feature is built but hidden. Your current runs finish exactly like today until we turn it on. No surprises.</p></div>
+      <div class="fact"><div class="ic">&#129001;</div><div class="t">Free to try first</div><p>There's a test mode that fakes the render (no cost, no account) so we can click through the whole thing before paying for the real service.</p></div>
+      <div class="fact"><div class="ic">&#127916;</div><div class="t">Real templates come later</div><p>The 3 designs shown are placeholders. Real ones need a designer to prep them - that's a separate later step.</p></div>
+    </div>
+    <div class="callout" style="margin-top:16px;">
+      <span>&#128161;</span>
+      <div style="font-size:0.92rem;"><b>What I need from you now:</b> read sections 1-3 so the flow is clear, then pick your options in section 4 (or say &ldquo;go with recommended&rdquo;). Once you confirm, I build these screens for real.</div>
+    </div>
+  </div>
+
+  <div class="foot">Shown in the studio's own dark theme. Click any option in section 4, or select text anywhere, to leave a note. Ask me to change wording, layout, or the choices themselves.</div>
+
+</div>
+</body>
+</html>

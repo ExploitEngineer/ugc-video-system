@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Template Library — plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg: oklch(0.15 0.008 235);
+    --bg-2: oklch(0.13 0.007 235);
+    --card: oklch(0.185 0.009 235);
+    --card-2: oklch(0.215 0.01 235);
+    --fg: oklch(0.96 0.004 230);
+    --muted: oklch(0.66 0.013 235);
+    --brand: oklch(0.8 0.13 205);
+    --brand-2: oklch(0.74 0.14 225);
+    --brand-3: oklch(0.68 0.14 250);
+    --brand-fg: oklch(0.2 0.04 220);
+    --border: oklch(1 0 0 / 9%);
+    --border-2: oklch(1 0 0 / 14%);
+    --success: oklch(0.75 0.15 155);
+    --warning: oklch(0.8 0.14 78);
+    --destructive: oklch(0.66 0.2 25);
+    --accent: oklch(0.26 0.03 215);
+    --accent-fg: oklch(0.9 0.06 205);
+  }
+  *{box-sizing:border-box;min-width:0}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, oklch(0.8 0.13 205 / 0.10), transparent 60%),
+      radial-gradient(900px 500px at -5% 5%, oklch(0.68 0.14 250 / 0.08), transparent 55%),
+      var(--bg);
+    color:var(--fg);
+    font-family:"Inter",system-ui,sans-serif;
+    font-size:15px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:44px 24px 96px}
+  h1,h2,h3,.mono-h{font-family:"Space Grotesk",system-ui,sans-serif;letter-spacing:-0.01em}
+  h1{font-size:clamp(28px,4vw,40px);line-height:1.08;margin:0 0 10px;font-weight:700}
+  h2{font-size:22px;margin:0 0 4px;font-weight:600}
+  h3{font-size:15px;margin:0 0 6px;font-weight:600}
+  p{margin:0 0 12px}
+  a{color:var(--brand)}
+  .muted{color:var(--muted)}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.85em}
+  .kbd{font-family:ui-monospace,monospace;font-size:.82em;background:var(--card-2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--fg)}
+  .brandtext{background:linear-gradient(92deg,var(--brand),var(--brand-3));-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:"Space Grotesk";font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--brand);border:1px solid var(--border-2);background:oklch(0.8 0.13 205 / 0.08);padding:5px 12px;border-radius:999px;margin-bottom:18px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--brand);box-shadow:0 0 10px var(--brand)}
+
+  section{margin-top:40px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:12px}
+  .sec-num{font-family:"Space Grotesk";font-size:13px;font-weight:700;color:var(--brand);flex:none}
+
+  .card{background:linear-gradient(180deg,var(--card),var(--bg-2));border:1px solid var(--border);border-radius:16px;padding:20px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:760px){.g2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid var(--border-2);white-space:nowrap}
+  .pill.bad{color:var(--destructive);background:oklch(0.66 0.2 25 / 0.10);border-color:oklch(0.66 0.2 25 / 0.30)}
+  .pill.good{color:var(--success);background:oklch(0.75 0.15 155 / 0.10);border-color:oklch(0.75 0.15 155 / 0.30)}
+  .pill.warn{color:var(--warning);background:oklch(0.8 0.14 78 / 0.10);border-color:oklch(0.8 0.14 78 / 0.30)}
+  .pill.brand{color:var(--brand);background:oklch(0.8 0.13 205 / 0.10);border-color:oklch(0.8 0.13 205 / 0.30)}
+
+  ul.clean{margin:0;padding-left:18px}
+  ul.clean li{margin:5px 0}
+  ul.clean li::marker{color:var(--brand)}
+
+  /* problem strip */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
+  .flow .step{flex:1 1 130px;background:var(--card-2);border:1px solid var(--border);border-radius:12px;padding:12px 13px;font-size:13px}
+  .flow .step .t{font-weight:600;font-family:"Space Grotesk"}
+  .arrow{align-self:center;color:var(--muted);font-size:18px;flex:none}
+  .dup{border-color:oklch(0.66 0.2 25 / 0.45);background:oklch(0.66 0.2 25 / 0.08)}
+
+  /* mock UI */
+  .mock{background:var(--bg-2);border:1px solid var(--border-2);border-radius:16px;padding:16px;box-shadow:0 20px 60px -30px oklch(0.05 0 0 / 0.9)}
+  .mock-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px}
+  .tabs{display:inline-flex;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px}
+  .tab{font-size:12.5px;font-weight:600;padding:5px 14px;border-radius:999px;color:var(--muted);cursor:default}
+  .tab.on{background:oklch(0.8 0.13 205 / 0.18);color:var(--fg);box-shadow:inset 0 0 0 1px oklch(0.8 0.13 205 / 0.35)}
+  .tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+  .tpl{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:13px;position:relative;transition:.15s}
+  .tpl:hover{border-color:oklch(0.8 0.13 205 / 0.45)}
+  .tpl .thumb{height:78px;border-radius:9px;background:
+     repeating-linear-gradient(135deg,oklch(0.24 0.02 235) 0 10px,oklch(0.21 0.015 235) 10px 20px);
+     border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;margin-bottom:10px}
+  .tpl .nm{font-weight:600;font-size:13.5px;font-family:"Space Grotesk";white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tpl .meta{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .tpl .use{margin-top:11px;width:100%;text-align:center;font-size:12.5px;font-weight:600;padding:7px;border-radius:9px;border:1px solid oklch(0.8 0.13 205 / 0.35);background:oklch(0.8 0.13 205 / 0.12);color:var(--brand);cursor:default}
+  .tpl.upload{border-style:dashed;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);gap:6px;min-height:150px;text-align:center}
+  .badgeReuse{position:absolute;top:9px;right:9px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:14px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-family:"Space Grotesk";font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg-2);position:sticky;top:0}
+  tr:last-child td{border-bottom:none}
+  td.mono,th.mono{font-family:ui-monospace,monospace;font-size:12.5px}
+  .add{color:var(--success);font-weight:600}
+  .chg{color:var(--warning);font-weight:600}
+
+  .cmp{display:grid;gap:16px}
+  @media(min-width:760px){.cmp{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+  .cmp .side{border-radius:16px;padding:18px;border:1px solid var(--border)}
+  .cmp .now{background:oklch(0.66 0.2 25 / 0.06);border-color:oklch(0.66 0.2 25 / 0.22)}
+  .cmp .next{background:oklch(0.75 0.15 155 / 0.06);border-color:oklch(0.75 0.15 155 / 0.22)}
+  .cmp h3{display:flex;align-items:center;gap:9px}
+
+  .mrm{background:var(--bg-2);border:1px solid var(--border);border-radius:16px;padding:10px;overflow-x:auto}
+  .mermaid{min-width:520px}
+
+  .risk{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}
+  .risk:last-child{border-bottom:none}
+  .risk .ic{flex:none;width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  .risk .warn{background:oklch(0.8 0.14 78 / 0.15);color:var(--warning)}
+  .risk .info{background:oklch(0.8 0.13 205 / 0.15);color:var(--brand)}
+
+  /* decisions / input */
+  .q{background:var(--card);border:1px solid var(--border-2);border-radius:16px;padding:18px;margin-bottom:16px}
+  .q h3{margin-bottom:2px}
+  .q .qsub{color:var(--muted);font-size:13px;margin-bottom:14px}
+  .opts{display:grid;gap:9px}
+  .opt{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--border);border-radius:11px;padding:12px 13px;cursor:pointer;transition:.12s}
+  .opt:hover{border-color:var(--border-2);background:oklch(1 0 0 / 0.02)}
+  .opt input{margin-top:3px;accent-color:oklch(0.8 0.13 205)}
+  .opt .ot{font-weight:600;font-size:13.5px}
+  .opt .od{font-size:12.5px;color:var(--muted);margin-top:1px}
+  .opt.rec{border-color:oklch(0.8 0.13 205 / 0.4);background:oklch(0.8 0.13 205 / 0.05)}
+  .rectag{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--brand-fg);background:var(--brand);padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:middle}
+  .qbtn{margin-top:14px;font-family:"Space Grotesk";font-weight:600;font-size:13px;padding:9px 16px;border-radius:10px;border:1px solid oklch(0.8 0.13 205 / 0.4);background:oklch(0.8 0.13 205 / 0.12);color:var(--brand);cursor:pointer}
+  .qbtn:hover{background:oklch(0.8 0.13 205 / 0.2)}
+  .qnote{font-size:12px;color:var(--muted);margin-top:9px;min-height:16px}
+  .hint{font-size:12.5px;color:var(--muted);display:flex;gap:7px;align-items:center;margin-top:8px}
+  footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow"><span class="dot"></span>Adverra Studio · Template pipeline</div>
+  <h1>A <span class="brandtext">template library</span> — upload once, reuse forever</h1>
+  <p class="muted" style="max-width:70ch;font-size:16px">
+    Right now every template run makes the user upload the AE file again, and each upload registers a
+    <b>brand-new duplicate</b> in Nexrender. This plan persists uploaded templates and lets the user
+    <b>pick a saved one</b> — no re-upload, no duplicate registration.
+  </p>
+
+  <!-- 1. PROBLEM -->
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>The problem today</h2></div>
+    <div class="grid g2">
+      <div class="card">
+        <h3>What happens now</h3>
+        <p class="muted" style="margin-bottom:14px">
+          <span class="mono">POST /templates/register</span> registers the file with Nexrender, uploads the bytes,
+          returns a <span class="mono">nexrenderTemplateId</span> — and <b>saves nothing on our side</b>.
+          The id only survives inside that one run's <span class="mono">runs.template</span> snapshot.
+        </p>
+        <div class="flow">
+          <div class="step"><div class="t">Upload .aep</div><div class="muted">again, every run</div></div>
+          <span class="arrow">→</span>
+          <div class="step"><div class="t">Register + upload</div><div class="muted">to Nexrender</div></div>
+          <span class="arrow">→</span>
+          <div class="step dup"><div class="t">New id #4820</div><div class="muted">duplicate of #4102, #3771…</div></div>
+        </div>
+        <div class="hint" style="margin-top:14px">
+          <span class="pill bad">no persistence</span>
+          <span class="pill bad">no reuse path</span>
+          <span class="pill bad">Nexrender fills with dupes</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Why it hurts</h3>
+        <ul class="clean muted">
+          <li><b>Re-upload friction</b> — the same 20–200&nbsp;MB file goes up the wire for every ad that uses it.</li>
+          <li><b>Duplicate Nexrender templates</b> — each upload is a fresh registration; the account accumulates identical copies (and, on paid plans, storage/clutter).</li>
+          <li><b>Re-introspection</b> — we poll Nexrender to read the composition/slots again even though we already know them.</li>
+          <li><b>No "my templates" surface</b> — the old catalog was removed; there is nothing to pick from.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. PROPOSED UI -->
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>Proposed: a "Your templates" picker</h2></div>
+    <p class="muted" style="max-width:72ch">
+      The template-pipeline start screen (<span class="mono">/studio/template-new</span>) gains a saved-templates grid.
+      Pick one → jump straight to the ad brief (structure already known, zero Nexrender calls). Or upload a new file as today.
+      <b>Mock only — rendered in the app's own dark-cyan theme:</b>
+    </p>
+    <div class="mock" style="margin-top:8px">
+      <div class="mock-head">
+        <div class="tabs"><span class="tab on">Your templates</span><span class="tab">Upload new</span></div>
+        <span class="muted mono" style="font-size:12px">4 saved</span>
+      </div>
+      <div class="tpl-grid">
+        <div class="tpl">
+          <span class="pill good badgeReuse" style="font-size:10px">reused ×6</span>
+          <div class="thumb">16:9 · 4 panels</div>
+          <div class="nm">lower-third-cta.aep</div>
+          <div class="meta">5 text · 4 video slots</div>
+          <div class="use">Use this template</div>
+        </div>
+        <div class="tpl">
+          <div class="thumb">9:16 · vertical</div>
+          <div class="nm">reels-endcard.zip</div>
+          <div class="meta">3 text · 1 video slot</div>
+          <div class="use">Use this template</div>
+        </div>
+        <div class="tpl">
+          <div class="thumb">16:9 · clean</div>
+          <div class="nm">clean-frame.aep</div>
+          <div class="meta">2 text · 1 video slot</div>
+          <div class="use">Use this template</div>
+        </div>
+        <div class="tpl upload">
+          <div style="font-size:26px;line-height:1">＋</div>
+          <div style="font-weight:600;font-family:'Space Grotesk';color:var(--fg)">Upload new template</div>
+          <div style="font-size:11.5px">.aep · .zip · .mogrt</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. HOW IT WORKS -->
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>How it works</h2></div>
+    <p class="muted">Persist every registered template in a new <span class="mono">templates</span> table, dedupe re-uploads by content hash, and serve the library from <span class="mono">GET /templates</span>.</p>
+    <div class="mrm">
+      <pre class="mermaid">
+flowchart TD
+    A["User opens /studio/template-new"] --> B{"Pick from library<br/>or upload new?"}
+    B -- "Pick saved" --> P["GET /templates → grid"]
+    P --> R["Use → brief with templateId<br/>structure already known"]
+    B -- "Upload file" --> H["Server hashes the bytes (sha256)"]
+    H --> D{"Hash already in<br/>templates table?"}
+    D -- "Yes (same file)" --> E["Reuse existing row + nexrenderTemplateId<br/>NO new Nexrender registration"]
+    D -- "No (new file)" --> F["registerTemplate + upload to Nexrender"]
+    F --> G["Insert templates row<br/>(id, nexrenderId, hash, name)"]
+    G --> I["Poll structure → persist snapshot<br/>(slots, comp, aspect ratio) on the row"]
+    E --> R
+    I --> R
+    R --> Z["POST /runs (pipeline=template, templateId)"]
+    class E,R,P good
+    class F,G warn
+    classDef good fill:#0f2a20,stroke:#3ddc97,color:#c8f7e2
+    classDef warn fill:#2a220f,stroke:#e0b64a,color:#f5e6c2
+      </pre>
+    </div>
+  </section>
+
+  <!-- 4. SCHEMA -->
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>New <span class="mono" style="font-size:.8em">templates</span> table</h2></div>
+    <p class="muted">One row per registered template (Drizzle, <span class="mono">apps/api/src/db/schema.ts</span>, one additive migration). Global for now — see the auth note in risks.</p>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th class="mono">column</th><th>type</th><th>purpose</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">id</td><td>uuid pk</td><td>our stable id — the frontend + <span class="mono">runs.template</span> reference this.</td></tr>
+          <tr><td class="mono">nexrender_template_id</td><td>text</td><td>the Nexrender id from register — reused on every run, never re-created.</td></tr>
+          <tr><td class="mono">content_hash</td><td>text (indexed)</td><td>sha256 of the uploaded bytes — the dedupe key that stops duplicate registrations.</td></tr>
+          <tr><td class="mono">display_name</td><td>text</td><td>the filename (optionally user-renamable later).</td></tr>
+          <tr><td class="mono">structure</td><td>jsonb</td><td>introspected snapshot — slots, mainComposition, dims, suggestedAspectRatio. Skips re-introspection on reuse.</td></tr>
+          <tr><td class="mono">status</td><td>text</td><td><span class="mono">processing</span> → <span class="mono">ready</span> once Nexrender finishes introspecting.</td></tr>
+          <tr><td class="mono">created_at / last_used_at</td><td>timestamptz</td><td>sort newest / most-recently-used in the picker.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5. API -->
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>API changes</h2></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th class="mono">route</th><th>change</th><th>behavior</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">GET&nbsp;/templates</td><td><span class="add">NEW</span></td><td>List saved templates (id, name, slot counts, aspect ratio, status, previewless). Powers the picker grid.</td></tr>
+          <tr><td class="mono">POST&nbsp;/templates/register</td><td><span class="chg">CHANGED</span></td><td>Hash the bytes first → if the hash exists, return the existing row (skip Nexrender entirely). Else register + upload + insert a row.</td></tr>
+          <tr><td class="mono">GET&nbsp;/templates/:id/structure</td><td><span class="chg">CHANGED</span></td><td>Same polling; also persist the structure snapshot onto the row once <span class="mono">ready</span> (so reuse never re-introspects). Keyed by our <span class="mono">id</span> now, not the raw Nexrender id.</td></tr>
+          <tr><td class="mono">DELETE&nbsp;/templates/:id</td><td><span class="add">NEW*</span></td><td>Remove a template from the library (see decision 2). *Only if you want manage/delete.</td></tr>
+          <tr><td class="mono">POST&nbsp;/runs</td><td class="muted">tiny</td><td>Already takes <span class="mono">templateId</span>; it now resolves our <span class="mono">templates.id</span> → the stored structure + <span class="mono">nexrenderTemplateId</span> instead of re-fetching from Nexrender.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:10px">Web: <span class="mono">template-upload-view.tsx</span> gets the two-tab picker; <span class="mono">lib/api.ts</span> gets <span class="mono">fetchTemplates()</span> back (list) + reused-id plumbing. The brief page already accepts a <span class="mono">templateId</span>.</p>
+  </section>
+
+  <!-- 6. COMPARISON -->
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><h2>Before → after</h2></div>
+    <div class="cmp">
+      <div class="side now">
+        <h3><span class="pill bad">today</span> Re-upload every time</h3>
+        <ul class="clean muted">
+          <li>Upload the file again for each ad.</li>
+          <li>Every upload → a <b>new</b> Nexrender registration.</li>
+          <li>Re-introspect the same composition.</li>
+          <li>Nothing to pick from; no memory of past templates.</li>
+        </ul>
+      </div>
+      <div class="side next">
+        <h3><span class="pill good">after</span> Pick from the library</h3>
+        <ul class="clean muted">
+          <li>Upload once; every later run picks the saved template.</li>
+          <li>Re-uploading the same file is deduped by hash → <b>zero</b> new Nexrender registrations.</li>
+          <li>Structure snapshot reused — no re-introspection.</li>
+          <li>A "Your templates" grid on the start screen.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. DECISIONS -->
+  <section>
+    <div class="sec-head"><span class="sec-num">07</span><h2>Decisions to confirm</h2></div>
+    <p class="muted" style="margin-bottom:18px">Pick an option in each — selections queue as feedback; hit <b>Send to Agent</b> in the Lavish bar when done.</p>
+
+    <form class="q" data-lavish-question="dedupe" onsubmit="queueAns(event,'dedupe','Dedupe re-uploads')">
+      <h3>1 · Dedupe re-uploads by content hash?</h3>
+      <div class="qsub">If the user (or a teammate) uploads the exact same file again, should we detect it and reuse the existing Nexrender registration?</div>
+      <div class="opts">
+        <label class="opt rec"><input type="radio" name="dedupe" value="hash-dedupe" checked><span><span class="ot">Yes — hash + reuse<span class="rectag">REC</span></span><span class="od">sha256 the bytes, look up before registering; identical file → reuse. Kills duplicates even on manual re-upload.</span></span></label>
+        <label class="opt"><input type="radio" name="dedupe" value="library-only"><span><span class="ot">Library-only</span><span class="od">Just show the picker; don't hash. Duplicates still possible if someone re-uploads instead of picking.</span></span></label>
+      </div>
+      <button type="submit" class="qbtn">Queue this answer</button>
+      <div class="qnote" data-note="dedupe"></div>
+    </form>
+
+    <form class="q" data-lavish-question="manage" onsubmit="queueAns(event,'manage','Delete/manage')">
+      <h3>2 · Let users delete templates from the library?</h3>
+      <div class="qsub">A <span class="mono">DELETE /templates/:id</span> + a trash affordance on each card.</div>
+      <div class="opts">
+        <label class="opt rec"><input type="radio" name="manage" value="delete-yes" checked><span><span class="ot">Yes — allow delete<span class="rectag">REC</span></span><span class="od">Remove from our library (optionally also delete from Nexrender). Keeps the grid tidy.</span></span></label>
+        <label class="opt"><input type="radio" name="manage" value="delete-no"><span><span class="ot">Not yet</span><span class="od">Read-only library for v1; add manage later.</span></span></label>
+      </div>
+      <button type="submit" class="qbtn">Queue this answer</button>
+      <div class="qnote" data-note="manage"></div>
+    </form>
+
+    <form class="q" data-lavish-question="scope" onsubmit="queueAns(event,'scope','Library scope')">
+      <h3>3 · Library scope — global for now?</h3>
+      <div class="qsub">Auth (F8) isn't built, so there are no users to scope to.</div>
+      <div class="opts">
+        <label class="opt rec"><input type="radio" name="scope" value="global-now" checked><span><span class="ot">Global shared library<span class="rectag">REC</span></span><span class="od">All templates visible to everyone for now; scope per-user when auth lands (F8).</span></span></label>
+        <label class="opt"><input type="radio" name="scope" value="defer"><span><span class="ot">Hold until auth</span><span class="od">Don't ship the library until per-user scoping exists. Slower, but no re-scoping migration later.</span></span></label>
+      </div>
+      <button type="submit" class="qbtn">Queue this answer</button>
+      <div class="qnote" data-note="scope"></div>
+    </form>
+  </section>
+
+  <!-- 8. RISKS -->
+  <section>
+    <div class="sec-head"><span class="sec-num">08</span><h2>Risks &amp; open questions</h2></div>
+    <div class="card">
+      <div class="risk"><div class="ic warn">!</div><div><b>No auth yet (F8).</b> A shared global library is the only option now; when auth lands, existing rows need an owner backfill / per-user scoping. Flagged, not blocking.</div></div>
+      <div class="risk"><div class="ic warn">!</div><div><b>Nexrender-side lifetime.</b> If Nexrender expires or garbage-collects an uploaded template, a saved row's <span class="mono">nexrenderTemplateId</span> could go stale. Mitigation: on a render "template not found", fall back to re-register from a stored copy — but we deliberately don't keep the .aep on Supabase, so a stale id would need a re-upload. Worth confirming Nexrender's retention.</div></div>
+      <div class="risk"><div class="ic info">?</div><div><b>Previews.</b> Nexrender templates have no thumbnail. v1 shows name + slot counts + aspect ratio (as mocked). A real preview would need a render or a user-supplied image — out of scope unless you want it.</div></div>
+      <div class="risk"><div class="ic info">?</div><div><b>Hash vs "same template, tweaked".</b> Content-hash treats a re-exported/edited .aep as a new template (different bytes). That's correct behavior, just noting it won't dedupe visually-identical-but-re-saved files.</div></div>
+    </div>
+  </section>
+
+  <footer>
+    Plan artifact · rendered in Adverra's own dark-cyan design system (matched from <span class="mono">apps/web/src/app/globals.css</span>). Mockups are illustrative, not final UI. Annotate anything or queue the decisions above, then Send to Agent.
+  </footer>
+</div>
+
+<script>
+  // Mermaid — dark theme tuned to the cyan palette.
+  if (window.mermaid){
+    mermaid.initialize({
+      startOnLoad:true, securityLevel:"loose",
+      theme:"base",
+      themeVariables:{
+        background:"transparent",
+        primaryColor:"#12212b", primaryBorderColor:"#2f9fc8", primaryTextColor:"#e7f6fb",
+        lineColor:"#5b7b8a", secondaryColor:"#1a2630", tertiaryColor:"#1a2630",
+        fontFamily:"Inter, system-ui, sans-serif", fontSize:"13px"
+      }
+    });
+  }
+
+  // Input playbook: reversible radios keep LOCAL state; a per-question submit
+  // queues exactly ONE prompt for that question's final answer.
+  function queueAns(ev, key, label){
+    ev.preventDefault();
+    var val = new FormData(ev.currentTarget).get(key);
+    if(!val) return;
+    var note = document.querySelector('[data-note="'+key+'"]');
+    if(note) note.textContent = "Queued: " + val + " — press Send to Agent to deliver.";
+    if(window.lavish && window.lavish.queuePrompt){
+      window.lavish.queuePrompt(
+        "Template library decision — " + label + ": " + val,
+        { tag:"decision", text:label+": "+val, element:ev.currentTarget, queueKey:key, data:{question:key, answer:val} }
+      );
+    }
+  }
+</script>
+</body>
+</html>

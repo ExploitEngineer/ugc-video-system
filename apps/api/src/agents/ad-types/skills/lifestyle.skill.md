@@ -158,7 +158,7 @@ a warm, aspirational, breezy narrator voice
 ### videoAudioLine
 
 ```
-Audio: a natural human VOICEOVER narrates each line over the scene (off-screen, never lip-synced on camera), the SAME warm voice verbatim in every slice — quote each line short (5-10 words); light naturalistic ambience of the moment plus a fitting, understated warm music bed. — no on-screen text, no identity drift, no warped face.
+Audio: naturalistic ambience of the moment under a fitting, understated warm music bed.
 ```
 
 ### narrativeTreatment
