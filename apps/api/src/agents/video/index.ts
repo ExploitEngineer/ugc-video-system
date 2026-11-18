@@ -282,7 +282,7 @@ export async function videoBuilder(
         });
       }
     }
-    // The simpler, camerafixed deterministic prompt — the retry ladder's final
+    // The simpler deterministic prompt — the retry ladder's final
     // tier (and the fallback when the LLM returned nothing). Built lazily so a
     // healthy first attempt never pays for it.
     let detVideoPromptCache: string | undefined;
@@ -383,14 +383,10 @@ export async function videoBuilder(
     }
     // Look-aware Seedance tail (per the prompting guide: short, failure-tied,
     // positive-rigidity phrasing). The negatives are tailored per look family
-    // (product morph vs warped hands vs identity drift), and `--camerafixed true`
-    // — Seedance's strongest anti-morph lever — is appended as a documented prompt
-    // SUFFIX (silently ignored if unsupported, so it can never 400 the request the
-    // way an unknown body field would). ugc_authentic is an INTENTIONALLY handheld
-    // look — locking the camera there produces an uncanny "static but candid"
-    // frame, so it is excluded; only the deliberately-controlled looks (demo_clean,
-    // cinematic_polished) get it.
-    const isHandheld = lookFamily === "ugc_authentic";
+    // (product morph vs warped hands vs identity drift). No `--camerafixed` prompt
+    // suffix: BytePlus parses it as the `camera_fixed` parameter and rejects it
+    // with a 400 for Seedance 2.0 reference-to-video; camera control is prompt
+    // prose only.
     // Service ads are a multi-scene skit (cuts between distinct scenes, multiple
     // synthesized characters, wanted on-screen stat/end-card text) — the per-look
     // negatives ("ONE consistent face… no on-screen text") fight that, so service
@@ -405,9 +401,8 @@ export async function videoBuilder(
     // lockstep with buildVideoPrompt / buildDeterministicVideoPrompt so the
     // composed prompt can never carry a cut-vs-continuous contradiction.
     const renderDirective = videoRenderDirective(ctx.adType);
-    const cameraFixed = isHandheld ? "" : " --camerafixed true";
     const composePrompt = (tier: "llm" | "deterministic"): string =>
-      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier)}\n\n${negatives}${cameraFixed}`;
+      `${roles.join(". ")}. ${renderDirective}\n\n${videoPromptBody(tier)}\n\n${negatives}`;
 
     // RETRY LADDER: submit → poll → download, up to MAX_VIDEO_ATTEMPTS times.
     // A TRANSIENT provider failure (network / 5xx / timeout / expired /

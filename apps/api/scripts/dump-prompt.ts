@@ -156,11 +156,8 @@ function dumpType(id: string, opts: { videoOnly?: boolean } = {}) {
   // The runtime tail appended in video/index.ts AFTER the LLM/deterministic body.
   const renderDirective =
     "Render ONE continuous live-action take with no cuts. The storyboard is a LOOK reference — reproduce its framing and identity but NEVER render its panel-number badges, grid lines, split-screen dividers, before/after labels, borders or bottom caption bars.";
-  // camerafixed is excluded for the intentionally-handheld ugc_authentic look.
-  const cameraFixed =
-    def.lookFamily === "ugc_authentic" ? "" : " --camerafixed true";
   console.log(
-    `\n${hr}\nRUNTIME TAIL (video/index.ts: renderDirective + per-LOOK negatives + camerafixed)\n${hr}\n[renderDirective] ${renderDirective}\n[negatives] ${videoNegatives(def.lookFamily)}${cameraFixed ? `\n[suffix] ${cameraFixed.trim()}` : ""}`,
+    `\n${hr}\nRUNTIME TAIL (video/index.ts: renderDirective + per-LOOK negatives)\n${hr}\n[renderDirective] ${renderDirective}\n[negatives] ${videoNegatives(def.lookFamily)}`,
   );
 }
 

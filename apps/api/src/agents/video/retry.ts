@@ -73,7 +73,7 @@ export function dispositionAfterLadder(
 /**
  * Prompt tier for a 1-indexed attempt. The first attempts use the richer LLM
  * prompt; the final attempt falls back to the simpler deterministic prompt
- * (fewer beats, camerafixed) which is more likely to clear a flaky provider.
+ * (fewer beats) which is more likely to clear a flaky provider.
  */
 export function promptTierForAttempt(attempt: number): "llm" | "deterministic" {
   return attempt >= MAX_VIDEO_ATTEMPTS ? "deterministic" : "llm";
